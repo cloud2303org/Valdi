@@ -24,7 +24,7 @@ interface MinifyOutput {
 }
 
 const defaultOptions: CommonMinifyOptions = {
-  ecma: 6,
+  ecma: 2015,
   safari10: true,
   mangle: {
     toplevel: true,
@@ -36,7 +36,16 @@ export const batchMinify = (minifierName: 'terser', fileURLs: string[], provided
   let minifier: Minifier<CommonMinifyOptions>;
   switch (minifierName) {
     case 'terser':
-      minifier = terser;
+      // terser 5's minify() is async and throws; minify_sync keeps the batch code and its { error } results.
+      minifier = {
+        minify: (files, options) => {
+          try {
+            return terser.minify_sync(files, options);
+          } catch (error) {
+            return { error: error as Error };
+          }
+        },
+      };
       break;
     default:
       throw new Error('Unknown minifier');

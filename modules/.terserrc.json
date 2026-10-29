@@ -1,5 +1,5 @@
 {
-  "ecma": "ES2016",
+  "ecma": 2020,
   "safari10": true,
   "mangle": {
     "toplevel": true,
