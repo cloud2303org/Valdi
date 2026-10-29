@@ -66,6 +66,8 @@ def valdi_exported_library(
         srcs = [
             "@valdi//valdi:valdi_ios_public_hdrs",
             "@valdi//valdi_core:valdi_core_ios_public_hdrs",
+            # SCValdiDrawingModuleFactory.h (in valdi_ios_public_hdrs) imports SCCDrawingTypes.h from this module.
+            "@valdi//src/valdi_modules/src/valdi/drawing:drawing_api_objc_hdrs",
         ] + get_suffixed_deps(deps, "_api_objc_hdrs") + get_suffixed_deps(deps, "_objc_hdrs"),
     )
 
