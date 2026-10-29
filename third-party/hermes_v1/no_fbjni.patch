@@ -1,0 +1,21 @@
+--- a/API/hermes/hermes.cpp
++++ b/API/hermes/hermes.cpp
+@@ -70,7 +70,8 @@
+ #include <jsi/instrumentation.h>
+ #include <jsi/threadsafe.h>
+ 
+-#ifdef __ANDROID__
++// HERMES_NO_FBJNI: embedders without fbjni (no JSI finalizers that touch JNI) leave the finalizer thread unattached.
++#if defined(__ANDROID__) && !defined(HERMES_NO_FBJNI)
+ #include <fbjni/fbjni.h>
+ #endif
+ 
+@@ -257,7 +258,7 @@
+ /// Return the runner that wraps the finalizer worker thread, or an empty runner
+ /// to leave the thread unwrapped.
+ ::hermes::SerialExecutor::ThreadRunner makeFinalizerThreadRunner() {
+-#ifdef __ANDROID__
++#if defined(__ANDROID__) && !defined(HERMES_NO_FBJNI)
+   return [](std::function<void()> run) {
+     // Finalizers may release JNI references, which requires the thread to be
+     // attached to the JVM. ThreadScope's constructor throws when fbjni has no

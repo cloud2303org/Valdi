@@ -146,12 +146,12 @@ http_archive(
 
 http_archive(
     name = "hermes",
-    build_file = "@valdi//third-party/hermes:hermes.BUILD",
-    integrity = "sha256-+GQiTtN6H8TQz/+YkVz73dHeYAZ86/9hAUwTlkISx48=",
+    build_file = "@valdi//third-party/hermes_v1:hermes.BUILD",
+    integrity = "sha256-vHWDPAB1xndg6k5EeAn43qZ65bkPJeG6cFhb1CK8alU=",
     patch_args = ["-p1"],
-    patches = ["@valdi//third-party/hermes/patches:nontrivial_memcall.patch"],
-    strip_prefix = "hermes-880b1645b5dca974f4329dc4108692d301abee0d",
-    url = "https://github.com/facebook/hermes/archive/880b1645b5dca974f4329dc4108692d301abee0d.zip",
+    patches = ["@valdi//third-party/hermes_v1:no_fbjni.patch"],
+    strip_prefix = "hermes-hermes-v260318099.0.4",
+    url = "https://github.com/facebook/hermes/archive/refs/tags/hermes-v260318099.0.4.tar.gz",
 )
 
 bazel_dep(name = "boringssl", version = "0.20250415.0")

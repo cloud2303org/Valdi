@@ -1,0 +1,53 @@
+# Hermes V1 for Valdi. hermes.BUILD is the build file of the downloaded Hermes source (see the hermes patch in
+# MODULE.bazel); this package holds what Hermes' CMake build generates and Bazel can't.
+
+exports_files([
+    "hermes.BUILD",
+    "no_fbjni.patch",
+    "sources.bzl",
+])
+
+PLATFORMS = {
+    "@valdi//bzl/conditions:ios_arm64": "apple",
+    "@valdi//bzl/conditions:ios_arm64e": "apple",
+    "@valdi//bzl/conditions:ios_x86_64": "apple",
+    "@valdi//bzl/conditions:ios_arm64_sim": "apple",
+    "@valdi//bzl/conditions:macos_x86_64": "apple",
+    "@valdi//bzl/conditions:macos_arm64": "apple",
+    "@valdi//bzl/conditions:android_arm32": "android-armeabi-v7a",
+    "@valdi//bzl/conditions:android_arm64": "android-arm64-v8a",
+    "@valdi//bzl/conditions:android_x64": "android-x86_64",
+    "@valdi//bzl/conditions:linux": "linux",
+}
+
+# llvh/Config/config.h (same template as the Hermes Valdi pinned before, so copied from Valdi) and
+# libhermesvm-config.h (from lib/config/libhermesvm-config.h.in: 22-bit segments, Hades GC; 64-bit Android uses
+# HEAP_HV_PREFER32 like Hermes' own Android build, i.e. compressed pointers in a contiguous heap and boxed doubles).
+cc_library(
+    name = "platform_headers",
+    hdrs = select({
+        condition: glob(["prepared_include/{}/**/*.h".format(platform)])
+        for condition, platform in PLATFORMS.items()
+    }),
+    strip_include_prefix = select({
+        condition: "prepared_include/{}".format(platform)
+        for condition, platform in PLATFORMS.items()
+    }),
+    visibility = ["//visibility:public"],
+)
+
+# Hermes' built-in JavaScript, compiled to bytecode by the matching hermesc.
+cc_library(
+    name = "internal_bytecode",
+    hdrs = ["prepared_include/internal_js/InternalBytecode.inc"],
+    strip_include_prefix = "prepared_include/internal_js",
+    visibility = ["//visibility:public"],
+)
+
+# The JSI extensions (TextEncoder, TextDecoder, ...) compiled to bytecode by the matching hermesc.
+cc_library(
+    name = "extensions_bytecode",
+    hdrs = ["prepared_include/extensions/ExtensionsBytecode.inc"],
+    strip_include_prefix = "prepared_include/extensions",
+    visibility = ["//visibility:public"],
+)
