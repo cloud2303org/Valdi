@@ -22,9 +22,10 @@ class RuntimeConfig;
 
 namespace facebook::hermes {
 class HermesRuntime;
-namespace inspector_modern::chrome {
-class CDPHandler;
-}
+namespace cdp {
+class CDPAgent;
+class CDPDebugAPI;
+} // namespace cdp
 } // namespace facebook::hermes
 
 namespace Valdi {
@@ -70,7 +71,10 @@ private:
     struct Entry {
         HermesRuntimeId runtimeId;
         HermesRuntimeId parentRuntimeId;
-        std::shared_ptr<facebook::hermes::inspector_modern::chrome::CDPHandler> hermesHandler;
+        // Declared in dependency order so the agent is destroyed before the debug API, and that before the runtime.
+        std::shared_ptr<facebook::hermes::HermesRuntime> jsiRuntime;
+        std::shared_ptr<facebook::hermes::cdp::CDPDebugAPI> debugAPI;
+        std::shared_ptr<facebook::hermes::cdp::CDPAgent> hermesAgent;
         bool isWorker() const {
             return parentRuntimeId != kRuntimeIdUndefined;
         }

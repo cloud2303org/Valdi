@@ -14,34 +14,29 @@
 #include "valdi_core/cpp/Utils/ValueUtils.hpp"
 
 #include <hermes/hermes.h>
-#include <hermes/inspector/chrome/CDPHandler.h>
+#if defined(HERMES_API)
+#include <hermes/cdp/CDPAgent.h>
+#include <hermes/cdp/CDPDebugAPI.h>
+#endif
 
 namespace Valdi::Hermes {
 
-class RuntimeAdapterImpl : public facebook::hermes::inspector_modern::RuntimeAdapter {
-public:
-    RuntimeAdapterImpl(const std::shared_ptr<facebook::hermes::HermesRuntime>& jsiRuntime,
-                       JavaScriptTaskScheduler* taskScheduler)
-        : _jsiRuntime(jsiRuntime), _taskScheduler(taskScheduler) {}
-    ~RuntimeAdapterImpl() override = default;
-
-    facebook::hermes::HermesRuntime& getRuntime() final {
-        return *_jsiRuntime;
-    }
-
-    void tickleJs() final {
+#if defined(HERMES_API)
+/// Hermes V1 runs debugger work through tasks that need the runtime while JS isn't running; run them on the JS thread.
+static facebook::hermes::debugger::EnqueueRuntimeTaskFunc makeEnqueueRuntimeTask(
+    const std::shared_ptr<facebook::hermes::HermesRuntime>& jsiRuntime, JavaScriptTaskScheduler* taskScheduler) {
+    std::weak_ptr<facebook::hermes::HermesRuntime> weakRuntime = jsiRuntime;
+    Ref<JavaScriptTaskScheduler> scheduler(taskScheduler);
+    return [weakRuntime, scheduler](facebook::hermes::debugger::RuntimeTask task) {
         constexpr auto reason = JsThreadDispatchReason::DebuggerTickle;
-        _taskScheduler->dispatchOnJsThreadAsync(reason, [](JavaScriptEntryParameters& entryParameters) {
-            auto globalObject = entryParameters.jsContext.getGlobalObject(entryParameters.exceptionTracker);
-            JSFunctionCallContext callContext(entryParameters.jsContext, nullptr, 0, entryParameters.exceptionTracker);
-            entryParameters.jsContext.callObjectProperty(globalObject.get(), "__tickleJs", callContext);
+        scheduler->dispatchOnJsThreadAsync(reason, [weakRuntime, task = std::move(task)](JavaScriptEntryParameters&) {
+            if (auto runtime = weakRuntime.lock()) {
+                task(*runtime);
+            }
         });
-    }
-
-private:
-    std::shared_ptr<facebook::hermes::HermesRuntime> _jsiRuntime;
-    Ref<JavaScriptTaskScheduler> _taskScheduler;
-};
+    };
+}
+#endif
 
 HermesDebuggerRegistry::HermesDebuggerRegistry() = default;
 HermesDebuggerRegistry::~HermesDebuggerRegistry() = default;
@@ -52,18 +47,22 @@ HermesRuntimeId HermesDebuggerRegistry::append(const std::shared_ptr<facebook::h
                                                HermesRuntimeId parentRuntimeId) {
 #if defined(HERMES_API)
     jsiRuntime->registerForProfiling();
-    auto hermesHandler = facebook::hermes::inspector_modern::chrome::CDPHandler::create(
-        std::make_unique<RuntimeAdapterImpl>(jsiRuntime, taskScheduler));
     std::lock_guard<Mutex> lock(_mutex);
-    HermesRuntimeId runtimeId = StringCache::getGlobal().makeString(std::to_string(++_runtimeIdSequence));
+    auto sequence = ++_runtimeIdSequence;
+    HermesRuntimeId runtimeId = StringCache::getGlobal().makeString(std::to_string(sequence));
+    std::shared_ptr<facebook::hermes::cdp::CDPDebugAPI> debugAPI =
+        facebook::hermes::cdp::CDPDebugAPI::create(*jsiRuntime);
+    std::shared_ptr<facebook::hermes::cdp::CDPAgent> hermesAgent = facebook::hermes::cdp::CDPAgent::create(
+        static_cast<int32_t>(sequence),
+        *debugAPI,
+        makeEnqueueRuntimeTask(jsiRuntime, taskScheduler),
+        [this, runtimeId](const std::string& message) { this->onHermesMessage(message, runtimeId); });
     auto& entry = _entries.emplace_back();
     entry.runtimeId = runtimeId;
-    entry.hermesHandler = hermesHandler;
+    entry.jsiRuntime = jsiRuntime;
+    entry.debugAPI = std::move(debugAPI);
+    entry.hermesAgent = std::move(hermesAgent);
     entry.parentRuntimeId = parentRuntimeId;
-
-    hermesHandler->registerCallbacks(
-        [this, runtimeId](const auto& message) { this->onHermesMessage(message, runtimeId); },
-        /* no-op for the unregister handler */ []() {});
 
     if (parentRuntimeId != kRuntimeIdUndefined) {
         for (auto* listener : _listeners) {
@@ -166,17 +165,19 @@ std::vector<HermesRuntimeId> HermesDebuggerRegistry::getWorkers(HermesRuntimeId 
 }
 
 void HermesDebuggerRegistry::submitMessageToHermes(const Value& message, HermesRuntimeId runtimeId) {
-    std::shared_ptr<facebook::hermes::inspector_modern::chrome::CDPHandler> hermesHandler = nullptr;
+#if defined(HERMES_API)
+    std::shared_ptr<facebook::hermes::cdp::CDPAgent> hermesAgent = nullptr;
     {
         std::lock_guard<Mutex> lock(_mutex);
         for (auto entry : _entries) {
             if (entry.runtimeId == runtimeId) {
-                hermesHandler = entry.hermesHandler;
+                hermesAgent = entry.hermesAgent;
             }
         }
     }
-    if (hermesHandler)
-        hermesHandler->handle(valueToJsonString(message));
+    if (hermesAgent)
+        hermesAgent->handleCommand(valueToJsonString(message));
+#endif
     return;
 }
 

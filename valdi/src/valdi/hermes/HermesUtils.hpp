@@ -118,20 +118,16 @@ hermes::vm::ExecutionStatus setNativeState(hermes::vm::Runtime& runtime,
                                            const Ref<RefCountable>& data);
 
 hermes::vm::CallResult<hermes::vm::HermesValue> callTrampoline(void* context,
-                                                               hermes::vm::Runtime& runtime,
-                                                               hermes::vm::NativeArgs args);
+                                                               hermes::vm::Runtime& runtime);
 
 hermes::vm::CallResult<hermes::vm::HermesValue> callNativeClassInstanceMember(
-    void* context, hermes::vm::Runtime& runtime, hermes::vm::NativeArgs args);
+    void* context, hermes::vm::Runtime& runtime);
 
 hermes::vm::CallResult<hermes::vm::HermesValue> callNativeClassStaticMember(
-    void* context, hermes::vm::Runtime& runtime, hermes::vm::NativeArgs args);
+    void* context, hermes::vm::Runtime& runtime);
 
 hermes::vm::CallResult<hermes::vm::HermesValue> callNativeClassConstructor(
-    void* context, hermes::vm::Runtime& runtime, hermes::vm::NativeArgs args);
-
-hermes::vm::CallResult<hermes::vm::PseudoHandle<hermes::vm::JSObject>> createNativeClassObject(
-    hermes::vm::Runtime& runtime, hermes::vm::Handle<hermes::vm::JSObject> prototype, void* context);
+    void* context, hermes::vm::Runtime& runtime);
 
 class ByteBufferOStream : public llvh::raw_ostream {
     ByteBuffer& _output;

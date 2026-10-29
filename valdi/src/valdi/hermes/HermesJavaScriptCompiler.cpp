@@ -9,6 +9,8 @@
 #include "utils/platform/TargetPlatform.hpp"
 #include "valdi/hermes/HermesUtils.hpp"
 
+#include "hermes/BCGen/HBC/BytecodeStream.h"
+
 namespace Valdi::Hermes {
 
 class BytesViewBuffer : public hermes::Buffer {
@@ -80,10 +82,11 @@ BytesView HermesJavaScriptCompiler::compileToSerializedBytecode(const std::strin
 
     ByteBufferOStream stream(*output);
 
-    hermes::hbc::BytecodeSerializer serializer{stream, options};
-    serializer.serialize(
+    hermes::hbc::serializeBytecodeModule(
         *compiledBytecode->getBytecodeModule(),
-        llvh::SHA1::hash(llvh::makeArrayRef(reinterpret_cast<const uint8_t*>(script.data()), script.size())));
+        llvh::SHA1::hash(llvh::makeArrayRef(reinterpret_cast<const uint8_t*>(script.data()), script.size())),
+        stream,
+        options);
 
     return stream.toBytesView();
 }
@@ -93,8 +96,8 @@ static hermes::hbc::CompileFlags getCompileFlags(hermes::OutputFormatKind output
     compileFlags.format = outputFormat;
     compileFlags.strict = true;
     compileFlags.includeLibHermes = false;
-    compileFlags.enableBlockScoping = true;
-    compileFlags.enableES6Classes = true;
+    // Hermes V1 always supports ES6 classes; block scoping is still opt-in.
+    compileFlags.enableES6BlockScoping = true;
     compileFlags.debug = debug;
     compileFlags.emitAsyncBreakCheck = true;
 
@@ -113,16 +116,15 @@ Shared<hermes::hbc::BCProviderFromSrc> HermesJavaScriptCompiler::compileToByteco
     auto buffer =
         std::make_unique<hermes::OwnedMemoryBuffer>(llvh::MemoryBuffer::getMemBuffer(llvh::StringRef(script)));
 
-    auto res = hermes::hbc::BCProviderFromSrc::createBCProviderFromSrc(
-        std::move(buffer),
-        llvh::StringRef(sourceFilename.data(), sourceFilename.size()),
-        nullptr,
-        compileFlags,
-        {},
-        {},
-        nullptr,
-        runOptimizations,
-        bytecodeGenerationsOptions);
+    auto res = hermes::hbc::BCProviderFromSrc::create(std::move(buffer),
+                                                      llvh::StringRef(sourceFilename.data(), sourceFilename.size()),
+                                                      /* sourceMap */ llvh::StringRef(),
+                                                      compileFlags,
+                                                      "global",
+                                                      {},
+                                                      nullptr,
+                                                      runOptimizations,
+                                                      bytecodeGenerationsOptions);
 
     if (!res.first) {
         exceptionTracker.onError(res.second);

@@ -67,9 +67,8 @@ static hermes::vm::RuntimeConfig makeRuntimeConfig() {
         .withMaxNumRegisters(256 * 1024)
         .withMicrotaskQueue(true)
         .withEnableHermesInternal(true)
-        .withES6Promise(true)
-        .withES6Class(true)
-        .withEnableBlockScoping(true)
+        // Promise and classes are always enabled in Hermes V1.
+        .withES6BlockScoping(true)
         .build();
 }
 
@@ -80,7 +79,7 @@ HermesJavaScriptContext::HermesJavaScriptContext(JavaScriptTaskScheduler* taskSc
       _managedValues(kManagedValuesOccupancyRatio, kManagedValuesSizingWeight) {
 #if defined(HERMES_API)
     _jsiRuntime = facebook::hermes::makeHermesRuntime(makeRuntimeConfig());
-    _runtime = _jsiRuntime->getVMRuntimeUnsafe();
+    _runtime = static_cast<hermes::vm::Runtime*>(_jsiRuntime->getVMRuntimeUnsafe());
 #else
     _sharedRuntime = hermes::vm::Runtime::create(makeRuntimeConfig());
     _runtime = _sharedRuntime.get();
@@ -279,7 +278,7 @@ JSValueRef HermesJavaScriptContext::evaluatePreCompiled(const BytesView& script,
                                                 runtimeModuleFlags,
                                                 llvh::StringRef(sourceFilename.data(), sourceFilename.length()),
                                                 hermes::vm::Runtime::makeNullHandle<hermes::vm::Environment>(),
-                                                hermes::vm::Handle<>(&_runtime->global_));
+                                                _runtime->getGlobal());
 
     return checkCallAndGetValue(evaluateResult, exceptionTracker);
 }
@@ -305,7 +304,7 @@ JSValueRef HermesJavaScriptContext::evaluate(const std::string& script,
                                                 runtimeModuleFlags,
                                                 jsSourceURL,
                                                 hermes::vm::Runtime::makeNullHandle<hermes::vm::Environment>(),
-                                                hermes::vm::Handle<>(&_runtime->global_));
+                                                _runtime->getGlobal());
 
     return checkCallAndGetValue(evaluateResult, exceptionTracker);
 #endif
@@ -378,10 +377,8 @@ JSValueRef HermesJavaScriptContext::newWeakRef(const JSValue& object, JSExceptio
         return newUndefined();
     }
 
-    auto prototype = hermes::vm::vmcast<hermes::vm::JSObject>(_runtime->weakRefPrototype);
-
-    auto weakRef = hermes::vm::JSWeakRef::create(*_runtime, _runtime->makeHandle(prototype));
-    weakRef->setTarget(*_runtime, std::move(jsObject));
+    auto weakRef = hermes::vm::JSWeakRef::create(*_runtime, _runtime->weakRefPrototype);
+    weakRef->setTarget(*_runtime, hermes::vm::SmallHermesValue::encodeHermesValue(jsObject.getHermesValue(), *_runtime));
 
     return toJSValueRefUncached(weakRef.getHermesValue());
 }
@@ -454,7 +451,8 @@ JSValueRef HermesJavaScriptContext::newStringUTF16(const std::u16string_view& st
 JSValueRef HermesJavaScriptContext::newArray(size_t initialSize, JSExceptionTracker& exceptionTracker) {
     hermes::vm::GCScope gcScope(*_runtime);
 
-    auto result = hermes::vm::JSArray::create(*_runtime, initialSize, initialSize);
+    auto size = static_cast<hermes::vm::JSArray::size_type>(initialSize);
+    auto result = hermes::vm::JSArray::create(*_runtime, size, size);
 
     if (checkException(result.getStatus(), exceptionTracker)) {
         return toJSValueRef(result.getValue().getHermesValue());
@@ -472,15 +470,13 @@ JSValueRef HermesJavaScriptContext::newArrayBuffer(const BytesView& buffer, JSEx
         auto arrayBuffer = _runtime->makeHandle(hermes::vm::JSArrayBuffer::create(
             *_runtime, hermes::vm::Handle<hermes::vm::JSObject>::vmcast(&_runtime->arrayBufferPrototype)));
 
-        auto status = hermes::vm::JSArrayBuffer::setExternalDataBlock(*_runtime,
-                                                                      arrayBuffer,
-                                                                      const_cast<uint8_t*>(buffer.data()),
-                                                                      buffer.size(),
-                                                                      unsafeBridgeRetain(buffer.getSource().get()),
-                                                                      &freeNativeState);
-        if (!checkException(status, exceptionTracker)) {
-            return newUndefined();
-        }
+        // Hermes V1 owns the external data through a shared_ptr; releasing it releases the source.
+        hermes::vm::JSArrayBuffer::setExternalDataBlock(
+            *_runtime,
+            arrayBuffer,
+            const_cast<uint8_t*>(buffer.data()),
+            static_cast<hermes::vm::JSArrayBuffer::size_type>(buffer.size()),
+            std::shared_ptr<void>(unsafeBridgeRetain(buffer.getSource().get()), &freeContext));
 
         return toJSValueRef(arrayBuffer.getHermesValue());
     }
@@ -584,13 +580,11 @@ JSValueRef HermesJavaScriptContext::newNativeClass(const Ref<RefCountable>& clas
         hermes::vm::Handle<hermes::vm::JSObject>::vmcast(&_runtime->functionPrototype),
         backendClass.get(),
         &callNativeClassConstructor,
-        0,
-        &createNativeClassObject,
-        hermes::vm::CellKind::JSObjectKind));
+        0));
 
     auto className = newSymbolIDFromString(classDefinition.getName().toStringView());
     auto defineConstructorStatus = hermes::vm::Callable::defineNameLengthAndPrototype(
-        constructor, *_runtime, className.get(), 0, prototype, hermes::vm::Callable::WritablePrototype::No, false);
+        constructor, *_runtime, className.get(), 0, prototype, hermes::vm::Callable::WritablePrototype::No);
     if (!checkException(defineConstructorStatus, exceptionTracker)) {
         return newUndefined();
     }
@@ -935,8 +929,13 @@ JSValueRef HermesJavaScriptContext::callObjectAsConstructor(const JSValue& objec
 
     auto handle = hermes::vm::Handle<hermes::vm::Callable>::vmcast(hermesValue);
 
-    auto thisRes = hermes::vm::Callable::createThisForConstruct_RJS(handle, *_runtime);
-    auto objHandle = _runtime->makeHandle<hermes::vm::JSObject>(std::move(*thisRes));
+    // new.target is the callee itself. Hermes V1 returns undefined here for callables that make their own `this`
+    // (native constructors, classes); their constructor result is then the object.
+    auto thisRes = hermes::vm::Callable::createThisForConstruct_RJS(handle, *_runtime, handle);
+    if (!checkException(thisRes.getStatus(), callContext.getExceptionTracker())) {
+        return newUndefined();
+    }
+    auto objHandle = _runtime->makeHandle(std::move(*thisRes));
 
     hermes::vm::ScopedNativeCallFrame callFrame(*_runtime,
                                                 static_cast<uint32_t>(callContext.getParameterSize()),
@@ -974,11 +973,14 @@ void HermesJavaScriptContext::visitObjectPropertyNames(const JSValue& object,
     for (uint32_t i = beginIndex; i < endIndex; i++) {
         hermes::vm::GCScope innerGCScope(*_runtime);
 
-        auto name = propertyNames->at(*_runtime, i);
+        auto name = propertyNames->at(i).unboxToHV(*_runtime);
 
         JSPropertyNameRef propertyName;
 
-        if (name.isString()) {
+        if (name.isSymbol()) {
+            // Hermes V1 returns most string keys as uniqued SymbolIDs (for-in never yields JS symbols).
+            propertyName = toPropertyNameRef(_runtime->makeHandle(name.getSymbol()));
+        } else if (name.isString()) {
             auto symbolId = hermes::vm::stringToSymbolID(*_runtime, hermes::vm::createPseudoHandle(name.getString()));
             if (!checkException(symbolId.getStatus(), exceptionTracker)) {
                 return;
@@ -1056,7 +1058,7 @@ bool HermesJavaScriptContext::valueToBool(const JSValue& value, JSExceptionTrack
     } else if (hermesValue.isBool()) {
         return hermesValue.getBool();
     } else if (hermesValue.isString()) {
-        return hermesValue.getString()->getSize() != 0;
+        return hermesValue.getString()->getStringLength() != 0;
     } else {
         return true;
     }
@@ -1181,7 +1183,7 @@ JSTypedArray HermesJavaScriptContext::valueToTypedArray(const JSValue& value, JS
             return JSTypedArray();
         }
 
-        auto* data = handle->getDataBlock(*_runtime);
+        auto* data = handle->getDataBlock();
         auto size = handle->size();
 
         return JSTypedArray(TypedArrayType::ArrayBuffer, data, size, JSValueRef::makeUnretained(*this, value));
@@ -1192,7 +1194,7 @@ JSTypedArray HermesJavaScriptContext::valueToTypedArray(const JSValue& value, JS
         }
 
         auto type = getTypedArrayType(*hermesValue);
-        auto* data = handle->begin(*_runtime);
+        auto* data = handle->data(*_runtime);
         auto size = static_cast<size_t>(handle->getByteLength());
         auto* arrayBuffer = handle->getBuffer(*_runtime);
 

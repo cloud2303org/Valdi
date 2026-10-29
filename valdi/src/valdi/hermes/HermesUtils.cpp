@@ -92,14 +92,15 @@ static inline bool handleInterrupt(IJavaScriptContext& jsContext, JSExceptionTra
 }
 
 hermes::vm::CallResult<hermes::vm::HermesValue> callTrampoline(void* context,
-                                                               hermes::vm::Runtime& runtime,
-                                                               hermes::vm::NativeArgs args) {
+                                                               hermes::vm::Runtime& runtime) {
+    // Hermes V1 passes native functions their arguments through the current frame.
+    hermes::vm::NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
     auto* functionData = unsafeBridgeUnretained<JSFunctionData>(context);
 
     auto thisRef = functionData->jsContext.toJSValueRef(args.getThisArg());
     JSValueRef outArguments[args.getArgCount()];
     for (size_t i = 0; i < args.getArgCount(); i++) {
-        outArguments[i] = functionData->jsContext.toJSValueRef(args.getArg(i));
+        outArguments[i] = functionData->jsContext.toJSValueRef(args.getArg(static_cast<unsigned>(i)));
     }
 
     JSExceptionTracker exceptionTracker(functionData->jsContext);
@@ -124,15 +125,16 @@ hermes::vm::CallResult<hermes::vm::HermesValue> callTrampoline(void* context,
 }
 
 hermes::vm::CallResult<hermes::vm::HermesValue> callNativeClassInstanceMember(void* context,
-                                                                              hermes::vm::Runtime& runtime,
-                                                                              hermes::vm::NativeArgs args) {
+                                                                              hermes::vm::Runtime& runtime) {
+    // Hermes V1 passes native functions their arguments through the current frame.
+    hermes::vm::NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
     auto functionData = unsafeBridge<HermesNativeClassFunctionData>(context);
     auto& jsContext = functionData->jsContext;
 
     auto argumentCount = args.getArgCount();
     JSValueRef arguments[argumentCount];
     for (size_t i = 0; i < argumentCount; i++) {
-        arguments[i] = jsContext.toJSValueRef(args.getArg(i));
+        arguments[i] = jsContext.toJSValueRef(args.getArg(static_cast<unsigned>(i)));
     }
 
     JSExceptionTracker exceptionTracker(jsContext);
@@ -164,15 +166,16 @@ hermes::vm::CallResult<hermes::vm::HermesValue> callNativeClassInstanceMember(vo
 }
 
 hermes::vm::CallResult<hermes::vm::HermesValue> callNativeClassStaticMember(void* context,
-                                                                            hermes::vm::Runtime& runtime,
-                                                                            hermes::vm::NativeArgs args) {
+                                                                            hermes::vm::Runtime& runtime) {
+    // Hermes V1 passes native functions their arguments through the current frame.
+    hermes::vm::NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
     auto functionData = unsafeBridge<HermesNativeClassFunctionData>(context);
     auto& jsContext = functionData->jsContext;
 
     auto argumentCount = args.getArgCount();
     JSValueRef arguments[argumentCount];
     for (size_t i = 0; i < argumentCount; i++) {
-        arguments[i] = jsContext.toJSValueRef(args.getArg(i));
+        arguments[i] = jsContext.toJSValueRef(args.getArg(static_cast<unsigned>(i)));
     }
 
     JSExceptionTracker exceptionTracker(jsContext);
@@ -195,14 +198,10 @@ hermes::vm::CallResult<hermes::vm::HermesValue> callNativeClassStaticMember(void
     return HermesJavaScriptContext::toHermesValue(result.get());
 }
 
-hermes::vm::CallResult<hermes::vm::PseudoHandle<hermes::vm::JSObject>> createNativeClassObject(
-    hermes::vm::Runtime& runtime, hermes::vm::Handle<hermes::vm::JSObject> prototype, void* /*context*/) {
-    return hermes::vm::JSObject::create(runtime, prototype);
-}
-
 hermes::vm::CallResult<hermes::vm::HermesValue> callNativeClassConstructor(void* context,
-                                                                           hermes::vm::Runtime& runtime,
-                                                                           hermes::vm::NativeArgs args) {
+                                                                           hermes::vm::Runtime& runtime) {
+    // Hermes V1 passes native functions their arguments through the current frame.
+    hermes::vm::NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
     auto classData = unsafeBridge<HermesNativeClassData>(context);
     if (!args.isConstructorCall()) {
         return runtime.raiseTypeError("Native class constructor must be called with new");
@@ -223,18 +222,29 @@ hermes::vm::CallResult<hermes::vm::HermesValue> callNativeClassConstructor(void*
         return runtime.raiseTypeError("Native class cannot be constructed from JavaScript");
     }
 
+    // Hermes V1 native constructors make their own `this` (the VM passes undefined): create it from
+    // new.target.prototype, like the object creator passed to NativeConstructor::create used to.
+    hermes::vm::GCScope gcScope(runtime);
+    auto parentResult = hermes::vm::NativeConstructor::parentForNewThis_RJS(
+        runtime, hermes::vm::Handle<hermes::vm::Callable>::vmcast(newTargetObject), runtime.objectPrototype);
+    if (parentResult == hermes::vm::ExecutionStatus::EXCEPTION) {
+        return hermes::vm::ExecutionStatus::EXCEPTION;
+    }
+    auto parent = runtime.makeHandle(std::move(*parentResult));
+    auto thisObject = runtime.makeHandle(hermes::vm::JSObject::create(runtime, parent));
+
     auto& jsContext = classData->jsContext;
     auto argumentCount = args.getArgCount();
     JSValueRef arguments[argumentCount];
     for (size_t i = 0; i < argumentCount; i++) {
-        arguments[i] = jsContext.toJSValueRef(args.getArg(i));
+        arguments[i] = jsContext.toJSValueRef(args.getArg(static_cast<unsigned>(i)));
     }
 
     JSExceptionTracker exceptionTracker(jsContext);
     const auto& referenceInfo = classData->nativeClass->getConstructorReferenceInfo();
     JSFunctionNativeCallContext callContext(
         jsContext, argumentCount == 0 ? nullptr : arguments, argumentCount, exceptionTracker, referenceInfo);
-    auto thisValue = jsContext.toJSValueRef(args.getThisArg());
+    auto thisValue = jsContext.toJSValueRef(thisObject.getHermesValue());
     callContext.setThisValue(thisValue.get());
 
     if (handleInterrupt(jsContext, exceptionTracker)) {
@@ -249,12 +259,11 @@ hermes::vm::CallResult<hermes::vm::HermesValue> callNativeClassConstructor(void*
         return onJsCallError(runtime, exceptionTracker);
     }
 
-    auto thisObject = args.dyncastThis<hermes::vm::JSObject>();
     auto instanceData = makeShared<JSNativeClassInstanceData>(classData->nativeClass, nativeOpaque);
     if (setNativeState(runtime, thisObject, instanceData) == hermes::vm::ExecutionStatus::EXCEPTION) {
         return hermes::vm::ExecutionStatus::EXCEPTION;
     }
-    return args.getThisArg();
+    return thisObject.getHermesValue();
 }
 
 void ByteBufferOStream::write_impl(const char* Ptr, size_t Size) {
