@@ -45,7 +45,8 @@ The maintained branch removes the old Swift Valdi compiler implementation,
 its private vendors/tests, standalone compiler targets and launch helper.
 `compiler/compiler` retains only `valdi.proto` and its C++ protocol targets,
 which are runtime inputs. Native iOS Swift code and the platform Swift
-compiler/toolchains remain intact.
+compiler/toolchains remain intact. The separate C++ compiler toolbox remains
+for native export header rewriting; it is not the removed Swift compiler.
 
 `valdi_compiled` now always delegates its established output/provider contract
 to the consuming application's `//bzl/node_compiler:adapter.bzl` (loaded from
