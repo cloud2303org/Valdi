@@ -41,65 +41,79 @@ class JavaScriptPreCompilerProcessor: CompilationProcessor {
 
     }
 
+    /// Hermes bytecode also goes to iOS: a Hermes runtime runs it there too, and release builds only link the lean
+    /// Hermes VM, which can't compile source. JavaScriptCore and QuickJS bytecode formats keep shipping source to iOS.
+    private var precompilesForIOS: Bool {
+        return androidJsBytecodeFormat == "hermes"
+    }
+
+    private func precompile(item: SelectedItem<JavaScriptFile>, engine: String) throws -> Data {
+        let jsPath = item.data.relativePath
+        logger.debug("-- Pre-compiling JavaScript file \(jsPath)")
+
+        let data = try item.data.file.readData()
+
+        if let cachedData = diskCache?.getOutput(item: jsPath, platform: .android, target: .release, inputData: data) {
+            return cachedData
+        }
+
+        let inputFile = URL.randomFileURL(extension: "js")
+        let outputFile = URL.randomFileURL(extension: "js")
+        try fileManager.save(data: data, to: inputFile)
+        defer {
+            _ = try? fileManager.delete(url: inputFile)
+            _ = try? fileManager.delete(url: outputFile)
+        }
+
+        // Remove .js suffix, JS files are referred without their extension
+        // in the consumer code
+        var filename = jsPath
+        if filename.hasSuffix(".js") {
+            filename.removeLast(3)
+        }
+
+        try toolboxExecutable.precompile(inputFilePath: inputFile.path, outputFilePath: outputFile.path, filename: filename, engine: engine)
+
+        let outputData = try File.url(outputFile).readData()
+        try diskCache?.setOutput(item: jsPath, platform: .android, target: .release, inputData: data, outputData: outputData)
+        return outputData
+    }
+
     private func compile(item: SelectedItem<JavaScriptFile>) -> [CompilationItem] {
         var output = [CompilationItem]()
-        if item.item.shouldOutputToIOS {
+        let toAndroid = item.item.shouldOutputToAndroid
+        let iosBytecode = precompilesForIOS && item.item.shouldOutputToIOS
+        if item.item.shouldOutputToIOS && !iosBytecode {
             output.append(item.item.with(newPlatform: .ios))
         }
         if item.item.shouldOutputToWeb {
             output.append(item.item.with(newPlatform: .web))
         }
 
-        // Early out if we're not looking at Android
-        if !item.item.shouldOutputToAndroid {
-            return output
-        }
-
         if item.item.outputTarget.contains(.debug) {
-            output.append(item.item.with(newKind: item.item.kind, newPlatform: .android, newOutputTarget: .debug))
+            if iosBytecode {
+                output.append(item.item.with(newKind: item.item.kind, newPlatform: .ios, newOutputTarget: .debug))
+            }
+            if toAndroid {
+                output.append(item.item.with(newKind: item.item.kind, newPlatform: .android, newOutputTarget: .debug))
+            }
         }
 
         guard let androidJsBytecodeFormat = self.androidJsBytecodeFormat else {
-            output.append(item.item.with(newKind: item.item.kind, newPlatform: .android, newOutputTarget: .release))
+            if toAndroid {
+                output.append(item.item.with(newKind: item.item.kind, newPlatform: .android, newOutputTarget: .release))
+            }
             return output
         }
 
         do {
-            let jsPath = item.data.relativePath
-            logger.debug("-- Pre-compiling JavaScript file \(jsPath)")
-
-            let data = try item.data.file.readData()
-
-            if let cachedData = diskCache?.getOutput(item: jsPath, platform: .android, target: .release, inputData: data) {
-                let outputJsFile = item.data.with(file: .data(cachedData))
+            let outputJsFile = item.data.with(file: .data(try precompile(item: item, engine: androidJsBytecodeFormat)))
+            if toAndroid {
                 output.append(item.item.with(newKind: .javaScript(outputJsFile), newPlatform: .android))
-                return output
             }
-
-            let inputFile = URL.randomFileURL(extension: "js")
-            let outputFile = URL.randomFileURL(extension: "js")
-            try fileManager.save(data: data, to: inputFile)
-            defer {
-                _ = try? fileManager.delete(url: inputFile)
-                _ = try? fileManager.delete(url: outputFile)
+            if iosBytecode {
+                output.append(item.item.with(newKind: .javaScript(outputJsFile), newPlatform: .ios, newOutputTarget: .release))
             }
-
-            // Remove .js suffix, JS files are referred without their extension
-            // in the consumer code
-            var filename = jsPath
-            if filename.hasSuffix(".js") {
-                filename.removeLast(3)
-            }
-
-            try toolboxExecutable.precompile(inputFilePath: inputFile.path, outputFilePath: outputFile.path, filename: filename, engine: androidJsBytecodeFormat)
-
-            let outputData = try File.url(outputFile).readData()
-
-            let outputJsFile = item.data.with(file: .data(outputData))
-            try diskCache?.setOutput(item: jsPath, platform: .android, target: .release, inputData: data, outputData: outputData)
-
-            output.append(item.item.with(newKind: .javaScript(outputJsFile), newPlatform: .android))
-
             return output
         } catch let error {
             logger.error(error.legibleLocalizedDescription)
@@ -109,7 +123,8 @@ class JavaScriptPreCompilerProcessor: CompilationProcessor {
 
     func process(items: CompilationItems) throws -> CompilationItems {
         return items.select { (item) -> JavaScriptFile? in
-            if !item.shouldOutputToAndroid || item.bundleInfo.compilationModeConfig.resolveCompilationMode(forItemPath: item.relativeProjectPath) == .js || !item.outputTarget.contains(.release) {
+            let precompiled = item.shouldOutputToAndroid || (self.precompilesForIOS && item.shouldOutputToIOS)
+            if !precompiled || item.bundleInfo.compilationModeConfig.resolveCompilationMode(forItemPath: item.relativeProjectPath) == .js || !item.outputTarget.contains(.release) {
                 return nil
             }
 
