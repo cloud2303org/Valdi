@@ -37,7 +37,8 @@ def valdi_exported_library(
         npm_scope = "",
         npm_version = "1.0.0",
         web_exclude_jsx_global_declaration = False,
-        resources = []):
+        resources = [],
+        native_deps = []):
     """Exports Valdi modules as platform-specific libraries (xcframework, aar, npm).
 
     Args:
@@ -47,6 +48,9 @@ def valdi_exported_library(
         ios_swift_module_names: Swift module names of deps that import each other.
             Only needed for multi-module exports with cross-module Swift imports.
             ValdiCoreSwift is always included automatically.
+        native_deps: cc_library targets linked into the runtime on both platforms (libvaldi_runtime.so, the
+            xcframework), as valdi_module's native_deps are: C++ implementations of @ExportModule modules, which
+            register themselves (alwayslink) and share the runtime's C++ library.
     """
     resources = resources + [Label("//bzl/valdi:api_version_file")]
     if not web_package_name:
@@ -71,7 +75,7 @@ def valdi_exported_library(
         ] + get_suffixed_deps(deps, "_api_objc_hdrs") + get_suffixed_deps(deps, "_objc_hdrs"),
     )
 
-    xcframework_deps = ["@valdi//valdi"] + get_suffixed_deps(deps, "_objc")
+    xcframework_deps = ["@valdi//valdi"] + get_suffixed_deps(deps, "_objc") + native_deps
 
     if ios_swift:
         merged_swift_name = "{}_merged_swift".format(name)
@@ -161,7 +165,7 @@ done | sed '/^import ValdiCoreSwift$$/d' > $@
         java_deps = java_deps,
         native_deps = [
             "@valdi//valdi",
-        ] + get_suffixed_deps(deps, "_native"),
+        ] + get_suffixed_deps(deps, "_native") + native_deps,
         additional_assets = [":{}_android_assets".format(name)],
         excluded_class_path_patterns = android_excluded_class_path_patterns,
         so_name = "lib{}.so".format(name),
