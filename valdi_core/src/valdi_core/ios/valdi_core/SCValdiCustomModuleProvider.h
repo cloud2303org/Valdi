@@ -28,6 +28,15 @@ NS_ASSUME_NONNULL_BEGIN
  */
 - (NSData*)customModuleDataForPath:(NSString*)modulePath error:(NSError**)error;
 
+@optional
+
+/**
+ Returns the URL (typically file://) of the image at resourcePath in the given module, for
+ images that ship next to the module data returned by customModuleDataForPath:error:.
+ Return nil to load the image bundled with the app.
+ */
+- (nullable NSString*)assetURLForModule:(NSString*)moduleName resourcePath:(NSString*)resourcePath;
+
 @end
 
 NS_ASSUME_NONNULL_END

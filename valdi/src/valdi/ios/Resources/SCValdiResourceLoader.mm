@@ -137,6 +137,13 @@ Valdi::StringBox ResourceLoader::resolveLocalAssetURL(const Valdi::StringBox &mo
     NSString *objcModuleName = ValdiIOS::NSStringFromString(moduleName);
     NSString *objcResourcePath = ValdiIOS::NSStringFromString(resourcePath);
 
+    if ([_moduleProvider respondsToSelector:@selector(assetURLForModule:resourcePath:)]) {
+        NSString *url = [_moduleProvider assetURLForModule:objcModuleName resourcePath:objcResourcePath];
+        if (url) {
+            return ValdiIOS::InternedStringFromNSString(url);
+        }
+    }
+
     SCValdiImage *image = [SCValdiImage imageWithModuleName:objcModuleName resourcePath:objcResourcePath];
     if (!image) {
         return Valdi::StringBox();

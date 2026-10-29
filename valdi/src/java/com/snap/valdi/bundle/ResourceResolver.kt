@@ -44,6 +44,8 @@ class ResourceResolver(private val context: Context,
 
     @Keep
     fun resolveResource(moduleName: String, resourcePath: String): Any? {
+        customModuleProvider?.resolveAssetUrl(moduleName, resourcePath)?.let { return it }
+
         val currentTime = System.nanoTime()
         val resourceId = ValdiImage.getImageIdentifier(context, moduleName, resourcePath)
         if (resourceId == 0) {

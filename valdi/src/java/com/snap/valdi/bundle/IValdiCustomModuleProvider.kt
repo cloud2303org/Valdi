@@ -23,4 +23,11 @@ interface IValdiCustomModuleProvider {
     @Throws(ValdiException::class)
     fun getCustomModuleData(path: String): ByteArray?
 
+    /**
+     * Returns the URL (typically file://) of the image at resourcePath in the given module, for
+     * images that ship next to the module data returned by getCustomModuleData.
+     * Return null to load the image bundled with the app.
+     */
+    fun resolveAssetUrl(moduleName: String, resourcePath: String): String? = null
+
 }
