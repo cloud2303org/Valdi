@@ -165,9 +165,7 @@ def valdi_initialize_workspace(target_platform = ""):
         llvm_version = "19.1.7",
     )
 
-    # Required for the objc_library targets. Roughly, the dependency chain is:
-    # valdi_core > valdi_compiler_toolbox > valdi_protobuf > utils_core_cc
-    # then objc_library from djinni or jscore, etc. depending on build target
+    # Required for native objc_library targets.
     apple_support_dependencies()
 
     # platform string expected to match BUILD_FLAGS in constants.ts

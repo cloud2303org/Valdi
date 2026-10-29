@@ -1,15 +1,18 @@
+NODEJS_TOOLCHAIN_TYPE = "@rules_nodejs//nodejs:toolchain_type"
+
 def _rewrite_hdrs_impl(ctx):
     """
     Rewrites headers into a given module name
     """
     output_files = []
-    transformer_exe = ctx.executable._transformer
+    node = ctx.toolchains[NODEJS_TOOLCHAIN_TYPE].nodeinfo
+    transformer = ctx.file._transformer
 
     for header in ctx.files.srcs:
         out = ctx.actions.declare_file("output/{}".format(header.basename))
 
         args = [
-            "rewrite_header",
+            transformer.path,
             "-m",
             ctx.attr.module_name,
             "-i",
@@ -26,11 +29,13 @@ def _rewrite_hdrs_impl(ctx):
             args.append(preserved_module_name)
 
         ctx.actions.run(
-            inputs = [header, transformer_exe],
+            inputs = [header, transformer],
+            tools = node.tool_files,
             outputs = [out],
             arguments = args,
             progress_message = "Transforming header: %s" % header.path,
-            executable = transformer_exe,
+            executable = node.target_tool_path,
+            mnemonic = "NodeValdiRewriteHeader",
         )
 
         output_files.append(out)
@@ -51,9 +56,9 @@ rewrite_hdrs = rule(
         "preserved_module_names": attr.string_list(),
         "flatten_paths": attr.bool(),
         "_transformer": attr.label(
-            executable = True,
-            cfg = "exec",
-            default = Label("@valdi_toolchain//:valdi_compiler_toolbox"),
+            allow_single_file = True,
+            default = Label("//bzl/valdi/node_tools:rewrite_header.mjs"),
         ),
     },
+    toolchains = [NODEJS_TOOLCHAIN_TYPE],
 )

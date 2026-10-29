@@ -3,7 +3,6 @@ load(
     "convert_icon",
     "is_application_icons",
     "make_application_icons",
-    "toolbox_attr",
 )
 
 def valdi_android_application_icons(src, round_src = None):
@@ -38,7 +37,6 @@ _android_application_icons = rule(
         "resource_root": attr.string(mandatory = True),
         "src": attr.label(allow_single_file = True, mandatory = True),
         "round_src": attr.label(allow_single_file = True),
-        "_toolbox": toolbox_attr(),
     },
 )
 

@@ -2202,56 +2202,6 @@ def _prepare_hotreload_explicit_input_list_file(ctx, all_targets):
 
     return file_list
 
-def _prepare_hotreload_arguments(module_names, config_yaml_file, explicit_input_list_file, toolchain, base_project_path):
-    """ Prepare arguments for the Valdi compiler invocation. """
-
-    companion_bin_wrapper = toolchain.companion.files.to_list()[0]
-    compiler_toolbox = toolchain.compiler_toolbox.files.to_list()[0]
-    minify_config = toolchain.minify_config.files.to_list()[0]
-    client_sql = toolchain.sqldelight_compiler.files.to_list()
-
-    args = []
-
-    for module_name in module_names:
-        args.append("--module")
-        args.append(module_name)
-    args.append("--config")
-    args.append(config_yaml_file.path)
-    args.append("--explicit-input-list-file")
-    args.append(explicit_input_list_file.path)
-    args.append("--direct-companion-path")
-    args.append(companion_bin_wrapper.path)
-    args.append("--direct-compiler-toolbox-path")
-    args.append(compiler_toolbox.path)
-    args.append("--direct-minify-config-path")
-    args.append(minify_config.path)
-
-    if client_sql:
-        args.append("--direct-client-sql-path")
-        args.append(client_sql[0].path)
-
-    args.append("--module")
-    args.append(_VALDI_BASE_MODULE_NAME)
-    args.append("--log-level")
-    args.append("info")
-    args.append("--monitor")
-    args.append("--usb")
-    args.append("--inline-translations")
-
-    # Probably need to cd to the base_project_path as part of the script
-    args.append("--config-value")
-    args.append("base_dir=$PWD/{}".format(base_project_path))
-
-    args.append("--config-value")
-    args.append("node_modules_dir=$PWD/{}".format(NODE_MODULES_BASE))
-
-    args.append("--config-value")
-    args.append("android.codegen_enabled=false")
-    args.append("--config-value")
-    args.append("ios.codegen_enabled=false")
-
-    return " ".join(args)
-
 def __common_path(left, right):
     left_components = left.split("/")
     right_components = right.split("/")

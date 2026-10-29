@@ -3,7 +3,6 @@ load(
     "convert_icon",
     "is_application_icons",
     "make_application_icons",
-    "toolbox_attr",
     "write_apple_contents_json",
 )
 
@@ -61,7 +60,6 @@ _ios_application_icons = rule(
     implementation = _ios_application_icons_impl,
     attrs = {
         "src": attr.label(allow_single_file = True, mandatory = True),
-        "_toolbox": toolbox_attr(),
     },
 )
 

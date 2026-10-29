@@ -1,11 +1,4 @@
-# Legacy Swift compiler and companion entry points are removed.
-# The native C++ toolbox still rewrites exported runtime headers.
-
-alias(
-    name = "valdi_compiler_toolbox",
-    actual = "@valdi//valdi/compiler/toolbox:valdi_compiler_toolbox",
-    visibility = ["//visibility:public"],
-)
+# Legacy compiler tools are removed; runtime executables remain.
 
 alias(
     name = "valdi_standalone",

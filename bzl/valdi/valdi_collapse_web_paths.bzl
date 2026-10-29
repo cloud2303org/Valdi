@@ -160,111 +160,7 @@ def _dest(rel):
     return rel
 
 def _impl(ctx):
-    outdir = ctx.actions.declare_directory(ctx.label.name)
-    package_name = ctx.attr.package_name
-    exclude_jsx = ctx.attr.exclude_jsx_global_declaration
-    all_modules = _all_modules(ctx.attr.modules)
-    web_workers = _collect_web_workers(all_modules)
-
-    # Build manifest src -> dest. Deduplicate by dest (first source wins) so the same logical file
-    # from tree artifact and filegroup doesn't trigger duplicate copies.
-    manifest = ctx.actions.declare_file(ctx.label.name + ".manifest")
-    seen_dest = {}
-    lines = []
-    for f in ctx.files.srcs:
-        rel = _repository_relative_short_path(f)
-        if exclude_jsx and "valdi_tsx/src/JSX.d.ts" in rel:
-            continue
-        if _should_exclude_from_package(rel):
-            continue
-        d = _dest(rel)
-        if d not in seen_dest:
-            seen_dest[d] = True
-            lines.append("{}\t{}".format(f.path, d))
-
-    # If excluding JSX global declaration, add stub file from valdi_tsx/web
-    if exclude_jsx:
-        stub = ctx.file.jsx_stub_file
-        lines.append("{}\tsrc/valdi_tsx/src/JSX.d.ts".format(stub.path))
-
-    ctx.actions.write(manifest, "\n".join(lines) + "\n")
-
-    # ── Build strings manifest ──
-    # module_name \t strings_dir (one line per module with strings).
-    # Used by CompilerToolbox to generate _strings_preload.js files for web bundlers.
-    strings_manifest = ctx.actions.declare_file(ctx.label.name + ".strings_manifest")
-    strings_lines = []
-    for m in all_modules.to_list():
-        info = m[ValdiModuleInfo]
-        if info.strings_dir:
-            strings_lines.append("{}\t{}".format(info.name, info.strings_dir))
-    ctx.actions.write(strings_manifest, "\n".join(strings_lines) + "\n")
-
-    # ── Build .d.ts manifest ──
-    # source_path \t module_name (one line per source .d.ts file).
-    # Used by CompilerToolbox to place source .d.ts alongside compiled .js.
-    # Module name comes from ValdiModuleInfo — no path convention guessing.
-    # Compiler-generated declarations are already placed by the main manifest
-    # using _dest(); copying them again would retain their .valdi_build path.
-    dts_manifest = ctx.actions.declare_file(ctx.label.name + ".dts_manifest")
-    dts_lines = []
-    for m in all_modules.to_list():
-        info = m[ValdiModuleInfo]
-        for f in info.web_input_dts_files:
-            if f.path.endswith(".d.ts"):
-                dts_lines.append("{}\t{}".format(f.path, info.name))
-    ctx.actions.write(dts_manifest, "\n".join(dts_lines) + "\n")
-
-    # ── Build web worker manifest ──
-    # Browser worker entry module path repeated as the registration path and URL path.
-    # CollapseWebPaths.cpp turns this into the host registry and its CommonJS bridge.
-    web_workers_manifest = ctx.actions.declare_file(ctx.label.name + ".web_workers_manifest")
-    web_workers_lines = [
-        "{0}\t{0}".format(entry_path)
-        for entry_path in sorted(web_workers.keys())
-    ]
-    ctx.actions.write(web_workers_manifest, "\n".join(web_workers_lines) + "\n")
-
-    # module_name \t no-inline (one line per module that disables image inlining).
-    image_policy_manifest = ctx.actions.declare_file(ctx.label.name + ".image_policy_manifest")
-    image_policy_lines = sorted([
-        "{}\tno-inline".format(module[ValdiModuleInfo].name)
-        for module in all_modules.to_list()
-        if module[ValdiModuleInfo].web_no_inline_images
-    ])
-    ctx.actions.write(image_policy_manifest, "\n".join(image_policy_lines) + "\n")
-
-    # The companion AST transformer handles variable requires (→ moduleLoader.load)
-    # and PrependWebJsProcessor strips extra args from string-literal requires.
-    # Native module package files are emitted by the compiler from each module's
-    # explicit web native module overrides.
-
-    # Collect input .d.ts files from modules as explicit inputs.
-    dts_files = []
-    for m in all_modules.to_list():
-        dts_files.extend(m[ValdiModuleInfo].web_input_dts_files)
-
-    compiler_toolbox = ctx.executable._compiler_toolbox
-    inputs = [manifest, strings_manifest, dts_manifest, web_workers_manifest, image_policy_manifest] + ctx.files.srcs + dts_files
-    args = ctx.actions.args()
-    args.add("collapse_web_paths")
-    args.add("-o", outdir.path)
-    args.add("-m", manifest)
-    args.add("-p", package_name)
-    args.add("-s", strings_manifest)
-    args.add("-d", dts_manifest)
-    args.add("-w", web_workers_manifest)
-    args.add("-i", image_policy_manifest)
-
-    ctx.actions.run(
-        inputs = inputs,
-        outputs = [outdir],
-        tools = [compiler_toolbox],
-        executable = compiler_toolbox,
-        arguments = [args],
-        progress_message = "Collapsing web paths, transforming requires, and rewriting .d.ts imports into {}".format(outdir.path),
-    )
-    return [DefaultInfo(files = depset([outdir]))]
+    fail("Legacy Valdi web packaging was removed with the C++ toolbox; use a Node web bundler")
 
 collapse_web_paths = rule(
     implementation = _impl,
@@ -283,55 +179,16 @@ collapse_web_paths = rule(
             providers = [ValdiModuleInfo],
             doc = "Valdi module targets for strings and declaration manifests.",
         ),
-        "_compiler_toolbox": attr.label(
-            executable = True,
-            cfg = "exec",
-            default = Label("@valdi//valdi/compiler/toolbox:valdi_compiler_toolbox"),
-        ),
     },
 )
 
 def _impl_native(ctx):
-    outdir = ctx.actions.declare_directory(ctx.label.name)
-
-    # Build a manifest of: SRC \t DEST
-    manifest = ctx.actions.declare_file(ctx.label.name + ".manifest")
-    lines = []
-    for f in ctx.files.srcs:
-        rel = _repository_relative_short_path(f)
-
-        # Only files under a module's web/ dir belong in the native tree. Source files
-        # (e.g. <module>/src/*.d.ts) have no web/ segment; they are placed by the main
-        # collapse_web_paths pass instead, so skip them here.
-        if "web" not in rel.split("/"):
-            continue
-        lines.append("{}\t{}".format(f.path, _dest_native(rel)))
-    ctx.actions.write(manifest, "\n".join(lines))
-
-    compiler_toolbox = ctx.executable._compiler_toolbox
-    args = ctx.actions.args()
-    args.add("collapse_paths")
-    args.add("-o", outdir.path)
-    args.add("-m", manifest)
-    ctx.actions.run(
-        inputs = [manifest] + ctx.files.srcs,
-        outputs = [outdir],
-        tools = [compiler_toolbox],
-        executable = compiler_toolbox,
-        arguments = [args],
-        progress_message = "Collapsing native paths into {}".format(outdir.path),
-    )
-    return [DefaultInfo(files = depset([outdir]))]
+    fail("Legacy Valdi web native-path packaging was removed with the C++ toolbox; use a Node web bundler")
 
 collapse_native_paths = rule(
     implementation = _impl_native,
     attrs = {
         "srcs": attr.label_list(allow_files = True),
-        "_compiler_toolbox": attr.label(
-            executable = True,
-            cfg = "exec",
-            default = Label("@valdi//valdi/compiler/toolbox:valdi_compiler_toolbox"),
-        ),
     },
 )
 

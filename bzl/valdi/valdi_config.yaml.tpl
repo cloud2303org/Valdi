@@ -47,10 +47,6 @@ cpp:
 
 compiler_companion_binary: {COMPANION_BINARY}
 
-compiler_toolbox_path:
-  linux: {COMPILER_TOOLBOX_PATH}
-  macos: {COMPILER_TOOLBOX_PATH}
-
 minify_config_path: {MINIFY_CONFIG_PATH}
 
 node_modules_dir: {NODE_MODULES_DIR}

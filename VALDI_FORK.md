@@ -45,8 +45,14 @@ The maintained branch removes the old Swift Valdi compiler implementation,
 its private vendors/tests, standalone compiler targets and launch helper.
 `compiler/compiler` retains only `valdi.proto` and its C++ protocol targets,
 which are runtime inputs. Native iOS Swift code and the platform Swift
-compiler/toolchains remain intact. The separate C++ compiler toolbox remains
-for native export header rewriting; it is not the removed Swift compiler.
+compiler/toolchains remain intact. The C++ compiler toolbox, its private
+engine bridge target and optimization wrapper are also removed. Exported
+header rewriting uses `bzl/valdi/node_tools/rewrite_header.mjs`, invoked with
+the registered Bazel Node toolchain; it has no npm or runtime library dependency.
+The textual import, flattening and preserved-module behavior matches the former
+C++ implementation. Run `node --test bzl/valdi/node_tools/rewrite_header.test.mjs`.
+Legacy toolbox icon conversion and web path packaging fail explicitly;
+ValdiNativeRoutes uses its own Node asset pipeline and native host app builds.
 
 `valdi_compiled` now always delegates its established output/provider contract
 to the consuming application's `//bzl/node_compiler:adapter.bzl` (loaded from

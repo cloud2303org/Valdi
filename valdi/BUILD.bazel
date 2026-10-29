@@ -373,27 +373,6 @@ cc_library(
 
 SNAP_DRAWING_ENABLED_DEFINES = ["SNAP_DRAWING_ENABLED"]
 
-# Target to be used by //src/valdi/compiler/toolbox:valdi_compiler_toolbox
-# which only includes engines with pre-compilation support.
-cc_library(
-    name = "valdi_jsbridge_for_toolbox",
-    srcs = glob([
-        "src/valdi/jsbridge/**/*.cpp",
-    ]),
-    hdrs = glob([
-        "src/valdi/jsbridge/**/*.hpp",
-    ]),
-    copts = CC_COMPILER_FLAGS,
-    strip_include_prefix = "src",
-    visibility = ["//visibility:public"],
-    deps = [
-        ":valdi_quickjs",
-    ] + select({
-        "//bzl/valdi:js_bytecode_format_hermes": [":valdi_hermes"],
-        "//conditions:default": [],
-    }),
-)
-
 cc_library(
     name = "valdi_runtime_with_vm",
     srcs = glob([
