@@ -2,5 +2,3 @@
 # moves this over config.bzl when mirroring to public github.com/Snapchat/Valdi.
 
 INTERNAL_BUILD = False
-
-use_local_compiler_default = True

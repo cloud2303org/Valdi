@@ -1,5 +1,4 @@
 load(":valdi_compiled.bzl", "ValdiModuleInfo")
-load(":valdi_toolchain_type.bzl", "VALDI_TOOLCHAIN_TYPE")
 
 def extract_valdi_output_rule(implementation, attrs):
     # TODO(simon): We use cfg = "exec" to avoid compiling multiple
@@ -23,5 +22,5 @@ def extract_valdi_output_rule(implementation, attrs):
         # follow valdi toolchain availability, so compiled_module lands in an
         # exec configuration whose valdi toolchain is actually runnable there
         # (see //bzl/valdi:mac_only_execution).
-        toolchains = [VALDI_TOOLCHAIN_TYPE],
+        toolchains = [],
     )

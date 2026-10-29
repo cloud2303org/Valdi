@@ -772,13 +772,9 @@ http_archive(
     url = "https://github.com/erikdoe/ocmock/archive/refs/tags/v3.9.4.tar.gz",
 )
 
-# Expose prebuilt compiler/jscore repos to the main workspace.
-# The bin/ sub-module also uses this extension, but targets in the main workspace
-# reference these repos via prebuilt_tools.bzl (e.g. @jscore_libs).
-valdi_compiler_repos = use_extension("//bzl:valdi_compiler_repos_extension.bzl", "valdi_compiler_repos")
-use_repo(valdi_compiler_repos, "jscore_libs", "valdi_compiler_linux", "valdi_compiler_macos")
-
-register_toolchains("@valdi//bzl/valdi:valdi_toolchain")
+# Preserve optional native JavaScriptCore libraries, without compiler downloads.
+jscore_repos = use_extension("//bzl:jscore_repos_extension.bzl", "jscore_repos")
+use_repo(jscore_repos, "jscore_libs")
 
 # C++ toolchains via unified Valdi extension — consumers inherit these
 # register_toolchains() without calling any extensions themselves.
@@ -789,23 +785,3 @@ use_repo(valdi_toolchains, "llvm_toolchain", "llvm_toolchain_llvm", "local_confi
 register_toolchains("@local_config_apple_cc_toolchains//:all")
 
 register_toolchains("@llvm_toolchain//:all")
-
-# Swift Package Manager deps for //compiler/compiler:local_valdi_compiler.
-# Consumers loading @valdi via bzlmod should also use this extension; see
-# bzl/valdi_compiler_swift_deps.bzl.
-valdi_compiler_swift_deps = use_extension("//bzl:valdi_compiler_swift_deps.bzl", "valdi_compiler_swift_deps")
-use_repo(
-    valdi_compiler_swift_deps,
-    "chalk",
-    "legible_error",
-    "libxml2",
-    "swift_argument_parser",
-    "swift_backtrace",
-    "swift_collections",
-    "swift_crypto",
-    "swift_protobuf",
-    "swiftsoup",
-    "swxmlhash",
-    "yams",
-    "zip_lib",
-)

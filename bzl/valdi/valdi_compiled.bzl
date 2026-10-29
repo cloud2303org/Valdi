@@ -23,9 +23,8 @@ load(
 )
 load(":localizable_strings.bzl", "supported_langs_mapping")
 load(":valdi_paths.bzl", "get_ids_yaml_dts_path", "get_legacy_vue_srcs_dts_paths", "get_resources_dts_paths", "get_sql_dts_paths", "get_sql_js_paths", "get_strings_dts_path", "infer_base_output_dir", "output_declaration_compiled_file_path_for_source_file", "output_declaration_file_path_for_source_file", "replace_prefix", "resolve_module_dir_and_name", "resolve_relative_project_path")
-load(":valdi_run_compiler.bzl", "generate_config", "resolve_compiler_executable", "run_valdi_compiler")
-load(":valdi_toolchain_type.bzl", "VALDI_TOOLCHAIN_TYPE")
 load(":valdi_web_workers.bzl", "validate_web_workers")
+load("@@//bzl/node_compiler:adapter.bzl", "NODE_COMPILER_ATTRS", "invoke_node_compiler")
 
 # These paths let us find/declare the expected output locations
 
@@ -185,9 +184,9 @@ def _valdi_compiled_impl(ctx):
 # - compiled TypeScript declaration (.d.ts) files that can be used to compile other Valdi modules
 valdi_compiled = rule(
     implementation = _valdi_compiled_impl,
-    toolchains = [VALDI_TOOLCHAIN_TYPE],
+    toolchains = [],
     fragments = ["coverage"],
-    attrs = {
+    attrs = dict({
         "module": attr.string(
             doc = "The module name",
             mandatory = True,
@@ -390,138 +389,20 @@ valdi_compiled = rule(
         "_native_api_min_version": attr.label(
             default = "@valdi//bzl/valdi:native_api_min_version",
         ),
-    },
+    }, **NODE_COMPILER_ATTRS),
 )
 
 def _invoke_valdi_compiler(ctx, module_name, module_yaml, enable_android = True, enable_ios = True, emit_debug = True, emit_release = True):
-    """ Invoke valdi Compiler for the requested module.
+    """Compile native runtime modules with the project's Node toolchain."""
+    if ctx.configuration.coverage_enabled or ctx.attr.code_coverage[BuildSettingInfo].value:
+        fail("Node runtime backend does not yet support code coverage")
+    module_directory, _ = resolve_module_dir_and_name(ctx.label)
+    base, outputs = _declare_compiler_outputs(ctx, module_name, module_directory,
+        ctx.attr.localization_mode[BuildSettingInfo].value, ctx.var.get("enable_web"), False,
+        enable_android, enable_ios, emit_debug, emit_release)
+    dependencies = depset(direct = ctx.attr.deps, transitive = [dep[ValdiModuleInfo].deps for dep in ctx.attr.deps]).to_list()
+    return invoke_node_compiler(ctx, module_name, base, outputs, module_directory, build_dependency_entries(dependencies), _get_transitive_intermediates(dependencies))
 
-        This function takes care of reproducing the required directory structure which Valdi expects
-        (source files should live in subdirectories relative to where the config.yaml files lives, for example).
-
-    Args:
-        ctx: The context of the current rule invocation
-        module_name: The name of the module to compile
-        module_yaml: The module.yaml file for this module
-        enable_android: Whether to generate Android outputs
-        enable_ios: Whether to generate iOS outputs
-        emit_debug: Whether the current build flavor wants debug artifacts
-        emit_release: Whether the current build flavor wants release artifacts
-
-    Returns:
-        A list of files that are produced by the Valdi compiler
-    """
-
-    # Get command line flags
-    # Set on command line as:
-    # --define flag_name="flag_value"
-    # Set in .bazelrc as:
-    # common --define flag_name=flag_value
-    module_upload_base_url = ctx.var.get("module_upload_base_url")
-    enable_web = ctx.var.get("enable_web")
-    disable_minify_web = ctx.var.get("disable_minify_web", False)
-    worker_protocol = ctx.var.get("valdi_worker_protocol", "json")
-
-    #############
-    # 1. Generate the project config file that is currently required by the Valdi compiler.
-    #    The Valdi compiler uses the project config file location as the initial base directory
-    #    (the base_dir read from the config is then resolved relative to the project config file's location)
-    config_yaml_file = generate_config(ctx)
-
-    #############
-    # 2. Prepare the explicit input list file for the compiler.
-    (explicit_input_list_file, all_inputs, module_directory) = _prepare_explicit_input_list_file(ctx, module_yaml)
-    explicit_image_asset_manifest_file = None
-    declared_processed_image_files = []
-    use_external_image_processing = ctx.attr.use_external_image_processing[BuildSettingInfo].value
-    if ctx.attr.use_explicit_image_manifest[BuildSettingInfo].value:
-        if use_external_image_processing:
-            (explicit_image_asset_manifest_file, declared_processed_image_files) = _prepare_explicit_image_asset_manifest_file(ctx, module_name, module_directory, enable_android, enable_ios, bool(enable_web), ctx.attr.inline_assets, external_image_processing = True)
-        else:
-            (explicit_image_asset_manifest_file, _) = _prepare_explicit_image_asset_manifest_file(ctx, module_name, module_directory, enable_android, enable_ios, bool(enable_web), ctx.attr.inline_assets, external_image_processing = False)
-    elif use_external_image_processing:
-        fail("use_external_image_processing requires use_explicit_image_manifest")
-
-    localization_mode = ctx.attr.localization_mode[BuildSettingInfo].value
-    js_bytecode_format = ctx.attr.js_bytecode_format[BuildSettingInfo].value
-
-    # Check if code coverage is enabled via `bazel coverage` command or explicit flag
-    code_coverage = ctx.configuration.coverage_enabled or ctx.attr.code_coverage[BuildSettingInfo].value
-
-    #############
-    # 3. Gather all outputs produced by the Valdi compiler
-    (base_output_dir, outputs) = _declare_compiler_outputs(ctx, module_name, module_directory, localization_mode, enable_web, code_coverage, enable_android, enable_ios, emit_debug, emit_release)
-
-    prepared_upload_artifact_file = None
-    if ctx.attr.prepared_upload_artifact_name:
-        prepared_upload_artifact_file = ctx.actions.declare_file(ctx.attr.prepared_upload_artifact_name)
-        outputs.append(prepared_upload_artifact_file)
-
-    #############
-    # 4. Prepare the Valdi compiler arguments
-    disable_downloadable_assets = not ctx.attr.downloadable_assets
-
-    valdi_copts = ctx.attr.valdi_copts
-
-    if module_upload_base_url:
-        # Make a mutable copy
-        valdi_copts = valdi_copts[:]
-        valdi_copts.append("--config-value")
-        valdi_copts.append("module_upload_base_url={}".format(module_upload_base_url))
-
-    # Compute the --output-target to pass to the compiler. This only restricts compiler
-    # output when the flavor flag explicitly asks for it; "all" (the default) preserves
-    # existing behaviour and still produces C++ (always release-path) for every module.
-    #
-    # Under flavor=release we degrade to "all" if any enabled platform on this module is
-    # debug-only — otherwise the compiler would emit nothing for that platform (see
-    # CompilationItem.getOutputDirectories), but _append_debug_and_maybe_release still
-    # declared debug for it as a module-level floor.
-    output_flavor_val = ctx.attr.output_flavor[BuildSettingInfo].value
-    if code_coverage or output_flavor_val == "debug":
-        compiler_output_target = "debug"
-    elif output_flavor_val == "release":
-        android_ready = not enable_android or ctx.attr.android_output_target == "release"
-        ios_ready = not enable_ios or ctx.attr.ios_output_target == "release"
-        compiler_output_target = "release" if (android_ready and ios_ready) else "all"
-    else:
-        compiler_output_target = "all"
-
-    #############
-    # 5a. Optionally split image generation into a separate ValdiProcessImages action.
-    #     Registered before arg preparation so the manifest with embedded image sizes
-    #     can be passed to the compile action instead of the original manifest.
-    if declared_processed_image_files:
-        manifest_with_sizes_file = _register_image_processing_action(
-            ctx = ctx,
-            config_yaml_file = config_yaml_file,
-            explicit_image_asset_manifest_file = explicit_image_asset_manifest_file,
-            declared_output_files = declared_processed_image_files,
-        )
-        explicit_image_asset_manifest_file = manifest_with_sizes_file
-
-    args = _prepare_arguments(ctx.actions.args(), ctx.attr.log_level[BuildSettingInfo].value, localization_mode, js_bytecode_format, config_yaml_file, explicit_input_list_file, explicit_image_asset_manifest_file, module_name, base_output_dir, disable_downloadable_assets, ctx.configuration.default_shell_env, prepared_upload_artifact_file, ctx.attr.inline_assets, valdi_copts, enable_web, ctx.attr.web_register_native_module_id_overrides, disable_minify_web, code_coverage, enable_android, enable_ios, emit_debug, emit_release, compiler_output_target)
-
-    compile_inputs = all_inputs + [config_yaml_file, explicit_input_list_file] + ([explicit_image_asset_manifest_file] if explicit_image_asset_manifest_file else [])
-    if declared_processed_image_files:
-        compile_inputs = compile_inputs + declared_processed_image_files
-
-    #############
-    # 5b. Set up the action that executes the Valdi compiler
-
-    run_valdi_compiler(
-        ctx = ctx,
-        args = args,
-        outputs = outputs,
-        inputs = compile_inputs,
-        mnemonic = "ValdiCompile",
-        progress_message = "Compiling Valdi module: " + str(ctx.label),
-        use_worker = True,
-        include_client_sql_tools = False,
-        worker_protocol = worker_protocol,
-    )
-
-    return outputs
 
 def _get_direct_dependencies(file, files, module_yaml):
     """ Return a list of files that are direct dependencies of the current module.
@@ -831,52 +712,8 @@ def _prepare_explicit_image_asset_manifest_file(ctx, module_name, module_directo
     return (explicit_image_asset_manifest_file, declared_output_files)
 
 def _register_image_processing_action(ctx, config_yaml_file, explicit_image_asset_manifest_file, declared_output_files):
-    """Register a ValdiProcessImages action that runs the compiler in
-    `--image-processing-only` mode to generate the per-variant image files
-    declared in the manifest.
+    fail("Runtime image processing through the removed compiler is unavailable; use the Node resource pipeline")
 
-    The action's inputs are intentionally restricted to the project config,
-    the manifest and the image source files (`ctx.files.res`). It does NOT
-    receive the explicit input list, dependency intermediates, or any TS/Vue
-    sources — those would needlessly invalidate this action's cache when
-    non-image files change. The `--image-processing-only` mode in the
-    compiler iterates the manifest directly without going through the
-    pipeline, so it doesn't need them.
-
-    Returns the manifest-with-sizes file (a JSON copy of the manifest with pixel
-    dimensions embedded per input) so that ValdiCompile can skip the toolbox
-    subprocess during image identification.
-    """
-    args = ctx.actions.args()
-    args.use_param_file("@%s", use_always = True)
-    args.set_param_file_format("multiline")
-
-    manifest_with_sizes_file = ctx.actions.declare_file("{}_explicit_image_asset_manifest_with_sizes.json".format(ctx.label.name))
-
-    args.add("--image-processing-only")
-    args.add("--config", config_yaml_file)
-    args.add("--explicit-image-asset-manifest", explicit_image_asset_manifest_file)
-    args.add("--image-asset-manifest-output", manifest_with_sizes_file)
-    args.add("--log-level", ctx.attr.log_level[BuildSettingInfo].value)
-
-    inputs = ctx.files.res + [config_yaml_file, explicit_image_asset_manifest_file]
-
-    run_valdi_compiler(
-        ctx = ctx,
-        args = args,
-        outputs = declared_output_files + [manifest_with_sizes_file],
-        inputs = inputs,
-        mnemonic = "ValdiProcessImages",
-        progress_message = "Processing image assets for: " + str(ctx.label),
-        # Image processing currently uses the same compiler binary; running with a
-        # worker would be possible but the protocol assumes a worker that loops on
-        # full compilations. Keep it as a one-shot action for now; revisit if action
-        # startup becomes a bottleneck.
-        use_worker = False,
-        include_client_sql_tools = False,
-    )
-
-    return manifest_with_sizes_file
 
 def _declare_compiler_outputs(ctx, module_name, module_directory, localization_mode, enable_web, code_coverage, enable_android = True, enable_ios = True, emit_debug = True, emit_release = True):
     files_output_paths = _get_files_output_paths(ctx, module_name, module_directory, localization_mode, enable_web, code_coverage, enable_android, enable_ios, emit_debug, emit_release)
@@ -2440,47 +2277,8 @@ def __infer_base_project_path(targets):
     return common_path
 
 def _invoke_valdi_hotreloader(ctx):
-    toolchain = ctx.toolchains[VALDI_TOOLCHAIN_TYPE].info
+    fail("The legacy Valdi hotreloader has been removed; use scripts/hotreload.sh")
 
-    config_yaml_file = generate_config(ctx)
-    (executable, tool_inputs, tools) = resolve_compiler_executable(
-        ctx,
-        toolchain,
-        include_tools = True,
-        include_client_sql_tools = False,
-    )
-
-    all_targets = depset(direct = ctx.attr.targets, transitive = [target[ValdiModuleInfo].deps for target in ctx.attr.targets]).to_list()
-
-    base_project_path = __infer_base_project_path(all_targets)
-    explicit_input_list_file = _prepare_hotreload_explicit_input_list_file(ctx, all_targets)
-
-    run_hotreloader = ctx.actions.declare_file("run_hotreloader.sh")
-
-    args = _prepare_hotreload_arguments([target[ValdiModuleInfo].name for target in ctx.attr.targets], config_yaml_file, explicit_input_list_file, toolchain, base_project_path)
-
-    # Here we run a command that outputs commands into run_hotreloader.sh.
-    # We do this so that Bazel can resolve the tools and input_manifests of the
-    # compiler and its dependencies.
-    cmd = """
-echo 'export BAZEL_BINDIR={bin_dir}' > {script_path}
-echo "export BAZEL_EXECROOT=$PWD" >> {script_path}
-echo '{executable} {args} "$@"' >> {script_path}
-    """.format(bin_dir = ctx.bin_dir.path, executable = executable.path, args = args, script_path = run_hotreloader.path)
-
-    ctx.actions.run_shell(
-        outputs = [run_hotreloader],
-        inputs = depset(direct = [executable, config_yaml_file, explicit_input_list_file], transitive = [tool_inputs]),
-        tools = tools,
-        command = cmd,
-        arguments = [],
-        env = {},
-        toolchain = VALDI_TOOLCHAIN_TYPE,
-        mnemonic = "ValdiHotreload",
-        progress_message = "Generating hotreloader.sh",
-    )
-
-    return (run_hotreloader, [])
 
 def _valdi_hotreload_impl(ctx):
     """Generates a shell script that can start the Compiler in hotreload mode
@@ -2493,7 +2291,7 @@ def _valdi_hotreload_impl(ctx):
 
 valdi_hotreload = rule(
     implementation = _valdi_hotreload_impl,
-    toolchains = [VALDI_TOOLCHAIN_TYPE],
+    toolchains = [],
     executable = True,
     attrs = {
         "targets": attr.label_list(

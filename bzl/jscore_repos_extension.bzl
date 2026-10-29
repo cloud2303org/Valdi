@@ -1,9 +1,4 @@
-# Module extension to expose compiler tool repos to the valdi_toolchain sub-module.
-#
-# For each repo (compiler, jscore), first checks if the binary exists
-# locally (e.g. from repo-archiver or a local build). If not, downloads from GCS
-# using the URLs in open_source_archives.bzl — matching the old WORKSPACE-era
-# setup_additional_dependencies() behavior.
+# Optional JavaScriptCore runtime libraries; no Valdi compiler repositories.
 
 load(":open_source_archives.bzl", "ARCHIVES")
 
@@ -16,7 +11,7 @@ filegroup(
 )
 """
 
-def _compiler_local_or_remote_impl(ctx):
+def _runtime_local_or_remote_impl(ctx):
     # Resolve the valdi workspace root via a known label.
     # Works whether @valdi is the main workspace or an external dep.
     valdi_root = ctx.path(Label("@valdi//:MODULE.bazel")).dirname
@@ -58,8 +53,8 @@ def _compiler_local_or_remote_impl(ctx):
         # No URL configured — create empty repo (analysis succeeds, execution fails)
         ctx.file("BUILD.bazel", SOURCES_FILEGROUP_BUILD_FILE_CONTENT)
 
-_compiler_local_or_remote = repository_rule(
-    implementation = _compiler_local_or_remote_impl,
+_runtime_local_or_remote = repository_rule(
+    implementation = _runtime_local_or_remote_impl,
     attrs = {
         "target_dir": attr.string(mandatory = True),
         "archive_url": attr.string(default = ""),
@@ -75,21 +70,19 @@ def _get_archive(name):
             return info
     return None
 
-def _valdi_compiler_repos_impl(module_ctx):
+def _jscore_repos_impl(module_ctx):
     repos = {
-        "valdi_compiler_macos": "bin/compiler/macos",
-        "valdi_compiler_linux": "bin/compiler/linux",
         "jscore_libs": "third-party/jscore/libs",
     }
     for name, target_dir in repos.items():
         archive = _get_archive(name)
-        _compiler_local_or_remote(
+        _runtime_local_or_remote(
             name = name,
             target_dir = target_dir,
             archive_url = archive["url"] if archive else "",
             archive_hash = archive["hash"] if archive else "",
         )
 
-valdi_compiler_repos = module_extension(
-    implementation = _valdi_compiler_repos_impl,
+jscore_repos = module_extension(
+    implementation = _jscore_repos_impl,
 )

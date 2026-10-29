@@ -170,14 +170,13 @@ def valdi_module(
         android_output_target = android_output_target,
         android_export_strings = android_export_strings,
         module = name,
-        # Keep test dependencies in the compiled module graph so valdi_test can
-        # collect their .valdimodule outputs.
-        deps = [_valdi_compiled_target_for_target(dep) for dep in deps + test_deps],
+        # Native exports use production sources; upstream test tooling is removed.
+        deps = [_valdi_compiled_target_for_target(dep) for dep in deps],
         web_deps = web_deps,
         web_register_native_module_id_overrides = web_register_native_module_id_overrides or {},
         web_workers = web_workers,
         web_no_inline_images = web_no_inline_images,
-        srcs = srcs,
+        srcs = [src for src in srcs if not src.startswith("test/") and ".spec." not in src],
         res = res,
         protodecl_srcs = protodecl_srcs,
         ids_yaml = ids_yaml,

@@ -1,10 +1,7 @@
 load("@bazel_skylib//rules:common_settings.bzl", "bool_flag", "int_flag", "string_flag")
 load("@valdi//bzl/conditions:selects.bzl", "selects")
-load("@valdi//bzl/valdi:valdi_toolchain.bzl", "valdi_toolchain")
-load("@valdi//bzl/valdi:valdi_toolchain_binary.bzl", "valdi_toolchain_binary")
 load("//bzl/valdi:common_test.bzl", "common_test_suite")
 load("//bzl/valdi:valdi_android_library_test.bzl", "valdi_android_library_test_suite")
-load(":config.bzl", "use_local_compiler_default")
 
 common_test_suite(name = "common_test")
 
@@ -406,143 +403,13 @@ selects.config_setting_combinations(
     ],
 )
 
-# Toolchain for compiling Bazel modules.
+# Kept only as an identifier for unsupported upstream tools; no compiler is registered.
 toolchain_type(name = "toolchain_type")
-
-# Flag to control whether to use prebuilt companion binary or build from source
-bool_flag(
-    name = "use_prebuilt_companion",
-    build_setting_default = False,
-)
-
-config_setting(
-    name = "use_prebuilt_companion_enabled",
-    flag_values = {
-        ":use_prebuilt_companion": "true",
-    },
-)
-
-# Flag to build the compiler from source instead of using the prebuilt from the toolchain.
-# When enabled, the valdi toolchain routes through @valdi//compiler/compiler
-# targets instead of the prebuilt @valdi_toolchain//:valdi_compiler artifact.
-# Enable with: --//bzl/valdi:use_local_compiler=true
-#
-# Both OSes route through :local_valdi_compiler (rules_swift swift_binary,
-# built by Bazel; see :compiler_source below). On Linux it links the Swift
-# runtime statically so the binary runs on hosts without a Swift install.
-# :local_valdi_compiler_native (script-built, out/linux/valdi_compiler) is
-# still available as an out-of-band escape hatch.
-bool_flag(
-    name = "use_local_compiler",
-    build_setting_default = use_local_compiler_default,
-    visibility = ["//visibility:public"],
-)
-
-config_setting(
-    name = "use_local_compiler_enabled",
-    flag_values = {
-        ":use_local_compiler": "true",
-    },
-)
-
-# The two OS-specific groups are mutually exclusive by construction
-# (linux vs macos constraints), so the select() below stays unambiguous.
-selects.config_setting_group(
-    name = "use_local_compiler_on_macos",
-    match_all = [
-        ":use_local_compiler_enabled",
-        "@snap_platforms//conditions:macos",
-    ],
-)
-
-selects.config_setting_group(
-    name = "use_local_compiler_on_linux",
-    match_all = [
-        ":use_local_compiler_enabled",
-        "@snap_platforms//conditions:linux",
-    ],
-)
-
-# Alias to choose between prebuilt binary and source-built companion
-alias(
-    name = "compiler_companion_source",
-    actual = select({
-        ":use_prebuilt_companion_enabled": "@valdi_toolchain//:valdi_compiler_companion",
-        "//conditions:default": "//compiler/companion:ts_bin_wrapper",
-    }),
-    visibility = ["//visibility:public"],
-)
-
-# Force the compiler binary to build under -c opt
-valdi_toolchain_binary(
-    name = "local_valdi_compiler_opt",
-    bin = "//compiler/compiler:local_valdi_compiler",
-)
-
-# Compiler: prebuilt from toolchain, or one of the local variants when
-# use_local_compiler=true is set. See the flag docstring above for the
-# per-OS routing rationale.
-alias(
-    name = "compiler_source",
-    actual = select({
-        ":use_local_compiler_on_macos": ":local_valdi_compiler_opt",
-        ":use_local_compiler_on_linux": ":local_valdi_compiler_opt",
-        "//conditions:default": "@valdi_toolchain//:valdi_compiler",
-    }),
-    visibility = ["//visibility:private"],
-)
-
-# Platform-specific rule definition, for macos
-valdi_toolchain(
-    name = "valdi",
-    compiler = ":compiler_source",
-    compiler_companion = ":compiler_companion_source",
-    compiler_toolbox = "@valdi_toolchain//:valdi_compiler_toolbox",
-    # Keep the established toolchain seam so internal builds can supply their
-    # existing compiler. The public toolchain target wraps the reviewed source
-    # generator with its hermetic SQLite validator without changing this CLI.
-    sqldelight_compiler = "@valdi_toolchain//:sqldelight_compiler",
-)
-
-# Cross-compilation setups whose first execution platform is a remote linux worker set this
-# flag toswap in the macOS-constrained toolchain below, keeping every Valdi action the local mac.
-bool_flag(
-    name = "mac_only_execution",
-    build_setting_default = False,
-    visibility = ["//visibility:public"],
-)
-
-config_setting(
-    name = "mac_only_execution_enabled",
-    flag_values = {":mac_only_execution": "true"},
-)
-
-config_setting(
-    name = "mac_only_execution_disabled",
-    flag_values = {":mac_only_execution": "false"},
-)
-
-toolchain(
-    name = "valdi_toolchain",
-    target_settings = [":mac_only_execution_disabled"],
-    toolchain = ":valdi",
-    toolchain_type = ":toolchain_type",
-)
-
-toolchain(
-    name = "valdi_toolchain_mac_exec",
-    exec_compatible_with = ["@platforms//os:macos"],
-    target_settings = [":mac_only_execution_enabled"],
-    toolchain = ":valdi",
-    toolchain_type = ":toolchain_type",
-)
 
 filegroup(
     name = "clientsql_generator_test_data",
     srcs = [
         "BUILD.bazel",
-        "valdi_run_compiler.bzl",
-        "valdi_toolchain.bzl",
     ],
     testonly = True,
     visibility = ["//compiler/clientsql:__pkg__"],

@@ -38,3 +38,25 @@ git merge --no-ff TAG
 Resolve conflicts in source, retaining only customizations still needed. Update the upstream base recorded above. Do not force-sync the maintained branch over its custom commits. Push the upgrade branch, then pin that exact commit in ValdiNativeRoutes with `node scripts/upstream.mjs pin COMMIT` and run its application CI (npm, Android and iOS). Validate Release bytecode and native behavior before promoting the upgrade to `valdiroutes`.
 
 The application owns its pages, host code and Node compiler port. Its companion diff report and binding goldens still need review when upstream code generation changes. Framework Actions are disabled in this fork; application CI is the validation entry point.
+
+## Node-only module compiler (2026-10-29)
+
+The maintained branch removes the old Swift Valdi compiler implementation,
+its private vendors/tests, standalone compiler targets and launch helper.
+`compiler/compiler` retains only `valdi.proto` and its C++ protocol targets,
+which are runtime inputs. Native iOS Swift code and the platform Swift
+compiler/toolchains remain intact.
+
+`valdi_compiled` now always delegates its established output/provider contract
+to the consuming application's `//bzl/node_compiler:adapter.bzl` (loaded from
+the main workspace). ValdiNativeRoutes owns that Node frontend, generated
+bindings and package dependencies. There is no compiler-backend selector or
+Swift fallback. The native export/library rules are retained. Upstream legacy
+hotreload, projectsync and desktop static-resource compiler entry points fail
+explicitly; the application uses its Node equivalents where supported.
+
+Production built-in module sources exclude upstream test sources and test-only
+dependencies. On future upstream merges, retain these compiler deletions and
+review new runtime protocol/codegen contracts against the application's real
+module tests and historical native ABI goldens. Do not restore the compiler
+source or its old toolchain dependencies as an automatic fallback.

@@ -1,6 +1,5 @@
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 load("//bzl:nested_repository.bzl", "nested_repository")
-load("//bzl:valdi_compiler_swift_deps.bzl", "setup_valdi_compiler_swift_deps")
 
 def local_or_nested_repository(workspace_root, name, path):
     if workspace_root:
@@ -563,7 +562,3 @@ def setup_dependencies(workspace_root = None):
         strip_prefix = "ocmock-3.9.4",
         url = "https://github.com/erikdoe/ocmock/archive/refs/tags/v3.9.4.tar.gz",
     )
-
-    # Swift Package Manager deps for //compiler/compiler:local_valdi_compiler.
-    # See bzl/valdi_compiler_swift_deps.bzl.
-    setup_valdi_compiler_swift_deps()
