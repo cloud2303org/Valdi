@@ -60,6 +60,8 @@ def valdi_android_aar(
             "-lm",
             "-lz",
             "-Wl,--version-script=$(location @valdi//src:android_exports.lst) $(location @valdi//src:build_id_note_symbols.ld)",
+            # Align LOAD segments to 16 KB so the library loads on devices with 16 KB pages (Android 15+).
+            "-Wl,-z,max-page-size=16384",
         ],
         linkshared = True,
         target_compatible_with = [
