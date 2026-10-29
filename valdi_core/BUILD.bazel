@@ -393,7 +393,7 @@ objc_library(
             "CoreVideo",
             "AVFoundation",
             "UIKit",
-            "JavaScriptCore",
+            # JavaScriptCore is linked by valdi_jscore only, when that engine is built in.
             "QuartzCore",
             "CoreGraphics",
             "Security",

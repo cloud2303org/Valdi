@@ -69,6 +69,8 @@ selects.config_setting_group(
     match_any = [
         ":is_debug_flavor",
         ":desktop",
+        # Modules precompiled to Hermes bytecode need Hermes at runtime in every flavor (lean outside debug).
+        "//bzl/valdi:js_bytecode_format_hermes",
     ],
 )
 
@@ -105,6 +107,34 @@ selects.config_setting_group(
         "//bzl/conditions:android",
     ],
 )
+
+custom_selects.config_setting_inverse(
+    "not_js_bytecode_format_hermes",
+    inverse_of = "//bzl/valdi:js_bytecode_format_hermes",
+)
+
+# Modules precompiled to Hermes bytecode only ever run on Hermes, so QuickJS and JavaScriptCore would be dead weight.
+selects.config_setting_group(
+    name = "quickjs_runtime_enabled",
+    match_all = [
+        ":quickjs_enabled",
+        ":not_js_bytecode_format_hermes",
+    ],
+)
+
+selects.config_setting_group(
+    name = "jscore_runtime_enabled",
+    match_all = [
+        ":jscore_enabled",
+        ":not_js_bytecode_format_hermes",
+    ],
+)
+
+# Only the JavaScriptCore engine (valdi_jscore) uses the framework.
+JSCORE_FRAMEWORKS = select({
+    ":jscore_runtime_enabled": ["JavaScriptCore"],
+    "//conditions:default": [],
+})
 
 custom_selects.config_setting_inverse(
     "libcxx_rtti_enabled",
@@ -385,10 +415,10 @@ cc_library(
         ":hermes_enabled": [":valdi_hermes"],
         "//conditions:default": [],
     }) + select({
-        ":jscore_enabled": [":valdi_jscore"],
+        ":jscore_runtime_enabled": [":valdi_jscore"],
         "//conditions:default": [],
     }) + select({
-        ":quickjs_enabled": [":valdi_quickjs"],
+        ":quickjs_runtime_enabled": [":valdi_quickjs"],
         "//conditions:default": [],
     }),
 )
@@ -746,12 +776,11 @@ objc_library(
     ],
     sdk_frameworks = [
         "UIKit",
-        "JavaScriptCore",
         "QuartzCore",
         "CoreGraphics",
         "CoreImage",
         "Security",
-    ],
+    ] + JSCORE_FRAMEWORKS,
     target_compatible_with = ["@platforms//os:ios"],
     visibility = ["//visibility:public"],
     deps = [

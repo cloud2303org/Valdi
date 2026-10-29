@@ -1008,7 +1008,7 @@ def _exported_objc_lib(name, ios_module_name, objc_hdrs, objc_srcs, single_file_
             "@snap_platforms//conditions:macos": ["AppKit"],
             "//conditions:default": ["UIKit"],
         }) + [
-            "JavaScriptCore",
+            # No JavaScriptCore: modules don't use it, and with Hermes bytecode the runtime doesn't either.
             "QuartzCore",
             "CoreGraphics",
             "Security",
