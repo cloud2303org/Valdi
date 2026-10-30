@@ -8,13 +8,13 @@ ts_project(
         "web/**/*.ts",
         "src/**/*.d.ts",
     ]),
-    allow_js = True,
-    composite = True,
-    declaration = True,
+    allow_js = true,
+    composite = true,
+    declaration = true,
     transpiler = "tsc",
     validate = select({
-        "@platforms//os:windows": False,
-        "//conditions:default": True,
+        "@platforms//os:windows": false,
+        "//conditions:default": true,
     }),
     tsconfig = "web/tsconfig.json",
 )
@@ -43,7 +43,7 @@ valdi_module(
     android_output_target = "release",
     ios_module_name = "SCCValdiCore",
     ios_output_target = "release",
-    single_file_codegen = True,
+    single_file_codegen = true,
     visibility = ["//visibility:public"],
     web_deps = [":valdi_core_web"],
     web_register_native_module_id_overrides = {
