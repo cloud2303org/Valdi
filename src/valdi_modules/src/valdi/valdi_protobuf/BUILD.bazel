@@ -40,6 +40,10 @@ ts_project(
     resolve_json_module = True,
     root_dir = "web",
     supports_workers = -1,
+    validate = select({
+        "@platforms//os:windows": False,
+        "//conditions:default": True,
+    }),
     transpiler = "tsc",
     tsconfig = "web/tsconfig.json",
     deps = [
