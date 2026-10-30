@@ -167,6 +167,10 @@ case "$(uname -s)" in
         # the resulting warning as a failed action and leaves stray files;
         # the JDK normalizes those entries while extracting.
         jar_command="{java_home}/bin/jar"
+        case "$jar_command" in
+            /*|[A-Za-z]:/*) ;;
+            *) jar_command="$root/$jar_command" ;;
+        esac
         if [[ ! -x "$jar_command" ]]; then
             jar_command="$jar_command.exe"
         fi
