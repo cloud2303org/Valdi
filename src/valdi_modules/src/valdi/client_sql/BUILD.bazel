@@ -42,13 +42,13 @@ ts_project(
         "web/**/*.ts",
         "src/**/*.d.ts",
     ]),
-    allow_js = true,
-    composite = true,
-    declaration = true,
+    allow_js = True,
+    composite = True,
+    declaration = True,
     transpiler = "tsc",
     validate = select({
-        "@platforms//os:windows": false,
-        "//conditions:default": true,
+        "@platforms//os:windows": False,
+        "//conditions:default": True,
     }),
     tsconfig = "web/tsconfig.json",
 )
@@ -83,6 +83,6 @@ filegroup(
         "BUILD.bazel",
         "src/ClientSQLNative.d.ts",
     ],
-    testonly = true,
+    testonly = True,
     visibility = ["//compiler/clientsql:__pkg__"],
 )

@@ -11,12 +11,12 @@ ts_project(
     srcs = glob([
         "web/**/*.ts",
     ]),
-    allow_js = true,
-    composite = true,
+    allow_js = True,
+    composite = True,
     transpiler = "tsc",
     validate = select({
-        "@platforms//os:windows": false,
-        "//conditions:default": true,
+        "@platforms//os:windows": False,
+        "//conditions:default": True,
     }),
     tsconfig = "web/tsconfig.json",
 )
@@ -47,8 +47,8 @@ valdi_module(
     android_output_target = "release",
     ios_module_name = "SCCValdiTsx",
     ios_output_target = "release",
-    no_compiled_valdimodule_output = true,
-    single_file_codegen = true,
+    no_compiled_valdimodule_output = True,
+    single_file_codegen = True,
     visibility = ["//visibility:public"],
     web_deps = [":valdi_tsx_web"],
 )
