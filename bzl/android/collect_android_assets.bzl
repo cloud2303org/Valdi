@@ -81,28 +81,32 @@ for src in "${{ITEMS[@]}}"; do
     chmod -R u+w "$DEST"
 done
 
-# Create zip from staging directory using Bazel's portable zipper.
-ABS_DEST="$PWD/{zip}"
-ZIPPER='$PWD/{zipper}'
-ZIP_RELATIVE='$PWD/{zip_relative}'
-cd "$DEST"
-mapfile -t ASSETS < <(find . -type f -print | sed 's|^\\./||' | sort)
-"$ZIP_RELATIVE" "$ZIPPER" . "$ABS_DEST" "${{ASSETS[@]}}"
 """.format(
             items = " ".join(['"{}"'.format(f.path) for f in all_assets]),
             dst = scratch.path,
-            zip = out_zip.path,
-            zipper = ctx.executable._zipper.path,
-            zip_relative = ctx.executable._zip_relative.path,
         ),
     )
 
     ctx.actions.run_shell(
         inputs = depset(all_assets),
-        tools = [script, ctx.executable._zipper, ctx.executable._zip_relative],
-        outputs = [out_zip, scratch],
+        tools = [script],
+        outputs = [scratch],
         command = script.path,
         progress_message = "Packaging Android assets for %{label}",
+    )
+
+    args = ctx.actions.args()
+    args.add(ctx.executable._zipper.path)
+    args.add(scratch.path)
+    args.add(out_zip.path)
+    args.add(scratch.path)
+    ctx.actions.run(
+        inputs = [scratch],
+        outputs = [out_zip],
+        executable = ctx.executable._zip_relative,
+        tools = [ctx.executable._zipper],
+        arguments = [args],
+        progress_message = "Zipping Android assets for %{label}",
     )
 
     return [DefaultInfo(files = depset([out_zip]))]

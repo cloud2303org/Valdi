@@ -19,12 +19,11 @@ def _filter_jar_impl(ctx):
     #       (zip -q ensures deterministic order)
     ctx.actions.run_shell(
         inputs = [in_jar, pattern_f],
-        outputs = [out_jar, scratch],
+        outputs = [scratch],
         command = """
 set -euo pipefail
 tmp="$4"
 ZIPPER="$5"
-ZIP_RELATIVE="$6"
 
 # Expand the input jar
 "$ZIPPER" x "$1" -d "$tmp"
@@ -39,14 +38,6 @@ pat=$(paste -sd'|' "$2")
 find "$tmp" -type f | grep -E "$pat" | xargs -r rm -f
 find "$tmp" -depth -type d -empty -exec rmdir -- "{}" +
 
-# Re-create the jar
-abs_dest="$PWD/$3"
-echo $abs_dest
-(
-  cd "$tmp"
-  mapfile -t FILES < <(find . -type f -print | sed 's|^\\./||' | sort)
-  "$ZIP_RELATIVE" "$ZIPPER" . "$abs_dest" "${FILES[@]}"
-)
 """,
         arguments = [
             in_jar.path,  # $1
@@ -54,11 +45,24 @@ echo $abs_dest
             out_jar.path,  # $3
             scratch.path,  # $4
             ctx.executable._zipper.path,  # $5
-            ctx.executable._zip_relative.path,  # $6
         ],
-        tools = [ctx.executable._zipper, ctx.executable._zip_relative],
+        tools = [ctx.executable._zipper],
         mnemonic = "FilterJar",
         progress_message = "Filtering JAR %s" % (in_jar.basename),
+    )
+
+    args = ctx.actions.args()
+    args.add(ctx.executable._zipper.path)
+    args.add(scratch.path)
+    args.add(out_jar.path)
+    args.add(scratch.path)
+    ctx.actions.run(
+        inputs = [scratch],
+        outputs = [out_jar],
+        executable = ctx.executable._zip_relative,
+        tools = [ctx.executable._zipper],
+        arguments = [args],
+        progress_message = "Zipping filtered JAR %s" % (in_jar.basename),
     )
 
     return [DefaultInfo(files = depset([out_jar]))]
