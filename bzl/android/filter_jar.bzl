@@ -23,9 +23,11 @@ def _filter_jar_impl(ctx):
         command = """
 set -euo pipefail
 tmp="$4"
+ZIPPER="$5"
+ZIP_RELATIVE="$6"
 
 # Expand the input jar
-unzip -qq "$1" -d "$tmp"
+"$ZIPPER" x "$1" -d "$tmp"
 
 chmod -R u+rwX "$tmp"
 
@@ -40,14 +42,21 @@ find "$tmp" -depth -type d -empty -exec rmdir -- "{}" +
 # Re-create the jar
 abs_dest="$PWD/$3"
 echo $abs_dest
-(cd "$tmp" && zip -qqr "$abs_dest" .)
+(
+  cd "$tmp"
+  mapfile -t FILES < <(find . -type f -print | sed 's|^\\./||' | sort)
+  "$ZIP_RELATIVE" "$ZIPPER" . "$abs_dest" "${FILES[@]}"
+)
 """,
         arguments = [
             in_jar.path,  # $1
             pattern_f.path,  # $2
             out_jar.path,  # $3
             scratch.path,  # $4
+            ctx.executable._zipper.path,  # $5
+            ctx.executable._zip_relative.path,  # $6
         ],
+        tools = [ctx.executable._zipper, ctx.executable._zip_relative],
         mnemonic = "FilterJar",
         progress_message = "Filtering JAR %s" % (in_jar.basename),
     )
@@ -65,6 +74,17 @@ filter_jar = rule(
         "excluded_class_path_patterns": attr.string_list(
             doc = "Regexes (applied to internal /.class paths) to exclude",
             mandatory = True,
+        ),
+        "_zip_relative": attr.label(
+            default = "//bzl/android:zip_relative",
+            executable = True,
+            cfg = "exec",
+        ),
+        "_zipper": attr.label(
+            default = "@bazel_tools//tools/zip:zipper",
+            allow_single_file = True,
+            executable = True,
+            cfg = "exec",
         ),
     },
     doc = "Produces a JAR with classes **not** matching any excluded_class_path_patterns.",

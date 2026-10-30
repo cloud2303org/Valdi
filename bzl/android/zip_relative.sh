@@ -13,7 +13,7 @@ output_file=$3
 shift 3
 
 args=()
-for path in $@; do
+for path in "$@"; do
     args+=( "${path#"$relative_dir/"}=$path" )
 done
 

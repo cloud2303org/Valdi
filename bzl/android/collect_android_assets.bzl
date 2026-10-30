@@ -81,19 +81,25 @@ for src in "${{ITEMS[@]}}"; do
     chmod -R u+w "$DEST"
 done
 
-# Create zip from staging directory
+# Create zip from staging directory using Bazel's portable zipper.
 ABS_DEST="$PWD/{zip}"
-cd "$DEST" && zip -qqr "$ABS_DEST" .
+ZIPPER='$PWD/{zipper}'
+ZIP_RELATIVE='$PWD/{zip_relative}'
+cd "$DEST"
+mapfile -t ASSETS < <(find . -type f -print | sed 's|^\\./||' | sort)
+"$ZIP_RELATIVE" "$ZIPPER" . "$ABS_DEST" "${{ASSETS[@]}}"
 """.format(
             items = " ".join(['"{}"'.format(f.path) for f in all_assets]),
             dst = scratch.path,
             zip = out_zip.path,
+            zipper = ctx.executable._zipper.path,
+            zip_relative = ctx.executable._zip_relative.path,
         ),
     )
 
     ctx.actions.run_shell(
         inputs = depset(all_assets),
-        tools = [script],
+        tools = [script, ctx.executable._zipper, ctx.executable._zip_relative],
         outputs = [out_zip, scratch],
         command = script.path,
         progress_message = "Packaging Android assets for %{label}",
@@ -118,6 +124,17 @@ collect_android_assets = rule(
             allow_files = False,
             default = [],
             doc = "Android library dependencies (unused, kept for compatibility)",
+        ),
+        "_zip_relative": attr.label(
+            default = "//bzl/android:zip_relative",
+            executable = True,
+            cfg = "exec",
+        ),
+        "_zipper": attr.label(
+            default = "@bazel_tools//tools/zip:zipper",
+            allow_single_file = True,
+            executable = True,
+            cfg = "exec",
         ),
     },
     outputs = {"assets_zip": "%{name}_assets.zip"},
