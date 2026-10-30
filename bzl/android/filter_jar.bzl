@@ -22,6 +22,7 @@ def _filter_jar_impl(ctx):
         outputs = [scratch],
         command = """
 set -euo pipefail
+export PATH="/usr/bin:/bin:$PATH"
 tmp="$4"
 
 # Extract with Info-ZIP unzip. Bazel's native zipper aborts on this large

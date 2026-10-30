@@ -66,6 +66,7 @@ def _collect_assets_impl(ctx):
         is_executable = True,
         content = """
 set -euo pipefail
+export PATH="/usr/bin:/bin:$PATH"
 ITEMS=( {items} )
 DEST='{dst}'
 

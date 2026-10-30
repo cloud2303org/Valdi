@@ -1,5 +1,6 @@
 #!/bin/bash
 set -eu
+export PATH="/usr/bin:/bin:$PATH"
 
 # First argument is a path to the bazel zipper
 zipper=$1

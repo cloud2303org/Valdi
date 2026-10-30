@@ -149,14 +149,14 @@ def _impl(ctx):
         tools = [ctx.executable._zipper, ndk_tools.strip, ctx.executable._compressor] + ndk_tools.strip_libs,
         command = """
 set -euo pipefail
-{zipper} x {input_aar} -d {output_dir}
+export PATH="/usr/bin:/bin:$PATH"
+unzip -qq {input_aar} -d {output_dir}
 cp {deploy_jar} {output_dir}/classes.jar
 {proguard_spec_command}
 {extra_mkdir_commands}
 {extra_cp_commands}
 {cp_commands}
 """.format(
-            zipper = ctx.executable._zipper.path,
             input_aar = ctx.file.aar.path,
             output_dir = aar_dir.path,
             deploy_jar = ctx.file.classes_jar.path,
