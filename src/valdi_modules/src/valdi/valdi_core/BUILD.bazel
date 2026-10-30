@@ -12,6 +12,10 @@ ts_project(
     composite = True,
     declaration = True,
     transpiler = "tsc",
+    validate = select({
+        "@platforms//os:windows": False,
+        "//conditions:default": True,
+    }),
     tsconfig = "web/tsconfig.json",
 )
 
