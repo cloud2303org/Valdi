@@ -594,14 +594,14 @@ http_archive(
 
 http_archive(
     name = "freetype",
-    build_file = "@skia//bazel/external/freetype:BUILD.bazel",
+    build_file = "@valdi//third-party/freetype:BUILD.bazel",
     strip_prefix = "freetype-5d4e649f740c675426fbe4cdaffc53ee2a4cb954",
     url = "https://github.com/freetype/freetype/archive/5d4e649f740c675426fbe4cdaffc53ee2a4cb954.tar.gz",
 )
 
 http_archive(
     name = "expat",
-    build_file = "@skia//bazel/external/expat:BUILD.bazel",
+    build_file = "@valdi//third-party/expat:BUILD.bazel",
     strip_prefix = "libexpat-624da0f593bb8d7e146b9f42b06d8e6c80d032a3",
     url = "https://github.com/libexpat/libexpat/archive/624da0f593bb8d7e146b9f42b06d8e6c80d032a3.tar.gz",
 )
@@ -776,7 +776,7 @@ http_archive(
 jscore_repos = use_extension("//bzl:jscore_repos_extension.bzl", "jscore_repos")
 use_repo(jscore_repos, "jscore_libs")
 
-# C++ toolchains via unified Valdi extension â€” consumers inherit these
+# C++ toolchains via unified Valdi extension â€?consumers inherit these
 # register_toolchains() without calling any extensions themselves.
 # Apple CC registered first (wins on macOS/iOS), LLVM second (wins on Linux).
 valdi_toolchains = use_extension("//bzl:valdi_toolchains.bzl", "valdi_toolchains")
