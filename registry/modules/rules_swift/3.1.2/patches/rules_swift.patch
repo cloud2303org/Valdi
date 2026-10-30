@@ -53,3 +53,15 @@ diff --git a/swift/swift_test.bzl b/swift/swift_test.bzl
              feature_configuration = feature_configuration,
              include_dev_srch_paths = include_dev_srch_paths,
              module_name = module_name + "__GeneratedTestDiscoveryRunner",
+diff --git a/swift/internal/swift_autoconfiguration.bzl b/swift/internal/swift_autoconfiguration.bzl
+--- a/swift/internal/swift_autoconfiguration.bzl
++++ b/swift/internal/swift_autoconfiguration.bzl
+@@ -364,7 +364,7 @@ toolchain(
+         "@platforms//os:windows",
+         "@platforms//cpu:x86_64",
+     ],
+-    target_compatible_with = APPLE_PLATFORMS_CONSTRAINTS[arch],
++    target_compatible_with = ["@platforms//os:windows", "@platforms//cpu:x86_64"],
+     toolchain = ":windows-toolchain",
+     toolchain_type = "{toolchain_type}",
+     visibility = ["//visibility:public"],
