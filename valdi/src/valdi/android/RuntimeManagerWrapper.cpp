@@ -37,7 +37,6 @@
 
 #include "valdi/jsbridge/JavaScriptBridge.hpp"
 
-#include "RuntimeManagerWrapper.hpp"
 #include "valdi_core/HTTPRequest.hpp"
 #include "valdi_core/HTTPRequestManager.hpp"
 #include <utils/debugging/Assert.hpp>

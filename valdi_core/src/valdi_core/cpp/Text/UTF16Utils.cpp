@@ -6,7 +6,6 @@
 //
 
 #include "valdi_core/cpp/Text/UTF16Utils.hpp"
-#include "UTF16Utils.hpp"
 #include <algorithm>
 #include <vector>
 

@@ -6,7 +6,6 @@
 //
 
 #include "valdi_core/cpp/Schema/ValueSchemaParser.hpp"
-#include "ValueSchemaParser.hpp"
 #include "valdi_core/cpp/Utils/Format.hpp"
 #include "valdi_core/cpp/Utils/SmallVector.hpp"
 #include "valdi_core/cpp/Utils/StringCache.hpp"

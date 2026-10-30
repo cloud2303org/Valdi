@@ -18,7 +18,6 @@
 #include "valdi_core/jni/JavaCache.hpp"
 #include "valdi_core/jni/JavaUtils.hpp"
 
-#include "valdi/android/AndroidBitmap.hpp"
 #include "valdi/android/CppPromiseCallbackJNI.hpp"
 #include "valdi/android/JavaValueDelegate.hpp"
 #include "valdi_core/cpp/Resources/LoadedAsset.hpp"

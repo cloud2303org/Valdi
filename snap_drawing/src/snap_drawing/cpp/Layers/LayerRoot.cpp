@@ -7,7 +7,6 @@
 
 #include "snap_drawing/cpp/Layers/LayerRoot.hpp"
 
-#include "LayerRoot.hpp"
 #include "valdi_core/cpp/Utils/LoggerUtils.hpp"
 #include "valdi_core/cpp/Utils/Trace.hpp"
 
