@@ -776,7 +776,7 @@ http_archive(
 jscore_repos = use_extension("//bzl:jscore_repos_extension.bzl", "jscore_repos")
 use_repo(jscore_repos, "jscore_libs")
 
-# C++ toolchains via unified Valdi extension â€?consumers inherit these
+# C++ toolchains via unified Valdi extension â€” consumers inherit these
 # register_toolchains() without calling any extensions themselves.
 # Apple CC registered first (wins on macOS/iOS), LLVM second (wins on Linux).
 valdi_toolchains = use_extension("//bzl:valdi_toolchains.bzl", "valdi_toolchains")
