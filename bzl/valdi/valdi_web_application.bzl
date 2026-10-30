@@ -25,6 +25,7 @@ def _package_relative_path(path):
     return path
 
 def _web_static_site_zip_impl(ctx):
+    java_runtime = ctx.toolchains["@bazel_tools//tools/jdk:runtime_toolchain_type"].java_runtime
     dist_outputs = ctx.attr.dist[DefaultInfo].files.to_list()
     if len(dist_outputs) != 1:
         fail("Expected exactly one dist directory from {}, got {}".format(ctx.attr.dist.label, len(dist_outputs)))
@@ -52,6 +53,7 @@ cp -R "{dist}/." "{site_dir}/"
     output_zip = ctx.actions.declare_file("{}.zip".format(ctx.label.name))
     args = ctx.actions.args()
     args.add(ctx.executable._zipper.path)
+    args.add(java_runtime.java_home)
     args.add(site_dir.path)
     args.add(output_zip.path)
     args.add_all([site_dir])
@@ -60,7 +62,7 @@ cp -R "{dist}/." "{site_dir}/"
         outputs = [output_zip],
         inputs = [site_dir],
         executable = ctx.executable._zip_relative,
-        tools = [ctx.executable._zipper],
+        tools = [ctx.executable._zipper, java_runtime.files],
         arguments = [args],
         mnemonic = "ValdiWebZip",
         progress_message = "Zipping Valdi web static site %{label}",
@@ -85,6 +87,7 @@ _web_static_site_zip = rule(
             cfg = "exec",
         ),
     },
+    toolchains = ["@bazel_tools//tools/jdk:runtime_toolchain_type"],
 )
 
 def valdi_web_application(

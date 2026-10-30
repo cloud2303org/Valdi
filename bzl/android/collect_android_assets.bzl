@@ -47,6 +47,7 @@ def _collect_valdimodules_from_valdi_deps(valdi_deps, output_target):
     return assets
 
 def _collect_assets_impl(ctx):
+    java_runtime = ctx.toolchains["@bazel_tools//tools/jdk:runtime_toolchain_type"].java_runtime
     # Collect valdimodules from valdi compiled modules (includes transitive deps)
     all_assets = _collect_valdimodules_from_valdi_deps(ctx.attr.valdi_deps, ctx.attr.output_target)
 
@@ -98,6 +99,7 @@ done
 
     args = ctx.actions.args()
     args.add(ctx.executable._zipper.path)
+    args.add(java_runtime.java_home)
     args.add(scratch.path)
     args.add(out_zip.path)
     args.add(scratch.path)
@@ -105,7 +107,7 @@ done
         inputs = [scratch],
         outputs = [out_zip],
         executable = ctx.executable._zip_relative,
-        tools = [ctx.executable._zipper],
+        tools = [ctx.executable._zipper, java_runtime.files],
         arguments = [args],
         progress_message = "Zipping Android assets for %{label}",
     )
@@ -143,6 +145,7 @@ collect_android_assets = rule(
         ),
     },
     outputs = {"assets_zip": "%{name}_assets.zip"},
+    toolchains = ["@bazel_tools//tools/jdk:runtime_toolchain_type"],
     doc = """Collects .valdimodule and .map.json files from Valdi modules for Android AARs.
     
 Extracts valdimodules and sourcemaps from each Valdi module and its transitive

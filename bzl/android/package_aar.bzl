@@ -28,6 +28,7 @@ AAR_KNOWN_DIRS = [
 ]
 
 def _impl(ctx):
+    java_runtime = ctx.toolchains["@bazel_tools//tools/jdk:runtime_toolchain_type"].java_runtime
     ndk_tools = ctx.toolchains[ANDROID_NDK_TOOLS_TOOLCHAIN_TYPE]
     dso_inputs = []
     cp_dsos_commands = []
@@ -170,6 +171,7 @@ cp {deploy_jar} {output_dir}/classes.jar
     output_aar_file = ctx.actions.declare_file("{name}.aar".format(name = ctx.attr.name))
     args = ctx.actions.args()
     args.add(ctx.executable._zipper.path)
+    args.add(java_runtime.java_home)
     args.add(aar_dir.path)
     args.add(output_aar_file.path)
     args.add_all([aar_dir])
@@ -178,7 +180,7 @@ cp {deploy_jar} {output_dir}/classes.jar
         outputs = [output_aar_file],
         inputs = [aar_dir],
         executable = ctx.executable._zip_relative,
-        tools = [ctx.executable._zipper],
+        tools = [ctx.executable._zipper, java_runtime.files],
         arguments = [args],
     )
 
@@ -283,7 +285,10 @@ _package_aar_internal = rule(
         ),
     },
     fragments = ["cpp"],
-    toolchains = [ANDROID_NDK_TOOLS_TOOLCHAIN_TYPE],
+    toolchains = [
+        ANDROID_NDK_TOOLS_TOOLCHAIN_TYPE,
+        "@bazel_tools//tools/jdk:runtime_toolchain_type",
+    ],
 )
 
 def package_aar(**kwargs):

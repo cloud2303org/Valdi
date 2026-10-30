@@ -1,5 +1,6 @@
 # filter_jar.bzl
 def _filter_jar_impl(ctx):
+    java_runtime = ctx.toolchains["@bazel_tools//tools/jdk:runtime_toolchain_type"].java_runtime
     in_jar = ctx.file.jar
     out_jar = ctx.actions.declare_file(ctx.label.name + ".jar")
     pattern_f = ctx.actions.declare_file(ctx.label.name + "_patterns.txt")
@@ -52,6 +53,7 @@ find "$tmp" -depth -type d -empty -exec rmdir -- "{}" +
 
     args = ctx.actions.args()
     args.add(ctx.executable._zipper.path)
+    args.add(java_runtime.java_home)
     args.add(scratch.path)
     args.add(out_jar.path)
     args.add(scratch.path)
@@ -59,7 +61,7 @@ find "$tmp" -depth -type d -empty -exec rmdir -- "{}" +
         inputs = [scratch],
         outputs = [out_jar],
         executable = ctx.executable._zip_relative,
-        tools = [ctx.executable._zipper],
+        tools = [ctx.executable._zipper, java_runtime.files],
         arguments = [args],
         progress_message = "Zipping filtered JAR %s" % (in_jar.basename),
     )
@@ -91,4 +93,5 @@ filter_jar = rule(
         ),
     },
     doc = "Produces a JAR with classes **not** matching any excluded_class_path_patterns.",
+    toolchains = ["@bazel_tools//tools/jdk:runtime_toolchain_type"],
 )
