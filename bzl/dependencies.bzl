@@ -538,7 +538,7 @@ def setup_dependencies(workspace_root = None):
 
     http_archive(
         name = "expat",
-        build_file = "@skia//bazel/external/expat:BUILD.bazel",
+        build_file = "@valdi//third-party/expat:BUILD.bazel",
         url = "https://github.com/libexpat/libexpat/archive/624da0f593bb8d7e146b9f42b06d8e6c80d032a3.tar.gz",
         strip_prefix = "libexpat-624da0f593bb8d7e146b9f42b06d8e6c80d032a3",
     )
