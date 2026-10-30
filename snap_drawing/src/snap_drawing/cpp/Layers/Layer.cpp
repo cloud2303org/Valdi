@@ -6,7 +6,6 @@
 //
 
 #include "snap_drawing/cpp/Layers/Layer.hpp"
-#include "Interfaces/ILayer.hpp"
 #include "snap_drawing/cpp/Layers/Interfaces/ILayerRoot.hpp"
 #include "snap_drawing/cpp/Layers/Mask/IMaskLayer.hpp"
 
