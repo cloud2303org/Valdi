@@ -132,8 +132,7 @@ def _impl(ctx):
 
         for file in additional_assets:
             inputs.append(file)
-            extra_cp_commands.append("{zipper} x {additional_asset} -d {output_dir}/assets/".format(
-                zipper = ctx.executable._zipper.path,
+            extra_cp_commands.append("unzip -qq {additional_asset} -d {output_dir}/assets/".format(
                 additional_asset = file.path,
                 output_dir = aar_dir.path,
             ))

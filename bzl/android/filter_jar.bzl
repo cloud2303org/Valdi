@@ -23,10 +23,10 @@ def _filter_jar_impl(ctx):
         command = """
 set -euo pipefail
 tmp="$4"
-ZIPPER="$5"
 
-# Expand the input jar
-"$ZIPPER" x "$1" -d "$tmp"
+# Extract with Info-ZIP unzip. Bazel's native zipper aborts on this large
+# Android deploy JAR on Windows after the first 1,225 entries.
+unzip -qq "$1" -d "$tmp"
 
 chmod -R u+rwX "$tmp"
 
@@ -44,9 +44,7 @@ find "$tmp" -depth -type d -empty -exec rmdir -- "{}" +
             pattern_f.path,  # $2
             out_jar.path,  # $3
             scratch.path,  # $4
-            ctx.executable._zipper.path,  # $5
         ],
-        tools = [ctx.executable._zipper],
         mnemonic = "FilterJar",
         progress_message = "Filtering JAR %s" % (in_jar.basename),
     )
