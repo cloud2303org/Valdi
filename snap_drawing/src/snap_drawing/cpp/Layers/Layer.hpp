@@ -7,7 +7,6 @@
 
 #pragma once
 
-#include "Interfaces/ILayer.hpp"
 #include "valdi_core/cpp/Utils/FlatMap.hpp"
 #include "valdi_core/cpp/Utils/Shared.hpp"
 
