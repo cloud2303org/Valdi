@@ -9,11 +9,13 @@ _NDK_VERSION = "r28"
 _NDK_URLS = {
     "linux": "https://dl.google.com/android/repository/android-ndk-{version}-linux.zip",
     "darwin": "https://dl.google.com/android/repository/android-ndk-{version}-darwin.zip",
+    "windows": "https://dl.google.com/android/repository/android-ndk-{version}-windows.zip",
 }
 
 _NDK_SHA256 = {
     "linux": "a186b67e8810cb949514925e4f7a2255548fb55f5e9b0824a6430d012c1b695b",
     "darwin": "19b16241e8e8d4c8e4f3729b8a0a625dd240394e1f1cd072596df891317e22a9",
+    "windows": "a561d7f0e2f2271fe387d0e8ea2a32afd52cfae257bcb487c860633fbebaec25",
 }
 
 _NDK_STRIP_PREFIX = "android-ndk-{version}"
@@ -26,6 +28,8 @@ def _hermetic_ndk_impl(ctx):
         platform = "linux"
     elif ctx.os.name == "mac os x":
         platform = "darwin"
+    elif ctx.os.name.startswith("windows"):
+        platform = "windows"
     else:
         fail("Unsupported host OS for hermetic NDK: " + ctx.os.name)
 
@@ -50,18 +54,20 @@ def _hermetic_ndk_impl(ctx):
 
     if platform == "linux":
         clang_directory = "toolchains/llvm/prebuilt/linux-x86_64"
-    else:
+    elif platform == "darwin":
         clang_directory = "toolchains/llvm/prebuilt/darwin-x86_64"
+    else:
+        clang_directory = "toolchains/llvm/prebuilt/windows-x86_64"
 
     sysroot_directory = "%s/sysroot" % clang_directory
-    executable_extension = ""
+    executable_extension = ".exe" if platform == "windows" else ""
 
     # Create symlinks from ndk/<subpath> into the repo root
     _create_symlinks(ctx, ndk_path, clang_directory, sysroot_directory)
 
     api_level = ctx.attr.api_level or 31
 
-    result = ctx.execute([clang_directory + "/bin/clang", "--print-resource-dir"])
+    result = ctx.execute([clang_directory + "/bin/clang" + executable_extension, "--print-resource-dir"])
     if result.return_code != 0:
         fail("Failed to execute clang: %s" % result.stderr)
     stdout = result.stdout.strip()
@@ -76,6 +82,10 @@ def _hermetic_ndk_impl(ctx):
         {"{clang_directory}": clang_directory},
         executable = False,
     )
+    if platform == "windows":
+        # The upstream NDK template omits its executable_extension placeholder here.
+        root_build = ctx.read(ctx.path("BUILD.bazel")).replace(':bin/llvm-strip"', ':bin/llvm-strip.exe"')
+        ctx.file("BUILD.bazel", root_build)
 
     ctx.template(
         "target_systems.bzl",

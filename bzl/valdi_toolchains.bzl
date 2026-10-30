@@ -36,7 +36,7 @@ _apple_cc_autoconf_toolchains = repository_rule(
 
 def _apple_cc_autoconf_impl(repository_ctx):
     env = repository_ctx.os.environ
-    if env.get(_DISABLE_ENV_VAR) == "1" or env.get(_OLD_DISABLE_ENV_VAR) == "1":
+    if repository_ctx.os.name.startswith("windows") or env.get(_DISABLE_ENV_VAR) == "1" or env.get(_OLD_DISABLE_ENV_VAR) == "1":
         repository_ctx.file("BUILD", "# Apple CC autoconfiguration disabled.")
     else:
         success, error = configure_osx_toolchain(repository_ctx)

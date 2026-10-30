@@ -14,20 +14,24 @@ _PLATFORM_STRIP_PREFIX = "android-36"
 _BUILD_TOOLS_URLS = {
     "linux": "https://dl.google.com/android/repository/build-tools_r34-linux.zip",
     "darwin": "https://dl.google.com/android/repository/build-tools_r34-macosx.zip",
+    "windows": "https://dl.google.com/android/repository/build-tools_r34-windows.zip",
 }
 _BUILD_TOOLS_SHA256 = {
     "linux": "e858c4b60069d0431051b225d384413b1643e1289b00a4825aed347f25bd510f",
     "darwin": "76bf668fe037b1a69197e298ddae5633d4d7f0f41af7ed17e537c80c1ed8a6f3",
+    "windows": "9be665ad74ef22bf0e489b37db465074484df79b95f26d759945d5c25a47b326",
 }
 _BUILD_TOOLS_STRIP_PREFIX = "android-14"
 
 _PLATFORM_TOOLS_URLS = {
     "linux": "https://dl.google.com/android/repository/platform-tools_r37.0.0-linux.zip",
     "darwin": "https://dl.google.com/android/repository/platform-tools_r37.0.0-darwin.zip",
+    "windows": "https://dl.google.com/android/repository/platform-tools_r37.0.1-win.zip",
 }
 _PLATFORM_TOOLS_SHA256 = {
     "linux": "198ae156ab285fa555987219af237b31102fefe8b9d2bc274708a8d4f2865a07",
     "darwin": "094a1395683c509fd4d48667da0d8b5ef4d42b2abfcd29f2e8149e2f989357c7",
+    "windows": "45f4d63113e895ebde0c90f194099a4676b6ac653bd28d54314a9e022bbc1a99",
 }
 
 def _hermetic_android_sdk_impl(ctx):
@@ -35,6 +39,8 @@ def _hermetic_android_sdk_impl(ctx):
         platform = "linux"
     elif ctx.os.name == "mac os x":
         platform = "darwin"
+    elif ctx.os.name.startswith("windows"):
+        platform = "windows"
     else:
         fail("Unsupported host OS for hermetic Android SDK: " + ctx.os.name)
 

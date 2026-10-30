@@ -6,8 +6,12 @@ native_binary(
         {
             "@bazel_tools//src/conditions:darwin": "bin/macos/zstd",
             "@bazel_tools//src/conditions:linux_x86_64": "bin/linux/zstd",
+            "@bazel_tools//src/conditions:windows": "bin/windows/zstd.exe",
         },
     ),
-    out = "zstd",
+    out = select({
+        "@bazel_tools//src/conditions:windows": "zstd.exe",
+        "//conditions:default": "zstd",
+    }),
     visibility = ["//visibility:public"],
 )
