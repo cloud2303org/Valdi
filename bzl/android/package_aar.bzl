@@ -147,11 +147,39 @@ def _impl(ctx):
     ctx.actions.run_shell(
         outputs = [aar_dir],
         inputs = inputs,
-        tools = [ctx.executable._zipper, ndk_tools.strip, ctx.executable._compressor] + ndk_tools.strip_libs,
+        tools = depset(
+            [ctx.executable._zipper, ndk_tools.strip, ctx.executable._compressor] + ndk_tools.strip_libs,
+            transitive = [java_runtime.files],
+        ),
         command = """
 set -euo pipefail
 export PATH="/usr/bin:/bin:$PATH"
-unzip -qq {input_aar} -d {output_dir}
+mkdir -p {output_dir}
+input_aar={input_aar}
+root=$(pwd)
+case "$input_aar" in
+    /*|[A-Za-z]:/*) ;;
+    *) input_aar="$root/$input_aar" ;;
+esac
+case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*)
+        # Bazel's Windows AAR contains backslash entry names. Info-ZIP treats
+        # the resulting warning as a failed action and leaves stray files;
+        # the JDK normalizes those entries while extracting.
+        jar_command="{java_home}/bin/jar"
+        if [[ ! -x "$jar_command" ]]; then
+            jar_command="$jar_command.exe"
+        fi
+        if [[ ! -x "$jar_command" ]]; then
+            echo "Extracting an AAR on Windows requires jar from the Bazel Java runtime: {java_home}" >&2
+            exit 1
+        fi
+        (cd {output_dir} && "$jar_command" xf "$input_aar")
+        ;;
+    *)
+        unzip -qq "$input_aar" -d {output_dir}
+        ;;
+esac
 cp {deploy_jar} {output_dir}/classes.jar
 {proguard_spec_command}
 {extra_mkdir_commands}
@@ -159,6 +187,7 @@ cp {deploy_jar} {output_dir}/classes.jar
 {cp_commands}
 """.format(
             input_aar = ctx.file.aar.path,
+            java_home = java_runtime.java_home,
             output_dir = aar_dir.path,
             deploy_jar = ctx.file.classes_jar.path,
             proguard_spec_command = proguard_spec_command,
