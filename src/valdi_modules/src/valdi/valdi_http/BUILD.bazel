@@ -11,12 +11,12 @@ ts_project(
     ]) + [
         "//src/valdi_modules/src/valdi/coreutils:coreutils_dts",
     ],
-    allow_js = True,
-    composite = True,
-    declaration = True,
+    allow_js = true,
+    composite = true,
+    declaration = true,
     validate = select({
-        "@platforms//os:windows": False,
-        "//conditions:default": True,
+        "@platforms//os:windows": false,
+        "//conditions:default": true,
     }),
     transpiler = "tsc",
     tsconfig = "web/tsconfig.json",
