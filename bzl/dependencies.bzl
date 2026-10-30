@@ -531,7 +531,7 @@ def setup_dependencies(workspace_root = None):
 
     http_archive(
         name = "freetype",
-        build_file = "@skia//bazel/external/freetype:BUILD.bazel",
+        build_file = "@valdi//third-party/freetype:BUILD.bazel",
         url = "https://github.com/freetype/freetype/archive/5d4e649f740c675426fbe4cdaffc53ee2a4cb954.tar.gz",
         strip_prefix = "freetype-5d4e649f740c675426fbe4cdaffc53ee2a4cb954",
     )
