@@ -34,9 +34,15 @@ MINGW*|MSYS*|CYGWIN*)
     args=()
     for path in "$@"; do
         if [[ -d "$path" ]]; then
+            # -H dereferences the starting point only. Bazel's Linux sandbox
+            # materializes a TreeArtifact input as a symlink, and find without
+            # -H walks nothing there, which made the archive fail with "Can't
+            # create zip without input files specified". Printed paths keep the
+            # argument form, so entries below $relative_dir are unchanged, and
+            # symlinks nested inside a tree stay unreferenced as before.
             while IFS= read -r -d '' file; do
                 args+=( "${file#"$relative_dir/"}=$file" )
-            done < <(find "$path" -type f -print0 | sort -z)
+            done < <(find -H "$path" -type f -print0 | sort -z)
         else
             args+=( "${path#"$relative_dir/"}=$path" )
         fi

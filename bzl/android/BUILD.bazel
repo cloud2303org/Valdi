@@ -1,7 +1,28 @@
+load("@rules_python//python:defs.bzl", "py_test")
+
 sh_binary(
     name = "zip_relative",
     srcs = ["zip_relative.sh"],
     visibility = ["//visibility:public"],
+)
+
+# Packages through the helper exactly as the Android rules call it, including a
+# directory reached through a symlink (the Linux sandbox shape for a
+# TreeArtifact input). Run standalone with:
+#   python3 bzl/android/zip_relative_test.py \
+#       --script bzl/android/zip_relative.sh --zipper <zipper>
+py_test(
+    name = "zip_relative_test",
+    srcs = ["zip_relative_test.py"],
+    main = "zip_relative_test.py",
+    data = [
+        "zip_relative.sh",
+        "@bazel_tools//tools/zip:zipper",
+    ],
+    args = [
+        "--script=$(location zip_relative.sh)",
+        "--zipper=$(locations @bazel_tools//tools/zip:zipper)",
+    ],
 )
 
 # For use in package_aar to generate a stub_jar for JavaInfo.
