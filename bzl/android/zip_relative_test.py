@@ -2,8 +2,10 @@
 
 These exercise the packaging helper the same way the Android rules call it:
 zipper, java home, prefix to strip, output zip, then the inputs. The important
-case is a directory given through a symlink, which is exactly how Bazel's Linux
-sandbox exposes a TreeArtifact input to an action.
+case is the shape Bazel's Linux sandbox uses for a TreeArtifact input: a real
+directory whose entries are all symlinks back to the execroot copy. A directory
+reached through a symlink is covered too, since both forms appear between the
+rules' actions.
 
 Runs under ``bazel test`` (paths come from ``$(location ...)``) and also
 standalone: ``python3 zip_relative_test.py --script ./zip_relative.sh --zipper <zipper>``.
@@ -67,9 +69,8 @@ class ZipRelativeTest(unittest.TestCase):
         )
 
     def test_symlinked_directory_matches_real_directory(self):
-        # Regression: without following the starting symlink the tree looked
-        # empty and the zipper aborted with "Can't create zip without input
-        # files specified".
+        # Both symlink forms have to produce identical archives: the starting
+        # point itself, and the per-entry links used by a sandboxed action.
         self.assertEqual(self.zip(self.tree, [self.tree], "real.zip"),
                          self.zip(self.linked, [self.linked], "linked.zip"))
 
@@ -92,15 +93,80 @@ class ZipRelativeTest(unittest.TestCase):
         entries = self.zip(self.work, [self.single, os.path.join(self.tree, "a.txt")])
         self.assertEqual({"single.txt": b"single", "tree/a.txt": b"alpha"}, entries)
 
-    def test_nested_symlinks_are_not_dereferenced(self):
-        # Behavior deliberately unchanged: only the starting point is resolved,
-        # so links inside a tree are still not packaged (no escaping the tree,
-        # no symlink loops).
-        nested = os.path.join(self.work, "nested")
-        _write(os.path.join(nested, "real.txt"), b"real")
-        os.symlink(self.single, os.path.join(nested, "link_out"))
-        os.symlink(self.tree, os.path.join(nested, "link_dir"))
-        entries = self.zip(nested, [nested])
+    def _sandbox_treeartifact(self):
+        """Reproduce how Bazel hands a TreeArtifact to a sandboxed action.
+
+        The action's working directory holds a real directory whose every entry
+        is a symlink back to the execroot copy of the same file.
+        """
+        execroot = os.path.join(self.work, "execroot", "bin", "assets_dir")
+        for name, data in (
+            ("app_pages.valdimodule", b"module-app"),
+            ("app_pages.map.json", b"{\"map\":1}"),
+            ("sub", None),
+        ):
+            if data is None:
+                _write(os.path.join(execroot, name, "deep.valdimodule"), b"module-deep")
+            else:
+                _write(os.path.join(execroot, name), data)
+        sandbox = os.path.join(self.work, "sandbox", "bin", "assets_dir")
+        os.makedirs(os.path.join(sandbox, "sub"))
+        for rel in ("app_pages.valdimodule", "app_pages.map.json", "sub/deep.valdimodule"):
+            os.symlink(os.path.join(execroot, rel), os.path.join(sandbox, rel))
+        return execroot, sandbox
+
+    def test_treeartifact_symlink_entries_are_packaged(self):
+        # Regression for the real failure: collect_android_assets zipped a
+        # TreeArtifact whose entries are symlinks, the walk saw no regular
+        # files, and the zipper aborted with "Can't create zip without input
+        # files specified".
+        execroot, sandbox = self._sandbox_treeartifact()
+        entries = self.zip(sandbox, [sandbox])
+        self.assertEqual(
+            {
+                "app_pages.valdimodule": b"module-app",
+                "app_pages.map.json": b'{"map":1}',
+                "sub/deep.valdimodule": b"module-deep",
+            },
+            entries,
+        )
+
+    def test_treeartifact_matches_materialized_directory(self):
+        # The sandboxed action must produce the same archive as a local
+        # (unsandboxed) run over the real execroot files.
+        execroot, sandbox = self._sandbox_treeartifact()
+        self.assertEqual(
+            self.zip(execroot, [execroot], "execroot.zip"),
+            self.zip(sandbox, [sandbox], "sandbox.zip"),
+        )
+
+    def test_entry_names_never_leak_resolved_paths(self):
+        execroot, sandbox = self._sandbox_treeartifact()
+        prefix = os.path.relpath(sandbox, self.work)
+        entries = self.zip(self.work, [sandbox], "prefix.zip")
+        self.assertEqual(
+            {
+                prefix + "/app_pages.valdimodule": b"module-app",
+                prefix + "/app_pages.map.json": b'{"map":1}',
+                prefix + "/sub/deep.valdimodule": b"module-deep",
+            },
+            entries,
+        )
+        for name in entries:
+            self.assertNotIn("execroot", name)
+
+    def test_symlink_loop_inside_tree_does_not_stall_the_walk(self):
+        tree = os.path.join(self.work, "loop")
+        _write(os.path.join(tree, "real.txt"), b"real")
+        os.symlink(tree, os.path.join(tree, "self"))
+        entries = self.zip(tree, [tree])
+        self.assertEqual({"real.txt": b"real"}, entries)
+
+    def test_dangling_link_keeps_the_other_entries(self):
+        tree = os.path.join(self.work, "dangling")
+        _write(os.path.join(tree, "real.txt"), b"real")
+        os.symlink(os.path.join(self.work, "missing.txt"), os.path.join(tree, "gone.txt"))
+        entries = self.zip(tree, [tree])
         self.assertEqual({"real.txt": b"real"}, entries)
 
 

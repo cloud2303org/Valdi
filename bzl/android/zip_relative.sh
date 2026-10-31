@@ -34,15 +34,20 @@ MINGW*|MSYS*|CYGWIN*)
     args=()
     for path in "$@"; do
         if [[ -d "$path" ]]; then
-            # -H dereferences the starting point only. Bazel's Linux sandbox
-            # materializes a TreeArtifact input as a symlink, and find without
-            # -H walks nothing there, which made the archive fail with "Can't
-            # create zip without input files specified". Printed paths keep the
-            # argument form, so entries below $relative_dir are unchanged, and
-            # symlinks nested inside a tree stay unreferenced as before.
+            # -L is required because of how Bazel hands a TreeArtifact to a
+            # sandboxed action: the directory itself is real, but every entry
+            # inside it is a symlink back to the execroot copy. Without -L the
+            # walk sees only type-l entries, finds no files, and the archive
+            # step aborts with "Can't create zip without input files specified"
+            # (observed on Linux; macOS escapes it because valdi/.bazelrc runs
+            # build:macos --spawn_strategy=local). find follows the links while
+            # still printing the given path, so entry names relative to
+            # $relative_dir are unchanged and only the dereferenced bytes are
+            # read. Loops are rejected by find itself, so a link back into the
+            # tree cannot spin this walk.
             while IFS= read -r -d '' file; do
                 args+=( "${file#"$relative_dir/"}=$file" )
-            done < <(find -H "$path" -type f -print0 | sort -z)
+            done < <(find -L "$path" -type f -print0 | sort -z)
         else
             args+=( "${path#"$relative_dir/"}=$path" )
         fi
