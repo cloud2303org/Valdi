@@ -57,6 +57,8 @@ public:
                            const hermes::vm::RuntimeConfig& runtimeConfig,
                            JavaScriptTaskScheduler* taskScheduler,
                            HermesRuntimeId parentRuntimeId = kRuntimeIdUndefined);
+    // Must run on the runtime's owner JS thread, before context teardown completes.
+    // Teardown from inside an active debugger command is unsupported.
     void remove(const HermesRuntimeId& runtimeId);
 
     void registerListener(HermesRuntimeMessageListener* listener);
@@ -68,13 +70,21 @@ public:
     std::vector<HermesRuntimeId> getWorkers(HermesRuntimeId runtimeId);
 
 private:
-    struct Entry {
-        HermesRuntimeId runtimeId;
-        HermesRuntimeId parentRuntimeId;
+    struct CommandGate {
+        // Never acquire this mutex while holding the registry mutex. Only this control
+        // block may escape submitMessageToHermes; remove clears its resources on JS.
+        RecursiveMutex mutex;
+        bool closed = false;
+        size_t activeCommands = 0;
         // Declared in dependency order so the agent is destroyed before the debug API, and that before the runtime.
         std::shared_ptr<facebook::hermes::HermesRuntime> jsiRuntime;
         std::shared_ptr<facebook::hermes::cdp::CDPDebugAPI> debugAPI;
         std::shared_ptr<facebook::hermes::cdp::CDPAgent> hermesAgent;
+    };
+    struct Entry {
+        HermesRuntimeId runtimeId;
+        HermesRuntimeId parentRuntimeId;
+        std::shared_ptr<CommandGate> commandGate;
         bool isWorker() const {
             return parentRuntimeId != kRuntimeIdUndefined;
         }

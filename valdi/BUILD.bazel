@@ -1186,6 +1186,7 @@ valdi_test(
 valdi_test(
     name = "test_hermes_boundary",
     srcs = [
+        "test/integration/HermesDebuggerRegistry_tests.cpp",
         "test/integration/HermesBoundary_tests.cpp",
         "test/integration/JSBridgeTestFixture.cpp",
     ],

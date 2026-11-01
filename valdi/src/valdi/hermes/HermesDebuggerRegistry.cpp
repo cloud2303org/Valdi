@@ -6,10 +6,10 @@
 //
 
 #include "valdi/hermes/HermesDebuggerRegistry.hpp"
-#include "valdi/hermes/Hermes.hpp"
 
 #include "valdi/runtime/JavaScript/JavaScriptFunctionCallContext.hpp"
 #include "valdi/runtime/JavaScript/JavaScriptTaskScheduler.hpp"
+#include "valdi_core/cpp/Utils/Defer.hpp"
 #include "valdi_core/cpp/Utils/LoggerUtils.hpp"
 #include "valdi_core/cpp/Utils/ValueUtils.hpp"
 
@@ -59,9 +59,10 @@ HermesRuntimeId HermesDebuggerRegistry::append(const std::shared_ptr<facebook::h
         [this, runtimeId](const std::string& message) { this->onHermesMessage(message, runtimeId); });
     auto& entry = _entries.emplace_back();
     entry.runtimeId = runtimeId;
-    entry.jsiRuntime = jsiRuntime;
-    entry.debugAPI = std::move(debugAPI);
-    entry.hermesAgent = std::move(hermesAgent);
+    entry.commandGate = std::make_shared<CommandGate>();
+    entry.commandGate->jsiRuntime = jsiRuntime;
+    entry.commandGate->debugAPI = std::move(debugAPI);
+    entry.commandGate->hermesAgent = std::move(hermesAgent);
     entry.parentRuntimeId = parentRuntimeId;
 
     if (parentRuntimeId != kRuntimeIdUndefined) {
@@ -78,18 +79,36 @@ HermesRuntimeId HermesDebuggerRegistry::append(const std::shared_ptr<facebook::h
 }
 
 void HermesDebuggerRegistry::remove(const HermesRuntimeId& runtimeId) {
-    HermesDebuggerRegistry::Entry entry;
+    std::shared_ptr<CommandGate> commandGate;
     {
         std::lock_guard<Mutex> lock(_mutex);
         auto it = _entries.begin();
         while (it != _entries.end()) {
             if (it->runtimeId == runtimeId) {
-                entry = std::move(*it);
-                it = _entries.erase(it);
+                commandGate = std::move(it->commandGate);
+                _entries.erase(it);
+                break;
             } else {
                 it++;
             }
         }
+    }
+    if (commandGate != nullptr) {
+        // Erase first, then wait outside _mutex: a command may be enqueueing work,
+        // and Hermes callbacks may need _mutex. No new lookup can find this gate.
+        std::lock_guard<RecursiveMutex> lock(commandGate->mutex);
+        // Default scheduler dispatch can run inline on JS. A recursive gate
+        // permits nested commands, but context teardown from an active command
+        // cannot safely destroy Hermes or defer its destruction past teardown.
+        SC_ABORT_UNLESS(commandGate->activeCommands == 0,
+                        "Cannot remove a Hermes runtime from an active debugger command");
+        commandGate->closed = true;
+        // CDPAgent's destructor enqueues disposal through the still-live API.
+        // CDPDebugAPI then drains pending interrupts on this owner JS thread.
+        // Escaped gates must retain none of these resources after remove returns.
+        commandGate->hermesAgent.reset();
+        commandGate->debugAPI.reset();
+        commandGate->jsiRuntime.reset();
     }
 }
 
@@ -145,7 +164,7 @@ void HermesDebuggerRegistry::onHermesMessage(const std::string& messageStr, Herm
 std::vector<HermesRuntimeId> HermesDebuggerRegistry::getRuntimeIds() {
     std::lock_guard<Mutex> lock(_mutex);
     std::vector<HermesRuntimeId> runtimeIds;
-    for (auto entry : _entries) {
+    for (const auto& entry : _entries) {
         if (!entry.isWorker()) {
             runtimeIds.push_back(entry.runtimeId);
         }
@@ -156,7 +175,7 @@ std::vector<HermesRuntimeId> HermesDebuggerRegistry::getRuntimeIds() {
 std::vector<HermesRuntimeId> HermesDebuggerRegistry::getWorkers(HermesRuntimeId runtimeId) {
     std::lock_guard<Mutex> lock(_mutex);
     std::vector<HermesRuntimeId> runtimeIds;
-    for (auto entry : _entries) {
+    for (const auto& entry : _entries) {
         if (entry.parentRuntimeId == runtimeId) {
             runtimeIds.push_back(entry.runtimeId);
         }
@@ -166,17 +185,26 @@ std::vector<HermesRuntimeId> HermesDebuggerRegistry::getWorkers(HermesRuntimeId 
 
 void HermesDebuggerRegistry::submitMessageToHermes(const Value& message, HermesRuntimeId runtimeId) {
 #if defined(HERMES_API)
-    std::shared_ptr<facebook::hermes::cdp::CDPAgent> hermesAgent = nullptr;
+    std::shared_ptr<CommandGate> commandGate;
     {
         std::lock_guard<Mutex> lock(_mutex);
-        for (auto entry : _entries) {
+        for (const auto& entry : _entries) {
             if (entry.runtimeId == runtimeId) {
-                hermesAgent = entry.hermesAgent;
+                commandGate = entry.commandGate;
+                break;
             }
         }
     }
-    if (hermesAgent)
-        hermesAgent->handleCommand(valueToJsonString(message));
+    if (commandGate != nullptr) {
+        auto json = valueToJsonString(message);
+        std::lock_guard<RecursiveMutex> lock(commandGate->mutex);
+        if (commandGate->closed) {
+            return;
+        }
+        ++commandGate->activeCommands;
+        Defer finishCommand([&] { --commandGate->activeCommands; });
+        commandGate->hermesAgent->handleCommand(std::move(json));
+    }
 #endif
     return;
 }
