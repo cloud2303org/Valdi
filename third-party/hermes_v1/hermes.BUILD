@@ -13,6 +13,16 @@ load(
 )
 load("@valdi//third-party/hermes:cmake_configure.bzl", "cmake_configure")
 
+# Source-only input to the checked-in internal HBC gate. Do not add VM/header
+# targets here: their dependency on @valdi internal_bytecode would form a cycle.
+filegroup(
+    name = "internal_bytecode_validation_sources",
+    srcs = glob(["lib/InternalJavaScript/*.js"]) + [
+        "include/hermes/BCGen/HBC/BytecodeVersion.h",
+    ],
+    visibility = ["@valdi//third-party/hermes_v1:__pkg__"],
+)
+
 COMPILER_FLAGS_COMPAT = [
     "-O3",  # Always set optimization on
     "-DNDEBUG",

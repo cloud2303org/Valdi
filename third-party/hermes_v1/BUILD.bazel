@@ -1,3 +1,6 @@
+load("@rules_python//python:defs.bzl", "py_binary", "py_test")
+load(":internal_bytecode_check.bzl", "internal_bytecode_check")
+
 # Hermes V1 for Valdi. hermes.BUILD is the build file of the downloaded Hermes source (see the hermes patch in
 # MODULE.bazel); this package holds what Hermes' CMake build generates and Bazel can't.
 
@@ -38,10 +41,19 @@ cc_library(
     visibility = ["//visibility:public"],
 )
 
+# No VM/compiler dependency: validates the actual repository-rule-patched JS.
+internal_bytecode_check(
+    name = "internal_bytecode_checked",
+    inc = "prepared_include/internal_js/InternalBytecode.inc",
+)
+
 # Hermes' built-in JavaScript, compiled to bytecode by the matching hermesc.
 cc_library(
     name = "internal_bytecode",
-    hdrs = ["prepared_include/internal_js/InternalBytecode.inc"],
+    hdrs = [
+        "prepared_include/internal_js/InternalBytecode.inc",
+        ":internal_bytecode_checked",
+    ],
     strip_include_prefix = "prepared_include/internal_js",
     visibility = ["//visibility:public"],
 )
@@ -52,4 +64,17 @@ cc_library(
     hdrs = ["prepared_include/extensions/ExtensionsBytecode.inc"],
     strip_include_prefix = "prepared_include/extensions",
     visibility = ["//visibility:public"],
+)
+
+py_binary(
+    name = "check_internal_bytecode",
+    srcs = ["check_internal_bytecode.py"],
+    main = "check_internal_bytecode.py",
+)
+
+py_test(
+    name = "check_internal_bytecode_test",
+    srcs = ["check_internal_bytecode.py", "check_internal_bytecode_test.py"],
+    imports = ["."],
+    main = "check_internal_bytecode_test.py",
 )
