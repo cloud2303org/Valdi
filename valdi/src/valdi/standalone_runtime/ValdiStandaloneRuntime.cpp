@@ -30,6 +30,14 @@
 #include "valdi_core/cpp/Utils/ValueArrayBuilder.hpp"
 #include "valdi_core/cpp/Utils/ValueFunctionWithCallable.hpp"
 
+#include <cstring>
+
+#if defined(__APPLE__)
+#include <crt_externs.h>
+#else
+extern char** environ;
+#endif
+
 #ifdef SNAP_DRAWING_ENABLED
 
 #include "valdi/snap_drawing/Modules/SnapDrawingModuleFactoriesProvider.hpp"
@@ -43,6 +51,32 @@
 #endif
 
 namespace Valdi {
+namespace {
+
+static char** getEnvironment() {
+#if defined(__APPLE__)
+    return *_NSGetEnviron();
+#else
+    return environ;
+#endif
+}
+
+static Value resolveEnvObject() {
+    auto envMap = makeShared<ValueMap>();
+    for (char** entry = getEnvironment(); entry != nullptr && *entry != nullptr; entry++) {
+        const char* separator = std::strchr(*entry, '=');
+        if (separator == nullptr || separator == *entry) {
+            continue;
+        }
+
+        auto key = StringBox::fromString(std::string_view(*entry, static_cast<size_t>(separator - *entry)));
+        auto value = StringBox::fromCString(separator + 1);
+        (*envMap)[key] = Value(value);
+    }
+    return Value(envMap);
+}
+
+} // namespace
 
 class ModuleFactory : public snap::valdi_core::ModuleFactory {
 public:
@@ -160,6 +194,26 @@ Ref<ValueFunction> ValdiStandaloneRuntime::makeMainThreadFunction(const ValueFun
     });
 }
 
+void ValdiStandaloneRuntime::setDarkMode(bool darkMode) {
+    if (_deviceModule == nullptr) {
+        return;
+    }
+    auto* jsRuntime = _runtime->getJavaScriptRuntime();
+    if (jsRuntime == nullptr) {
+        _deviceModule->setDarkMode(darkMode);
+        return;
+    }
+    // Serialize host updates with subscription/cancellation on the JS queue.
+    // Resolve the observer list when the task runs, so canceled observers do not
+    // receive a host update that was queued before cancellation.
+    jsRuntime->getJsDispatchQueue()->async([device = weakRef(_deviceModule.get()), darkMode]() {
+        auto module = device.lock();
+        if (module != nullptr) {
+            module->setDarkMode(darkMode);
+        }
+    });
+}
+
 void ValdiStandaloneRuntime::setupJsRuntime(const std::vector<StringBox>& jsArguments) {
     auto exitCoordinator = _exitCoordinator;
 
@@ -233,6 +287,7 @@ void ValdiStandaloneRuntime::setupJsRuntime(const std::vector<StringBox>& jsArgu
 
     auto process = makeShared<ValueMap>();
     (*process)[STRING_LITERAL("argv")] = Value(processArguments.build());
+    (*process)[STRING_LITERAL("env")] = resolveEnvObject();
     (*process)[STRING_LITERAL("exit")] = Value(exitFunction);
     (*process)[STRING_LITERAL("stdout")] = Value(stdoutObject);
     _runtime->getJavaScriptRuntime()->setValueToGlobalObject(STRING_LITERAL("process"), Value(process));
@@ -428,7 +483,8 @@ Ref<ValdiStandaloneRuntime> ValdiStandaloneRuntime::create(bool enableDebuggerSe
     auto runtime = runtimeManager->createRuntime(resourceLoader, static_cast<double>(viewManager->getPointScale()));
     runtime->setListener(runtimeListener);
 
-    runtime->registerNativeModuleFactory(makeShared<DeviceModule>().toShared());
+    auto deviceModule = makeShared<DeviceModule>();
+    runtime->registerNativeModuleFactory(deviceModule.toShared());
     runtime->registerNativeModuleFactory(makeShared<ApplicationModule>().toShared());
 
     if (runtime->getJavaScriptRuntime() != nullptr) {
@@ -439,13 +495,15 @@ Ref<ValdiStandaloneRuntime> ValdiStandaloneRuntime::create(bool enableDebuggerSe
 
     runtimeManager->applicationDidResume();
 
-    return Valdi::makeShared<ValdiStandaloneRuntime>(std::move(runtimeManager),
-                                                     std::move(runtime),
-                                                     resourceLoader,
-                                                     mainQueue,
-                                                     std::move(viewManager),
-                                                     std::move(viewManagerContext),
-                                                     shouldWaitForHotReload);
+    auto standaloneRuntime = Valdi::makeShared<ValdiStandaloneRuntime>(std::move(runtimeManager),
+                                                                       std::move(runtime),
+                                                                       resourceLoader,
+                                                                       mainQueue,
+                                                                       std::move(viewManager),
+                                                                       std::move(viewManagerContext),
+                                                                       shouldWaitForHotReload);
+    standaloneRuntime->_deviceModule = std::move(deviceModule);
+    return standaloneRuntime;
 }
 
 } // namespace Valdi

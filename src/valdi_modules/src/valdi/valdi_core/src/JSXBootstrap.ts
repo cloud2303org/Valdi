@@ -2,11 +2,12 @@ import { StringCache } from 'valdi_core/src/StringCache';
 import { StringMap } from 'coreutils/src/StringMap';
 import { IRenderedComponentHolder } from 'valdi_tsx/src/IRenderedComponentHolder';
 import { IRenderedElementHolder } from 'valdi_tsx/src/IRenderedElementHolder';
+import { ViewFactory } from 'valdi_tsx/src/ViewFactory';
 import { AnyRenderFunction } from './AnyRenderFunction';
 import { isDevBuild } from './BuildType';
 import { resolveComponentConstructor } from './ComponentPath';
 import { ComponentPrototype } from './ComponentPrototype';
-import { ValdiRuntime } from './ValdiRuntime';
+import { getValdiRuntime } from './ValdiRuntimeProvider';
 import { ComponentConstructor, IComponent } from './IComponent';
 import { RequireFunc } from './IModuleLoader';
 import { IRenderedElement } from './IRenderedElement';
@@ -31,8 +32,6 @@ import { PropertyList, removeProperty } from './utils/PropertyList';
 /**
  * TypeScript to Native interactions
  */
-
-declare const runtime: ValdiRuntime;
 
 class DummyComponent implements IComponent {
   viewModel: any;
@@ -61,8 +60,15 @@ class JSXModule implements IDaemonClientManagerListener, RendererFactory {
   readonly daemonClientManager: DaemonClientManager;
 
   constructor() {
+    const runtime = getValdiRuntime();
     this.currentPlatform = runtime.getCurrentPlatform();
-    if (this.currentPlatform !== 1 && this.currentPlatform !== 2 && this.currentPlatform !== 3 && this.currentPlatform !== 4) {
+    if (
+      this.currentPlatform !== 1 &&
+      this.currentPlatform !== 2 &&
+      this.currentPlatform !== 3 &&
+      this.currentPlatform !== 4 &&
+      this.currentPlatform !== 5
+    ) {
       throw Error(`Unrecognized platform type ${this.currentPlatform.toString()}`);
     }
 
@@ -98,8 +104,20 @@ class JSXModule implements IDaemonClientManagerListener, RendererFactory {
     getRenderer().beginElement(prototype, key);
   }
 
+  beginRenderWithViewFactory(prototype: NodePrototype, viewFactory: ViewFactory, key: string | undefined): void {
+    getRenderer().beginElementWithViewFactory(prototype, viewFactory, key);
+  }
+
   beginRenderIfNeeded(prototype: NodePrototype, key?: string): boolean {
     return getRenderer().beginElementIfNeeded(prototype, key);
+  }
+
+  beginRenderWithViewFactoryIfNeeded(
+    prototype: NodePrototype,
+    viewFactory: ViewFactory,
+    key: string | undefined,
+  ): boolean {
+    return getRenderer().beginElementWithViewFactoryIfNeeded(prototype, viewFactory, key);
   }
 
   endRender() {
@@ -264,14 +282,16 @@ class JSXModule implements IDaemonClientManagerListener, RendererFactory {
       let androidClass: string | undefined;
       let iosClass: string | undefined;
       let macosClass: string | undefined;
+      let linuxClass: string | undefined;
       if (attributes) {
         androidClass = removeProperty(attributes, 'androidClass');
         iosClass = removeProperty(attributes, 'iosClass');
         macosClass = removeProperty(attributes, 'macosClass');
+        linuxClass = removeProperty(attributes, 'linuxClass');
         // webClass is left in attributes so WebValdiCustomView receives it via changeAttribute
       }
 
-      // 1 = Android, 2 = iOS, 3 = MacOS, 4 = Web
+      // 1 = Android, 2 = iOS, 3 = MacOS, 4 = Web, 5 = Linux
       if (this.currentPlatform === 4) {
         return new NodePrototype(className, 'custom-view', attributes);
       }
@@ -282,11 +302,14 @@ class JSXModule implements IDaemonClientManagerListener, RendererFactory {
           return new DeferredNodePrototype(className, attributes);
         }
       }
-      if (this.currentPlatform === 3) {
+      if (this.currentPlatform === 5 && linuxClass) {
+        return new NodePrototype(className, linuxClass, attributes);
+      }
+      if (this.currentPlatform === 3 || this.currentPlatform === 5) {
         if (macosClass) {
           return new NodePrototype(className, macosClass, attributes);
         } else if (iosClass) {
-          // macOS falls through to iOS class names
+          // Desktop SnapDrawing hosts fall through to iOS class names
           return new NodePrototype(className, iosClass, attributes);
         } else {
           return new DeferredNodePrototype(className, attributes);
@@ -319,6 +342,7 @@ class JSXModule implements IDaemonClientManagerListener, RendererFactory {
   }
 
   makeRendererWithAllowedRootElementTypes(allowedRootElementTypes: string[] | undefined, treeId: string): Renderer {
+    const runtime = getValdiRuntime();
     const useTopDownMoveOrder = typeof runtime.useTopDownMoveOrder === 'boolean' ? runtime.useTopDownMoveOrder : false;
     return new Renderer(
       treeId,
@@ -332,8 +356,8 @@ class JSXModule implements IDaemonClientManagerListener, RendererFactory {
 
   registerNativeElement(className: string, iosClass: string, androidClass: string): void {
     let viewClassName: string;
-    if (this.currentPlatform === 2 || this.currentPlatform === 3) {
-      // macOS (3) falls through to iOS class names
+    if (this.currentPlatform === 2 || this.currentPlatform === 3 || this.currentPlatform === 5) {
+      // SnapDrawing on macOS (3) and Linux (5) registers iOS class names
       viewClassName = iosClass;
     } else if (this.currentPlatform === 1) {
       viewClassName = androidClass;
@@ -399,6 +423,7 @@ class JSXModule implements IDaemonClientManagerListener, RendererFactory {
       message.respond(requestId => Messages.customMessageResponse(requestId, { handled: false, data: undefined }));
     } else if (message.message.type === DaemonClientMessageType.DUMP_HEAP_REQUEST) {
       const dumpHeapRequest = (message.message as DumpHeapRequest).body;
+      const runtime = getValdiRuntime();
       if (!runtime.dumpHeap) {
         message.respond(requestId => Messages.errorResponse(requestId, `Runtime does not support dumping heap`));
         return;

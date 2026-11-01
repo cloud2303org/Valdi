@@ -76,6 +76,14 @@ typedef void (^SCValdiPerformHapticFeedbackBlock)(NSString* type);
 @property (assign, nonatomic) BOOL enableGesturePrewarm;
 
 /**
+ Whether a new runtime's initial auto-render state is applied while the runtime manager still holds
+ the lock that publishes the runtime. When NO (default), it is applied after the lock is released, so
+ a load operation finishing concurrently can be overwritten by a stale value and leave the runtime's
+ first render queued. Applies to runtimes created after the configuration is updated.
+ */
+@property (assign, nonatomic) BOOL enableAtomicInitialAutoRenderState;
+
+/**
  * Local-development-only debugger and hot-reload settings.
  *
  * These values are read when SCValdiRuntimeManager initializes its underlying
@@ -117,6 +125,14 @@ typedef void (^SCValdiPerformHapticFeedbackBlock)(NSString* type);
  * When 0 (default), the ANR detector is not started.
  */
 @property (assign, nonatomic) NSInteger anrTimeoutMs;
+
+/**
+ Process-wide switch that makes date and time pickers defer the wheels-style rebuild Valdi applies
+ when a picker's `preferredStyle` is reset, until the picker is next measured or laid out.
+ Defaults to NO.
+ */
++ (void)setDeferCompactPickerStyleResetEnabled:(BOOL)enabled;
++ (BOOL)deferCompactPickerStyleResetEnabled;
 
 @end
 

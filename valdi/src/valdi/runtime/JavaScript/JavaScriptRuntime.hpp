@@ -251,6 +251,29 @@ public:
         _refuseDispatchAfterJsQueueTeardown = enabled;
     }
 
+    // Kept in sync with VALDI_ENABLE_TEARDOWN_STOP_ORPHANED_WORKERS by Runtime::setRuntimeTweaks. Off by default.
+    // When on, teardown marks this runtime's workers host-torn-down.
+    void setStopWorkersOnHostTeardown(bool enabled) {
+        _stopWorkersOnHostTeardown = enabled;
+    }
+
+    bool stopWorkersOnHostTeardown() const {
+        return _stopWorkersOnHostTeardown;
+    }
+
+    // Set on a worker by its host's teardown when VALDI_ENABLE_TEARDOWN_STOP_ORPHANED_WORKERS is on. From then on
+    // the worker's JS-thread tasks return before touching anything, because its ResourceManager,
+    // MainThreadManager and AttributeIds references point into the host, which is being freed.
+    void markHostTornDown() {
+        _hostTornDown = true;
+        // A worker's own workers hold the same references into the original host.
+        markWorkersHostTornDown();
+    }
+
+    bool isHostTornDown() const {
+        return _hostTornDown;
+    }
+
     // Test-only: enter/leave the disposed-but-context-alive teardown window without running teardown,
     // so the dispatch guard's cooperative-drain vs aggressive-skip behavior can be tested deterministically.
     void setDisposedForTesting(bool disposed) {
@@ -283,7 +306,7 @@ public:
     // native-call activity writes so worker threads never touch the JS thread's slot.
     bool anrDiagnosticsActiveOnJsThread();
     // Safe to read from any thread so bridges can skip attribution conversion before dispatch.
-    bool anrDiagnosticsEnabled() const;
+    bool anrDiagnosticsEnabled() const override;
 
     // Breadcrumb name for an ANR inside a runtime.trace span: the tag cut at its first ':' (tags put
     // dynamic payloads after it) and capped, so one span is one group.
@@ -484,6 +507,7 @@ private:
     Result<JSValueRef> _symbolicateFunction;
     Result<JSValueRef> _onDaemonClientEventFunction;
     JSValueRef _moduleLoader;
+    bool _skipTrailingUnloadGc = false;
     JSPropertyNameIndex<7> _propertyNameIndex;
 
     Ref<IDiskCache> _diskCache;
@@ -511,6 +535,10 @@ private:
     std::atomic<bool> _joinJsThreadOnTeardown = true;
     // Mirror of VALDI_REFUSE_DISPATCH_AFTER_JS_QUEUE_TEARDOWN (see setRefuseDispatchAfterJsQueueTeardown).
     std::atomic<bool> _refuseDispatchAfterJsQueueTeardown = true;
+    // Mirror of VALDI_ENABLE_TEARDOWN_STOP_ORPHANED_WORKERS (see setStopWorkersOnHostTeardown).
+    std::atomic<bool> _stopWorkersOnHostTeardown = false;
+    // Set by the host's teardown (see markHostTornDown). Only ever set on workers.
+    std::atomic<bool> _hostTornDown = false;
     // Recursive: a task rejected by a queue disposed outside teardownOnJsThread is destroyed inside the
     // enqueue while this is held, and its destructors can dispatch again.
     RecursiveMutex _jsQueueTeardownMutex;
@@ -604,6 +632,7 @@ private:
     JSValueRef runtimeMakePlatformSpecificAsset(JSFunctionNativeCallContext& callContext);
     JSValueRef runtimeMakeThemableAsset(JSFunctionNativeCallContext& callContext);
     JSValueRef runtimeGetLoadedAssetMetadata(JSFunctionNativeCallContext& callContext);
+    JSValueRef runtimeSetColorPalette(JSFunctionNativeCallContext& callContext);
     JSValueRef runtimeConfigureColorPalette(JSFunctionNativeCallContext& callContext);
     JSValueRef runtimeSetActiveColorPalette(JSFunctionNativeCallContext& callContext);
     JSValueRef runtimeTakeElementSnapshot(JSFunctionNativeCallContext& callContext);
@@ -629,6 +658,7 @@ private:
     JSValueRef runtimeDestroyContext(JSFunctionNativeCallContext& callContext);
 
     JSValueRef runtimeSetLayoutSpecs(JSFunctionNativeCallContext& callContext);
+    JSValueRef runtimeSetViewNodeAssetTracker(JSFunctionNativeCallContext& callContext);
     JSValueRef runtimeMeasureContext(JSFunctionNativeCallContext& callContext);
 
     void callViewNodeActionCallback(const Shared<JSValueRefHolder>& callbackRef, const Value& result);
@@ -704,6 +734,7 @@ private:
     void reevalUnloadedModulesIfNeeded();
 
     std::vector<Ref<JavaScriptRuntime>> getAllWorkers();
+    void markWorkersHostTornDown();
     void dispatchPerformGcToWorkers();
     void performGcNow(IJavaScriptContext& jsContext);
     JavaScriptContextMemoryStatistics dumpMemoryStatistics(IJavaScriptContext& jsContext);
@@ -728,12 +759,14 @@ private:
                             size_t parametersLength,
                             JSExceptionTracker& exceptionTracker);
 
+    // `outParseFailed`, if set, is set to true when the module failed to parse, before any of its code ran.
     ModuleLoadResult loadJsModuleFromBytes(IJavaScriptContext& jsContext,
                                            const BytesView& jsModule,
                                            const StringBox& importPath,
                                            const JSValueRef* parameters,
                                            size_t parametersLength,
-                                           JSExceptionTracker& exceptionTracker);
+                                           JSExceptionTracker& exceptionTracker,
+                                           bool* outParseFailed = nullptr);
 
     ModuleLoadResult loadJsModuleFromNative(IJavaScriptContext& jsContext,
                                             const StringBox& importPath,

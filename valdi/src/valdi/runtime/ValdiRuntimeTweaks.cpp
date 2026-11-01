@@ -39,6 +39,14 @@ bool ValdiRuntimeTweaks::enableCommonJsModuleLoader() const {
     return getConfigKey("VALDI_ENABLE_COMMONJS_MODULE_LOADER");
 }
 
+bool ValdiRuntimeTweaks::enableModuleUnloadWorklist() const {
+    return getConfigKey("VALDI_ENABLE_MODULE_UNLOAD_WORKLIST_ANDROID");
+}
+
+bool ValdiRuntimeTweaks::skipTrailingUnloadGc() const {
+    return getConfigKey("VALDI_SKIP_TRAILING_UNLOAD_GC_ANDROID");
+}
+
 bool ValdiRuntimeTweaks::disableHotReloaderLazyDenylist() const {
     return getConfigKey("VALDI_DISABLE_HOTRELOADER_LAZY_DENYLIST");
 }
@@ -132,6 +140,12 @@ bool ValdiRuntimeTweaks::refuseDispatchAfterJsQueueTeardown() const {
     return _tweakValueProvider->getBool(configKey, true);
 }
 
+bool ValdiRuntimeTweaks::enableTeardownStopOrphanedWorkers() const {
+    auto configKey =
+        StringCache::getGlobal().makeStringFromLiteral(std::string_view("VALDI_ENABLE_TEARDOWN_STOP_ORPHANED_WORKERS"));
+    return _tweakValueProvider->getBool(configKey, false);
+}
+
 bool ValdiRuntimeTweaks::applyManagedChildFramePadding() const {
     auto configKey =
         StringCache::getGlobal().makeStringFromLiteral(std::string_view("VALDI_MANAGES_CHILD_FRAME_PADDING_ENABLED"));
@@ -152,8 +166,8 @@ bool ValdiRuntimeTweaks::useTopDownMoveOrder() const {
     return _tweakValueProvider->getInt(configKey, 0) > 0;
 }
 
-bool ValdiRuntimeTweaks::enableMmapModuleArchives() const {
-    return getConfigKey("VALDI_ENABLE_MMAP_MODULE_ARCHIVES");
+bool ValdiRuntimeTweaks::enableMmapModuleArchiveCacheReuse() const {
+    return getConfigKey("VALDI_MMAP_MODULE_ARCHIVES_CACHE_REUSE");
 }
 
 bool ValdiRuntimeTweaks::skipSourceMapLookup() const {
@@ -162,42 +176,6 @@ bool ValdiRuntimeTweaks::skipSourceMapLookup() const {
 
 bool ValdiRuntimeTweaks::disableViewPoolingOnLayoutCallbacks() const {
     return getConfigKey("VALDI_DISABLE_VIEW_POOLING_ON_LAYOUT_CALLBACKS");
-}
-
-bool ValdiRuntimeTweaks::isMmapModuleArchiveDenylisted(const StringBox& modulePath) const {
-    static const StringBox kKey = StringCache::getGlobal().makeStringFromLiteral("VALDI_MMAP_MODULE_ARCHIVES_DENYLIST");
-    auto denylist = _tweakValueProvider->getString(kKey, StringBox());
-    if (denylist.isEmpty()) {
-        return false;
-    }
-
-    auto moduleView = modulePath.toStringView();
-    auto listView = denylist.toStringView();
-    size_t start = 0;
-    while (start <= listView.size()) {
-        auto end = listView.find(',', start);
-        if (end == std::string_view::npos) {
-            end = listView.size();
-        }
-        auto prefix = listView.substr(start, end - start);
-        while (!prefix.empty() && prefix.front() == ' ') {
-            prefix.remove_prefix(1);
-        }
-        while (!prefix.empty() && prefix.back() == ' ') {
-            prefix.remove_suffix(1);
-        }
-        // A trailing '$' anchors the entry: "camera$" matches only the module
-        // "camera", not "camera_control_center". Without it the entry is a prefix.
-        bool exact = !prefix.empty() && prefix.back() == '$';
-        if (exact) {
-            prefix.remove_suffix(1);
-        }
-        if (!prefix.empty() && (exact ? moduleView == prefix : moduleView.substr(0, prefix.size()) == prefix)) {
-            return true;
-        }
-        start = end + 1;
-    }
-    return false;
 }
 
 bool ValdiRuntimeTweaks::enableANRDiagnostics() const {

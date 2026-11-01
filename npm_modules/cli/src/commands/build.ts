@@ -59,6 +59,12 @@ async function valdiBuild(argv: ArgumentsResolver<CommandParameters>) {
       await bazel.buildTarget(buildInfo.application, buildInfo.bazelArgs);
       break;
     }
+    case PLATFORM.WEB: {
+      logReproduceThisCommandIfNeeded(argv);
+      console.log('Building web application...');
+      await bazel.buildTarget(buildInfo.application, buildInfo.bazelArgs);
+      break;
+    }
   }
 }
 
@@ -82,7 +88,7 @@ export const builder = makeArgsBuilder((yargs: Argv<CommandParameters>) => {
       requiresArg: true,
     })
     .option('simulator', {
-      describe: 'Whether to build for simulator or for device',
+      describe: 'Build for the iOS simulator (default). Pass --no-simulator to build for a device',
       type: 'boolean',
     });
 });

@@ -137,20 +137,25 @@ function symbolicateStackFrame(stackFrame: StackFrame, getOrCreateSourceMapFunc:
     return stackFrame;
   }
 
-  const sourceMap = getOrCreateSourceMapFunc(stackFrame.fileName, createSourceMap);
-  if (!sourceMap) {
+  try {
+    const sourceMap = getOrCreateSourceMapFunc(stackFrame.fileName, createSourceMap);
+    if (!sourceMap) {
+      return stackFrame;
+    }
+
+    const resolved = sourceMap.resolve(stackFrame.line, stackFrame.column, stackFrame.name);
+    if (!resolved) {
+      return stackFrame;
+    }
+
+    const fileName = resolved.fileName ?? stackFrame.fileName;
+    const name = resolved.name ?? stackFrame.name;
+
+    return { fileName, name, line: resolved.line, column: resolved.column };
+  } catch (err: any) {
+    console.error(`Failed to symbolicate stack frame ${stackFrame.fileName}: ${err.message}`);
     return stackFrame;
   }
-
-  const resolved = sourceMap.resolve(stackFrame.line, stackFrame.column, stackFrame.name);
-  if (!resolved) {
-    return stackFrame;
-  }
-
-  const fileName = resolved.fileName ?? stackFrame.fileName;
-  const name = resolved.name ?? stackFrame.name;
-
-  return { fileName, name, line: resolved.line, column: resolved.column };
 }
 
 export function symbolicateStackFrames(
@@ -166,7 +171,19 @@ export function symbolicateStackFrames(
   return out;
 }
 
-export function symbolicateStack(stack: string, getOrCreateSourceMapFunc: GetOrCreateSourceMapFunc): string {
+export interface SymbolicatedStack {
+  stack: string;
+  frames: StackFrame[];
+}
+
+/**
+ * Symbolicates a stack and also returns its frames. A stack that cannot be processed is returned
+ * unchanged with no frames.
+ */
+export function symbolicateStackWithFrames(
+  stack: string,
+  getOrCreateSourceMapFunc: GetOrCreateSourceMapFunc,
+): SymbolicatedStack {
   try {
     let stackFrames = parseStackFrames(stack);
     stackFrames = symbolicateStackFrames(stackFrames, getOrCreateSourceMapFunc);
@@ -189,9 +206,13 @@ export function symbolicateStack(stack: string, getOrCreateSourceMapFunc: GetOrC
       newStack += ')\n';
     }
 
-    return newStack;
+    return { stack: newStack, frames: stackFrames };
   } catch (err: any) {
     console.error('Failed to process stack frames:', err.message, err.stack);
-    return stack;
+    return { stack, frames: [] };
   }
+}
+
+export function symbolicateStack(stack: string, getOrCreateSourceMapFunc: GetOrCreateSourceMapFunc): string {
+  return symbolicateStackWithFrames(stack, getOrCreateSourceMapFunc).stack;
 }

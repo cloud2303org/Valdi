@@ -6,6 +6,7 @@
 #include "valdi/runtime/Context/IViewNodesAssetTracker.hpp"
 #include "valdi/runtime/Context/ViewNodeAssetHandler.hpp"
 #include "valdi/runtime/Context/ViewNodeScrollState.hpp"
+#include "valdi/runtime/Context/ViewNodesAssetTrackerCallbackBridge.hpp"
 #include "valdi/runtime/Interfaces/ITweakValueProvider.hpp"
 #include "valdi/runtime/JavaScript/JavaScriptANRDetector.hpp"
 #include "valdi/runtime/JavaScript/JavaScriptMessagePort.hpp"
@@ -63,6 +64,7 @@
 #include <atomic>
 #include <condition_variable>
 #include <cstdint>
+#include <cstring>
 #include <future>
 #include <iostream>
 #include <memory>
@@ -110,6 +112,38 @@ public:
     Value getBinary(const StringBox& key, const Value& fallback) override {
         return config.getMapValue(key);
     }
+};
+
+// Overrides only the keys it is given and returns the fallback for every other key, so a test can flip one
+// tweak without changing the defaults of the rest (TestTweakValueProvider returns false for missing keys).
+class OverridingTweakValueProvider : public SharedPtrRefCountable, public ITweakValueProvider {
+public:
+    explicit OverridingTweakValueProvider(FlatMap<StringBox, bool> boolOverrides)
+        : _boolOverrides(std::move(boolOverrides)) {}
+
+    StringBox getString(const StringBox& key, const StringBox& fallback) override {
+        return fallback;
+    }
+
+    bool getBool(const StringBox& key, bool fallback) override {
+        auto it = _boolOverrides.find(key);
+        return it != _boolOverrides.end() ? it->second : fallback;
+    }
+
+    float getFloat(const StringBox& key, float fallback) override {
+        return fallback;
+    }
+
+    int32_t getInt(const StringBox& key, int32_t fallback) override {
+        return fallback;
+    }
+
+    Value getBinary(const StringBox& key, const Value& fallback) override {
+        return fallback;
+    }
+
+private:
+    FlatMap<StringBox, bool> _boolOverrides;
 };
 
 class TestValueTypedProxyObject : public ValueTypedProxyObject {
@@ -281,6 +315,37 @@ TEST_P(RuntimeFixture, exposesDefaultApiVersion) {
     ASSERT_EQ(0, evalResult.value().toInt());
 }
 
+TEST_P(RuntimeFixture, exposesGlobalThis) {
+    std::string evalBody = "return typeof globalThis !== 'undefined' && globalThis === global;";
+
+    auto evalResult = wrapper.runtime->getJavaScriptRuntime()->evaluateScript(
+        makeShared<ByteBuffer>(evalBody)->toBytesView(), STRING_LITERAL("eval.js"));
+
+    ASSERT_TRUE(evalResult) << evalResult.description();
+    ASSERT_TRUE(evalResult.value().toBool());
+}
+
+TEST_P(RuntimeFixture, supportsUnicodePropertyEscapesInRegExp) {
+    // Hermes rejects \p{...} at parse time unless built with HERMES_ENABLE_UNICODE_REGEXP_PROPERTY_ESCAPES,
+    // which fails the whole module that contains the regex literal.
+    // [\P{...}] is left out on purpose: Hermes mis-handles a negated property inside a class.
+    std::string evalBody = R"(return [
+        /^\p{L}+$/u.test('午前'),
+        /\p{L}/u.test('12:30'),
+        new RegExp('^\\p{L}+$', 'u').test('午前'),
+        /^\P{L}+$/u.test('12:30'),
+        /^[\p{L}\d]+$/u.test('abc123'),
+        /\p{Script=Latin}/u.test('é'),
+        /\p{Script=Latin}/u.test('ع'),
+    ].map(Number).join('');)";
+
+    auto evalResult = wrapper.runtime->getJavaScriptRuntime()->evaluateScript(
+        makeShared<ByteBuffer>(evalBody)->toBytesView(), STRING_LITERAL("eval.js"));
+
+    ASSERT_TRUE(evalResult) << evalResult.description();
+    ASSERT_EQ(STRING_LITERAL("1011110"), evalResult.value().toStringBox());
+}
+
 TEST_P(RuntimeFixture, traceProxyRetainsCallbackAcrossGC) {
     // Regression: JavaScriptRuntimeTraceProxyCallable used to hold its wrapped callback as a bare,
     // non-owning JSValue. Under Hermes the callback's pooled value could be collected and its slot
@@ -437,6 +502,39 @@ TEST_P(RuntimeFixture, clearViewNodesOnDestroy) {
         ASSERT_FALSE(child->getParent() != nullptr);
         ASSERT_EQ(1, child->retainCount());
     }
+}
+
+// An attribute update rendered by JS can still be queued for the main thread when the context is destroyed.
+// Destroying it in that window must drop the update: the views keep no attributes and the tree stays cleared.
+TEST_P(RuntimeFixture, pendingAttributeUpdateIsDroppedWhenContextIsDestroyed) {
+    auto viewModelParameters = makeShared<ValueMap>();
+    auto tree = wrapper.createViewNodeTreeAndContext("test", "DynamicAttributes", Value(viewModelParameters));
+    wrapper.waitUntilAllUpdatesCompleted();
+
+    auto rootNode = tree->getRootViewNode();
+    ASSERT_TRUE(rootNode != nullptr);
+    ASSERT_EQ(static_cast<uint32_t>(2), rootNode->getChildCount());
+    auto rootView = rootNode->getView();
+    auto title = rootNode->getChildAt(static_cast<uint32_t>(0))->getView();
+    auto subtitle = rootNode->getChildAt(static_cast<uint32_t>(1))->getView();
+
+    (*viewModelParameters)[STRING_LITERAL("title")] = Valdi::Value(std::string("Hello"));
+    (*viewModelParameters)[STRING_LITERAL("subtitleHeight")] = Valdi::Value(45.5);
+    (*viewModelParameters)[STRING_LITERAL("padding")] = Valdi::Value(10);
+    wrapper.setViewModel(tree->getContext(), Value(viewModelParameters));
+
+    // Let JS render without running the main queue, so the update is enqueued but not applied.
+    wrapper.flushJsQueue();
+    ASSERT_TRUE(tree->getContext()->hasPendingRenderRequests());
+
+    wrapper.runtime->destroyContext(tree->getContext());
+    wrapper.flushQueues();
+
+    EXPECT_EQ(DummyView("SCValdiView"), getDummyView(rootView));
+    EXPECT_EQ(DummyView("SCValdiLabel"), getDummyView(title));
+    EXPECT_EQ(DummyView("SCValdiLabel"), getDummyView(subtitle));
+    EXPECT_TRUE(tree->getRootViewNode() == nullptr);
+    EXPECT_FALSE(rootNode->hasView());
 }
 
 TEST_P(RuntimeFixture, respectAttributeTyping) {
@@ -5772,6 +5870,110 @@ TEST_P(RuntimeFixture, canTrackAssets) {
     ASSERT_EQ(1, assetTracker->changedCount);
 }
 
+TEST_P(RuntimeFixture, canTrackBundledAssetThroughJavaScriptRenderer) {
+    std::atomic_int beganRequestCount = 0;
+    std::atomic_int endRequestCount = 0;
+    std::atomic_int changedCount = 0;
+    std::atomic_int allAssetsLoadedCount = 0;
+    std::atomic_int trackedNodeId = 0;
+    std::atomic_bool loadedWithoutError = false;
+
+    auto onAssetEvent = makeShared<ValueFunctionWithCallable>([&](const auto& callContext) {
+        const auto eventType = callContext.getParameter(0).toInt();
+        trackedNodeId = callContext.getParameter(1).toInt();
+
+        switch (eventType) {
+            case ViewNodesAssetTrackerCallbackBridge::kEventTypeBeganRequesting:
+                beganRequestCount++;
+                break;
+            case ViewNodesAssetTrackerCallbackBridge::kEventTypeEndRequesting:
+                endRequestCount++;
+                break;
+            case ViewNodesAssetTrackerCallbackBridge::kEventTypeLoadedAssetChanged:
+                loadedWithoutError = callContext.getParameter(2).isUndefined();
+                changedCount++;
+                break;
+        }
+
+        return Value::undefined();
+    });
+    auto onAllAssetsLoaded = makeShared<ValueFunctionWithCallable>([&](const auto& /* callContext */) {
+        allAssetsLoadedCount++;
+        return Value::undefined();
+    });
+    auto viewModel = makeShared<ValueMap>();
+    (*viewModel)[STRING_LITERAL("showImage")] = Value(true);
+    (*viewModel)[STRING_LITERAL("onAssetEvent")] = Value(onAssetEvent);
+    (*viewModel)[STRING_LITERAL("onAllAssetsLoaded")] = Value(onAllAssetsLoaded);
+
+    auto tree = wrapper.createViewNodeTreeAndContext(
+        STRING_LITERAL("TrackedBundledAsset@test/src/TrackedBundledAsset"), Value(viewModel), Value());
+    wrapper.flushJsQueue();
+
+    ASSERT_NE(nullptr, tree->getAssetTracker());
+    ASSERT_EQ(0, beganRequestCount);
+    ASSERT_EQ(0, endRequestCount);
+    ASSERT_EQ(0, changedCount);
+    ASSERT_EQ(0, allAssetsLoadedCount);
+
+    ASSERT_TRUE(wrapper.mainQueue->runNextTask());
+    wrapper.flushJsQueue();
+
+    ASSERT_EQ(1, beganRequestCount);
+    ASSERT_EQ(0, endRequestCount);
+    ASSERT_EQ(0, changedCount);
+    ASSERT_EQ(0, allAssetsLoadedCount);
+    ASSERT_NE(0, trackedNodeId);
+
+    wrapper.runtime->getWorkerQueue()->sync([]() {});
+    ASSERT_TRUE(wrapper.mainQueue->runNextTask());
+    wrapper.flushJsQueue();
+
+    ASSERT_EQ(1, beganRequestCount);
+    ASSERT_EQ(0, endRequestCount);
+    ASSERT_EQ(1, changedCount);
+    ASSERT_EQ(1, allAssetsLoadedCount);
+    ASSERT_TRUE(loadedWithoutError);
+
+    (*viewModel)[STRING_LITERAL("showImage")] = Value(false);
+    wrapper.setViewModel(tree->getContext(), Value(viewModel));
+    wrapper.waitUntilAllUpdatesCompleted();
+    wrapper.flushJsQueue();
+
+    ASSERT_EQ(1, beganRequestCount);
+    ASSERT_EQ(1, endRequestCount);
+    ASSERT_EQ(1, changedCount);
+    ASSERT_EQ(1, allAssetsLoadedCount);
+
+    wrapper.runtime->getJavaScriptRuntime()->callComponentFunction(tree->getContext(),
+                                                                   STRING_LITERAL("clearAssetTracker"));
+    wrapper.flushJsQueue();
+
+    ASSERT_EQ(nullptr, tree->getAssetTracker());
+}
+
+// Compares the WebP header rather than the byte count, which depends on whether the host's image
+// pipeline embeds an ICC profile chunk for the image's colorspace.
+::testing::AssertionResult isExtendedWebPWithSize(const BytesView& bytes, uint32_t width, uint32_t height) {
+    // RIFF header (12) + VP8X chunk header (8) + flags and reserved (4) + 24-bit canvas width and height minus one (6).
+    if (bytes.size() < 30 || std::memcmp(bytes.data(), "RIFF", 4) != 0 ||
+        std::memcmp(bytes.data() + 8, "WEBP", 4) != 0 || std::memcmp(bytes.data() + 12, "VP8X", 4) != 0) {
+        return ::testing::AssertionFailure() << "not an extended WebP (" << bytes.size() << " bytes)";
+    }
+    auto readUInt24 = [&](size_t offset) {
+        const auto* data = bytes.data() + offset;
+        return static_cast<uint32_t>(data[0]) | (static_cast<uint32_t>(data[1]) << 8) |
+               (static_cast<uint32_t>(data[2]) << 16);
+    };
+    auto actualWidth = readUInt24(24) + 1;
+    auto actualHeight = readUInt24(27) + 1;
+    if (actualWidth != width || actualHeight != height) {
+        return ::testing::AssertionFailure()
+               << "WebP is " << actualWidth << "x" << actualHeight << ", expected " << width << "x" << height;
+    }
+    return ::testing::AssertionSuccess();
+}
+
 TEST_P(RuntimeFixture, canLoadBundledAsset) {
     configureWrapperWithRemoteSupport(wrapper);
 
@@ -5792,7 +5994,7 @@ TEST_P(RuntimeFixture, canLoadBundledAsset) {
 
     ASSERT_TRUE(loadedAsset != nullptr);
 
-    ASSERT_EQ(static_cast<size_t>(1742), loadedAsset->getBytes().size());
+    ASSERT_TRUE(isExtendedWebPWithSize(loadedAsset->getBytes(), 88, 88));
 }
 
 void loadRemoteBundle(RuntimeWrapper& wrapper) {
@@ -6039,7 +6241,7 @@ TEST_P(RuntimeFixture, canLoadRemoteAsset) {
 
     ASSERT_TRUE(loadedAsset != nullptr);
 
-    ASSERT_EQ(static_cast<size_t>(1070), loadedAsset->getBytes().size());
+    ASSERT_TRUE(isExtendedWebPWithSize(loadedAsset->getBytes(), 60, 44));
 }
 
 TEST_P(RuntimeFixture, canResolveRemoteAssetWithKebabCaseFromRemoteComponent) {
@@ -6134,7 +6336,7 @@ TEST_P(RuntimeFixture, canHandleRemoteModuleLoadAsyncFailure) {
         getRootView(tree));
 }
 
-TEST_P(RuntimeFixture, canRemoveUnusedResourcesOnTrimMemory) {
+static void verifyUnusedResourceCleanup(RuntimeWrapper& wrapper) {
     // Disable inline assets for this test as they will prevent the "test" module
     // to be found as unused.
     wrapper.runtime->getResourceManager().setInlineAssetsEnabled(false);
@@ -6228,6 +6430,42 @@ TEST_P(RuntimeFixture, canRemoveUnusedResourcesOnTrimMemory) {
     ASSERT_TRUE(wrapper.runtime->getJavaScriptRuntime()->isJsModuleLoaded(
         ResourceId(STRING_LITERAL("test2"), STRING_LITERAL("src/TestImport.vue.generated"))));
     ASSERT_TRUE(wrapper.runtime->getJavaScriptRuntime()->isJsModuleLoaded(ResourceId(STRING_LITERAL("Valdi"))));
+}
+
+TEST_P(RuntimeFixture, canRemoveUnusedResourcesOnTrimMemory) {
+    verifyUnusedResourceCleanup(wrapper);
+}
+
+TEST_P(RuntimeFixture, moduleUnloadExperimentArmsRetainAndReloadModules) {
+    for (bool worklist : {false, true}) {
+        for (bool skipTrailingGc : {false, true}) {
+            SCOPED_TRACE(::testing::Message() << "worklist=" << worklist << " skipTrailingGc=" << skipTrailingGc);
+            FlatMap<StringBox, bool> overrides;
+            overrides[STRING_LITERAL("VALDI_ENABLE_MODULE_UNLOAD_WORKLIST_ANDROID")] = worklist;
+            overrides[STRING_LITERAL("VALDI_SKIP_TRAILING_UNLOAD_GC_ANDROID")] = skipTrailingGc;
+            auto provider = makeShared<OverridingTweakValueProvider>(std::move(overrides));
+            auto armOwner = std::unique_ptr<RuntimeWrapper, void (*)(RuntimeWrapper*)>(
+                new RuntimeWrapper(getJsBridge(), getTSNMode(), false, provider.toShared()),
+                [](RuntimeWrapper* runtime) {
+                    runtime->teardown();
+                    delete runtime;
+                });
+            auto& arm = *armOwner;
+            verifyUnusedResourceCleanup(arm);
+
+            auto worklistEnabled = arm.runtime->getJavaScriptRuntime()->evaluateScript(
+                makeShared<ByteBuffer>("return runtime.enableModuleUnloadWorklist;")->toBytesView(),
+                STRING_LITERAL("eval.js"));
+            ASSERT_TRUE(worklistEnabled) << worklistEnabled.description();
+            ASSERT_EQ(worklist, worklistEnabled.value().toBool());
+
+            bool completed = false;
+            arm.runtime->getJavaScriptRuntime()->unloadUnusedModules([&completed] { completed = true; });
+            arm.flushQueues();
+            ASSERT_TRUE(completed);
+            ASSERT_TRUE(arm.runtime->getJavaScriptRuntime()->isJsModuleLoaded(ResourceId(STRING_LITERAL("Valdi"))));
+        }
+    }
 }
 
 TEST_P(RuntimeFixture, retainsReferencedModulesInNativeOnTrimMemory) {
@@ -6867,10 +7105,26 @@ TEST_P(RuntimeFixture, workerCanBeTerminatedBeforeInitialization) {
     EXPECT_EQ("works", result.toString());
 }
 
+// Workers read VALDI_USE_COOPERATIVE_TERMINATION from the host's tweaks at postInit. Under the default
+// cooperative mode terminate() does not interrupt running JS, so a worker spinning in a loop is never stopped:
+// the busy-worker tests would leak a thread spinning at full CPU into every later test. Make workers created
+// afterwards use aggressive termination; the host keeps the default so the fixture tears down as usual.
+static void useAggressiveWorkerTermination(RuntimeWrapper& wrapper) {
+    FlatMap<StringBox, bool> overrides;
+    overrides[STRING_LITERAL("VALDI_USE_COOPERATIVE_TERMINATION")] = false;
+    wrapper.runtime->setRuntimeTweaks(
+        makeShared<ValdiRuntimeTweaks>(makeShared<OverridingTweakValueProvider>(std::move(overrides)).toShared()));
+    wrapper.runtime->getJavaScriptRuntime()->setCooperativeTermination(true);
+}
+
 TEST_P(RuntimeFixture, busyWorkerCanBeTerminated) {
     if (isJSCore()) {
         GTEST_SKIP() << "JavaScriptCore cannot interrupt a pure JavaScript loop through its public API";
     }
+    if (isWithTSN()) {
+        GTEST_SKIP() << "TSN is unused; its native-compiled loop is not reliably interruptible";
+    }
+    useAggressiveWorkerTermination(wrapper);
 
     auto tree =
         wrapper.createViewNodeTreeAndContext(STRING_LITERAL("WorkerTest@test/src/WorkerTest"), Value(), Value());
@@ -6885,6 +7139,10 @@ TEST_P(RuntimeFixture, busyWorkerWithTransferredPortCanBeTerminated) {
     if (isJSCore()) {
         GTEST_SKIP() << "JavaScriptCore cannot interrupt a pure JavaScript loop through its public API";
     }
+    if (isWithTSN()) {
+        GTEST_SKIP() << "TSN is unused; its native-compiled loop is not reliably interruptible";
+    }
+    useAggressiveWorkerTermination(wrapper);
 
     auto tree =
         wrapper.createViewNodeTreeAndContext(STRING_LITERAL("WorkerTest@test/src/WorkerTest"), Value(), Value());
@@ -7723,6 +7981,142 @@ TEST_P(RuntimeFixture, disposedWorkerReleasedOffJsThreadWhileExecutingIsSafe) {
 
     EXPECT_EQ(std::future_status::ready, dropStatus)
         << "dropping a disposed worker's last reference off its JS thread must not block on in-flight work";
+}
+
+// A runtime whose last reference drops inside a task on its own JS thread must tear down inline. Blocking on
+// its own queue from teardown traps (GCD) or deadlocks (dedicated thread).
+TEST_P(RuntimeFixture, runtimeReleasedFromTaskOnItsOwnJsThreadTearsDownInline) {
+    auto* hostRuntime = wrapper.runtime->getJavaScriptRuntime();
+    hostRuntime->dispatchSynchronouslyOnJsThread(STRING_LITERAL("test.runtime"), [](auto& /*jsEntry*/) {});
+    auto worker = hostRuntime->createWorker();
+    auto* workerRuntime = dynamic_cast<JavaScriptRuntime*>(worker.get());
+    ASSERT_NE(nullptr, workerRuntime);
+    {
+        std::promise<void> initialized;
+        workerRuntime->getJsDispatchQueue()->async([&]() { initialized.set_value(); });
+        initialized.get_future().wait();
+    }
+
+    std::weak_ptr<snap::valdi_core::JSRuntime> weakWorker = worker;
+    // Queued JS-thread work retains the runtime; wait until the test holds the only reference.
+    for (int i = 0; i < 100 && weakWorker.use_count() > 1; i++) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    if (weakWorker.use_count() > 1) {
+        // Hermes and JSCore (its run-loop flush) keep delayed JS-thread work queued on an idle worker, so the test
+        // cannot own the last reference. That work would outlive the host torn down after this test and run against
+        // its freed state, so tear the worker down while the host is still alive.
+        workerRuntime->fullTeardown();
+        GTEST_SKIP() << "queued JS-thread work keeps the worker retained";
+    }
+    // Shared holder so a copy of the task cannot keep its own reference: the drop happens at reset().
+    auto lastRef = std::make_shared<std::shared_ptr<snap::valdi_core::JSRuntime>>(std::move(worker));
+    auto released = std::make_shared<std::promise<void>>();
+    auto releasedFuture = released->get_future();
+    auto droppedLastRef = std::make_shared<std::atomic<bool>>(false);
+    workerRuntime->getJsDispatchQueue()->async([lastRef, released, droppedLastRef]() {
+        *droppedLastRef = lastRef->use_count() == 1;
+        lastRef->reset();
+        released->set_value();
+    });
+    workerRuntime = nullptr;
+
+    if (releasedFuture.wait_for(std::chrono::seconds(10)) != std::future_status::ready) {
+        // The JS thread is wedged inside teardown and cannot be recovered; abort rather than hang the suite.
+        ADD_FAILURE() << "releasing a runtime from its own JS thread deadlocked in teardown";
+        std::abort();
+    }
+    EXPECT_TRUE(droppedLastRef->load());
+    if (auto leftoverWorker = weakWorker.lock()) {
+        ADD_FAILURE() << "the worker outlived the release of the test's reference";
+        // Do not let it outlive the host torn down after this test.
+        dynamic_cast<JavaScriptRuntime*>(leftoverWorker.get())->fullTeardown();
+    }
+}
+
+// A worker holds raw references to its host's ResourceManager, MainThreadManager and AttributeIds. With
+// VALDI_ENABLE_TEARDOWN_STOP_ORPHANED_WORKERS on, host teardown marks the worker, and work dispatched to it
+// afterwards is skipped instead of running against freed host state.
+TEST_P(RuntimeFixture, workerSkipsWorkAfterHostTeardown) {
+    auto* hostRuntime = wrapper.runtime->getJavaScriptRuntime();
+    ASSERT_FALSE(hostRuntime->stopWorkersOnHostTeardown()) << "the flag must default to the old behavior";
+    hostRuntime->setStopWorkersOnHostTeardown(true);
+    hostRuntime->dispatchSynchronouslyOnJsThread(STRING_LITERAL("test.runtime"), [](auto& /*jsEntry*/) {});
+    auto worker = hostRuntime->createWorker();
+    auto* workerRuntime = dynamic_cast<JavaScriptRuntime*>(worker.get());
+    ASSERT_NE(nullptr, workerRuntime);
+    ASSERT_FALSE(workerRuntime->isHostTornDown());
+    // Let the worker finish initializing (queued first on its thread): the flag stops work that starts after host
+    // teardown, not work that is already running there.
+    {
+        std::promise<void> initialized;
+        workerRuntime->getJsDispatchQueue()->async([&]() { initialized.set_value(); });
+        initialized.get_future().wait();
+    }
+
+    wrapper.teardown();
+    ASSERT_TRUE(workerRuntime->isHostTornDown());
+
+    std::atomic<bool> ran = false;
+    workerRuntime->dispatchOnJsThreadAsync(STRING_LITERAL("test.worker"), [&](auto& /*jsEntry*/) { ran = true; });
+    workerRuntime->getJsDispatchQueue()->sync([]() {});
+    EXPECT_FALSE(ran.load());
+
+    workerRuntime = nullptr;
+    worker.reset();
+}
+
+// A worker's own workers hold the same references into the original host, so they are marked too.
+TEST_P(RuntimeFixture, nestedWorkerIsMarkedOnHostTeardown) {
+    auto* hostRuntime = wrapper.runtime->getJavaScriptRuntime();
+    hostRuntime->setStopWorkersOnHostTeardown(true);
+    hostRuntime->dispatchSynchronouslyOnJsThread(STRING_LITERAL("test.runtime"), [](auto& /*jsEntry*/) {});
+
+    auto waitForInit = [](JavaScriptRuntime* runtime) {
+        std::promise<void> initialized;
+        runtime->getJsDispatchQueue()->async([&]() { initialized.set_value(); });
+        initialized.get_future().wait();
+    };
+
+    auto worker = hostRuntime->createWorker();
+    auto* workerRuntime = dynamic_cast<JavaScriptRuntime*>(worker.get());
+    ASSERT_NE(nullptr, workerRuntime);
+    waitForInit(workerRuntime);
+    auto nestedWorker = workerRuntime->createWorker();
+    auto* nestedWorkerRuntime = dynamic_cast<JavaScriptRuntime*>(nestedWorker.get());
+    ASSERT_NE(nullptr, nestedWorkerRuntime);
+    EXPECT_TRUE(nestedWorkerRuntime->stopWorkersOnHostTeardown());
+    waitForInit(nestedWorkerRuntime);
+
+    wrapper.teardown();
+    EXPECT_TRUE(workerRuntime->isHostTornDown());
+    EXPECT_TRUE(nestedWorkerRuntime->isHostTornDown());
+
+    nestedWorkerRuntime = nullptr;
+    nestedWorker.reset();
+    workerRuntime = nullptr;
+    worker.reset();
+}
+
+TEST_P(RuntimeFixture, workersInheritStopWorkersOnHostTeardownOff) {
+    auto* hostRuntime = wrapper.runtime->getJavaScriptRuntime();
+    ASSERT_FALSE(hostRuntime->stopWorkersOnHostTeardown());
+    hostRuntime->dispatchSynchronouslyOnJsThread(STRING_LITERAL("test.runtime"), [](auto& /*jsEntry*/) {});
+    auto worker = hostRuntime->createWorker();
+    auto* workerRuntime = dynamic_cast<JavaScriptRuntime*>(worker.get());
+    ASSERT_NE(nullptr, workerRuntime);
+    EXPECT_FALSE(workerRuntime->stopWorkersOnHostTeardown());
+    {
+        std::promise<void> initialized;
+        workerRuntime->getJsDispatchQueue()->async([&]() { initialized.set_value(); });
+        initialized.get_future().wait();
+    }
+
+    // Tear the worker down before the host: with the switch off nothing protects it from the host's freed state.
+    workerRuntime->fullTeardown();
+    workerRuntime = nullptr;
+    worker.reset();
+    wrapper.teardown();
 }
 
 // Verifies that a sync JS call from the main thread triggers the assertion when the module has
@@ -8610,6 +9004,37 @@ TEST_P(RuntimeFixture, scopeNameAppearsInDisposedReferenceError) {
         << "Expected error message to contain scopeName 'MyFeature.MyCallsite', got: " << errorMessage.slowToString();
 }
 
+// A native objects manager can be destroyed twice: an explicit dispose, then again when its owner is
+// deallocated. The repeat finds the scope context already gone and must be a no-op.
+TEST_P(RuntimeFixture, destroyingNativeObjectsManagerTwiceDestroysItsContextOnce) {
+    auto* jsRuntime = wrapper.runtime->getJavaScriptRuntime();
+    Ref<MyNativeObject> nativeObject = makeShared<MyNativeObject>();
+
+    auto contextsBefore = wrapper.runtime->getContextManager().getAllContexts().size();
+    auto objectsManager = jsRuntime->createNativeObjectsManager("");
+    ASSERT_EQ(contextsBefore + 1, wrapper.runtime->getContextManager().getAllContexts().size());
+
+    auto jsResult =
+        callFunctionSync(wrapper, objectsManager, "test/src/WrapNativeObject", "wrapper", {Value(nativeObject)});
+    ASSERT_TRUE(jsResult) << jsResult.description();
+    ASSERT_EQ(2, nativeObject.use_count());
+
+    jsRuntime->destroyNativeObjectsManager(objectsManager);
+    wrapper.flushJsQueue();
+    ASSERT_EQ(1, nativeObject.use_count());
+    ASSERT_EQ(contextsBefore, wrapper.runtime->getContextManager().getAllContexts().size());
+
+    jsRuntime->destroyNativeObjectsManager(objectsManager);
+    wrapper.flushJsQueue();
+    EXPECT_EQ(1, nativeObject.use_count());
+    EXPECT_EQ(contextsBefore, wrapper.runtime->getContextManager().getAllContexts().size());
+
+    jsResult = Result<Value>();
+    objectsManager = nullptr;
+    wrapper.flushJsQueue();
+    EXPECT_EQ(contextsBefore, wrapper.runtime->getContextManager().getAllContexts().size());
+}
+
 TEST_P(RuntimeFixture, supportsSingleCallJsFunction) {
     auto getCallbackFn =
         getJsModulePropertyWithSchema(wrapper.runtime, "test/src/SingleCall", "getCallback", "f():f!():s");
@@ -9317,6 +9742,21 @@ TEST_P(RuntimeFixture, canSwitchActiveCustomColorPalette) {
     wrapper.flushQueues();
 
     ASSERT_EQ(makeColorPaletteTestView(4278190335, 4294902015), getRootView(tree));
+}
+
+TEST_P(RuntimeFixture, supportsDeprecatedSetColorPalette) {
+    auto tree = wrapper.createViewNodeTreeAndContext(STRING_LITERAL("ColorPaletteTest@test/src/ColorPaletteTest"),
+                                                     Value(makeShared<ValueMap>()),
+                                                     Value::undefined());
+
+    wrapper.waitUntilAllUpdatesCompleted();
+
+    wrapper.runtime->getJavaScriptRuntime()->callComponentFunction(tree->getContext(),
+                                                                   STRING_LITERAL("setLegacyColorPalette"));
+
+    wrapper.flushQueues();
+
+    ASSERT_EQ(makeColorPaletteTestView(255, 4294967295), getRootView(tree));
 }
 
 TEST_P(RuntimeFixture, doesNotReapplyCustomColorPaletteWhenInactivePaletteChanges) {
@@ -10235,6 +10675,67 @@ TEST_P(RuntimeFixture, canCaptureStackTraces) {
     ASSERT_EQ(JavaScriptCapturedStacktrace::Status::NOT_RUNNING, output[0].getStatus());
 }
 
+static std::string bundleNamingSymbolicatorBody() {
+    return R"""(
+    module.exports.symbolicate = function(error) {
+        var symbolicated = new Error(error.message);
+        symbolicated.stack = error.stack;
+        symbolicated.stackBundleName = 'send_to';
+        return symbolicated;
+    };
+    )""";
+}
+
+// Captures the stack from inside the InfiniteLoop module, mirroring canCaptureStackTraces.
+static std::vector<JavaScriptCapturedStacktrace> captureStackTracesWhileLooping(RuntimeWrapper& wrapper) {
+    ExitOnDestruct exitOnDestruct;
+    auto callback = makeShared<ValueFunctionWithCallable>(
+        [shouldContinue = exitOnDestruct.shouldContinue](const auto& callContext) -> Value {
+            return Value(static_cast<bool>(shouldContinue->load()));
+        });
+
+    auto function =
+        getJsModulePropertyAsUntypedFunction(wrapper.runtime, nullptr, "test/src/InfiniteLoop", "callIndefinitely");
+    EXPECT_TRUE(function) << function.description();
+    if (!function) {
+        return {};
+    }
+    function.value()->call(ValueFunctionFlagsNeverCallSync, {Value(callback)}).value();
+
+    auto output = wrapper.runtime->getJavaScriptRuntime()->captureStackTraces(std::chrono::seconds(5));
+    (*exitOnDestruct.shouldContinue) = false;
+    wrapper.flushJsQueue();
+    return output;
+}
+
+TEST_P(RuntimeFixture, capturesBundleNamedByStackWhenANRDiagnosticsAreEnabled) {
+    wrapper.teardown();
+
+    auto tweakModule = makeShared<TestTweakValueProvider>().toShared();
+    tweakModule->config.setMapValue("VALDI_ENABLE_MODULE_LOAD_DIAGNOSTICS", Valdi::Value(static_cast<bool>(true)));
+    wrapper = RuntimeWrapper(getJsBridge(), getTSNMode(), false, tweakModule);
+
+    wrapper.hotReload(STRING_LITERAL("valdi_core"), STRING_LITERAL("src/Symbolicator.js"), bundleNamingSymbolicatorBody());
+
+    auto output = captureStackTracesWhileLooping(wrapper);
+
+    ASSERT_EQ(static_cast<size_t>(1), output.size());
+    ASSERT_EQ(JavaScriptCapturedStacktrace::Status::RUNNING, output[0].getStatus());
+    ASSERT_EQ(STRING_LITERAL("send_to"), output[0].getStackBundleName());
+}
+
+TEST_P(RuntimeFixture, dropsBundleNamedByStackWhenANRDiagnosticsAreDisabled) {
+    ASSERT_FALSE(wrapper.runtime->getJavaScriptRuntime()->anrDiagnosticsEnabled());
+
+    wrapper.hotReload(STRING_LITERAL("valdi_core"), STRING_LITERAL("src/Symbolicator.js"), bundleNamingSymbolicatorBody());
+
+    auto output = captureStackTracesWhileLooping(wrapper);
+
+    ASSERT_EQ(static_cast<size_t>(1), output.size());
+    ASSERT_EQ(JavaScriptCapturedStacktrace::Status::RUNNING, output[0].getStatus());
+    ASSERT_TRUE(output[0].getStackBundleName().isEmpty());
+}
+
 static std::atomic_int myAttributionFnCallCount = 0;
 static const void* myAttributionFn(const Valdi::AttributionFunctionCallback& fn) {
     myAttributionFnCallCount++;
@@ -10446,6 +10947,60 @@ TEST_P(RuntimeFixture, recordsScheduledWorkItemForANRAttribution) {
     EXPECT_EQ(std::string::npos, wrapper.runtime->getJavaScriptRuntime()->getANRAttributionInfo().find("[stuck-in:"));
 }
 
+class BlockingModuleFactory : public SharedPtrRefCountable, public snap::valdi_core::ModuleFactory {
+public:
+    explicit BlockingModuleFactory(std::shared_future<void> release) : _release(std::move(release)) {}
+
+    std::promise<void> loading;
+
+    StringBox getModulePath() override {
+        return STRING_LITERAL("test/src/AnrAttributionBlockingModule");
+    }
+
+    Value loadModule() override {
+        loading.set_value();
+        _release.wait();
+        return Value().setMapValue("CONSTANT", Value(1));
+    }
+
+private:
+    std::shared_future<void> _release;
+};
+
+TEST_P(RuntimeFixture, recordsModulePathWhenPushingModuleToMarshallerForANRAttribution) {
+    wrapper.teardown();
+
+    auto tweakModule = makeShared<TestTweakValueProvider>().toShared();
+    tweakModule->config.setMapValue("VALDI_ENABLE_MODULE_LOAD_DIAGNOSTICS", Valdi::Value(static_cast<bool>(true)));
+    wrapper = RuntimeWrapper(getJsBridge(), getTSNMode(), false, tweakModule);
+
+    std::promise<void> release;
+    auto moduleFactory = makeShared<BlockingModuleFactory>(release.get_future().share());
+    auto loading = moduleFactory->loading.get_future();
+    wrapper.runtime->registerNativeModuleFactory(moduleFactory.toShared());
+
+    auto* jsRuntime = wrapper.runtime->getJavaScriptRuntime();
+    bool resolved = false;
+    std::thread resolveThread([&] {
+        SimpleExceptionTracker exceptionTracker;
+        Marshaller marshaller(exceptionTracker);
+        jsRuntime->pushModuleToMarshaller(nullptr, STRING_LITERAL("test/src/AnrAttributionBlockingModule"), marshaller);
+        resolved = static_cast<bool>(exceptionTracker);
+    });
+
+    auto loadStarted = loading.wait_for(std::chrono::seconds(30)) == std::future_status::ready;
+    auto observed = jsRuntime->getANRAttributionInfo();
+    release.set_value();
+    resolveThread.join();
+
+    ASSERT_TRUE(loadStarted);
+    EXPECT_TRUE(resolved);
+    EXPECT_NE(std::string::npos,
+              observed.find("[stuck-in: runtime.pushModuleToMarshaller(test/src/AnrAttributionBlockingModule)]"))
+        << "observed: '" << observed << "'";
+    EXPECT_EQ(std::string::npos, jsRuntime->getANRAttributionInfo().find("[stuck-in:"));
+}
+
 TEST(JavaScriptRuntimeANRAttribution, traceSpanNameKeepsStaticPrefixOnly) {
     EXPECT_EQ(STRING_LITERAL("renderComponent.SendToRecipientList"),
               JavaScriptRuntime::anrNativeCallNameForTraceSpan(STRING_LITERAL("renderComponent.SendToRecipientList")));
@@ -10575,6 +11130,69 @@ TEST_P(RuntimeFixture, preservesBridgedCallbackANRAttributionDuringPromiseContin
         runtime->dispatchSynchronouslyOnJsThread(STRING_LITERAL("test.barrier"), [](auto&) {});
         EXPECT_EQ("", runtime->getANRAttributionInfo());
     }
+}
+
+TEST_P(RuntimeFixture, namesUnattributedBridgedCallbackAfterItsReferenceForANRAttribution) {
+    wrapper.teardown();
+    auto tweaks = makeShared<TestTweakValueProvider>().toShared();
+    tweaks->config.setMapValue("VALDI_ENABLE_MODULE_LOAD_DIAGNOSTICS", Value(true));
+    wrapper = RuntimeWrapper(getJsBridge(), getTSNMode(), false, tweaks);
+    auto* runtime = wrapper.runtime->getJavaScriptRuntime();
+
+    std::string script = "return services => services.subscribe((callReport, timerReport) => {"
+                         "  callReport();"
+                         "  runtime.scheduleWorkItem(() => timerReport(), 0);"
+                         "});";
+    auto installResult =
+        runtime->evaluateScript(makeShared<ByteBuffer>(script)->toBytesView(), STRING_LITERAL("attribution.js"));
+    ASSERT_TRUE(installResult) << installResult.description();
+    auto install = installResult.value().getFunctionRef();
+    ASSERT_NE(nullptr, install);
+
+    Ref<ValueFunction> subscriber;
+    auto subscribe = makeShared<ValueFunctionWithCallable>([&](const auto& callContext) {
+        subscriber = callContext.getParameter(0).getFunctionRef();
+        return Value::undefined();
+    });
+    auto installCall = install->call(ValueFunctionFlagsCallSync, {Value().setMapValue("subscribe", Value(subscribe))});
+    ASSERT_TRUE(installCall) << installCall.description();
+    auto* bridgedSubscriber = dynamic_cast<ValueFunctionWithJSValue*>(subscriber.get());
+    ASSERT_NE(nullptr, bridgedSubscriber);
+    EXPECT_TRUE(bridgedSubscriber->getANRAttribution().isEmpty());
+    auto subscriberName = bridgedSubscriber->getReferenceInfo().toFunctionIdentifier().slowToString();
+    ASSERT_NE(std::string::npos, subscriberName.find("subscribe.<p0>")) << subscriberName;
+
+    std::promise<std::string> callInfo;
+    std::promise<std::string> timerInfo;
+    auto callReport = makeShared<ValueFunctionWithCallable>([&](const auto&) {
+        callInfo.set_value(runtime->getANRAttributionInfo());
+        return Value::undefined();
+    });
+    auto timerReport = makeShared<ValueFunctionWithCallable>([&](const auto&) {
+        timerInfo.set_value(runtime->getANRAttributionInfo());
+        return Value::undefined();
+    });
+    Result<Value> callResult;
+    std::thread caller([&]() {
+        EXPECT_FALSE(runtime->isInJsThread());
+        callResult = subscriber->call(ValueFunctionFlagsNone, {Value(callReport), Value(timerReport)});
+    });
+    caller.join();
+    ASSERT_TRUE(callResult) << callResult.description();
+
+    auto callFuture = callInfo.get_future();
+    auto timerFuture = timerInfo.get_future();
+    ASSERT_EQ(std::future_status::ready, callFuture.wait_for(std::chrono::seconds(30)));
+    ASSERT_EQ(std::future_status::ready, timerFuture.wait_for(std::chrono::seconds(30)));
+    auto callAttribution = callFuture.get();
+    auto timerAttribution = timerFuture.get();
+    EXPECT_NE(std::string::npos, callAttribution.find("[attribution: " + subscriberName + " -> ")) << callAttribution;
+    EXPECT_NE(std::string::npos,
+              timerAttribution.find("[attribution: " + subscriberName + " -> runtime.scheduleWorkItem -> "))
+        << timerAttribution;
+
+    runtime->dispatchSynchronouslyOnJsThread(STRING_LITERAL("test.barrier"), [](auto&) {});
+    EXPECT_EQ("", runtime->getANRAttributionInfo());
 }
 
 TEST_P(RuntimeFixture, returnsOriginalANRAttributionCallbackWhenDiagnosticsAreDisabled) {
@@ -10920,6 +11538,39 @@ TEST_P(RuntimeFixture, canDetectANR) {
 
     ASSERT_TRUE(stacktrace.contains("at onCreate"));
     ASSERT_TRUE(stacktrace.contains("test/src/ANRDetection"));
+}
+
+// The ANR detector holds runtimes by raw pointer and keeps ticking after one of them is destroyed, so
+// runtime teardown must deregister it; a later tick would otherwise dispatch into a freed runtime.
+TEST_P(RuntimeFixture, anrDetectorKeepsTickingSafelyAfterARuntimeIsDestroyed) {
+    auto anrDetector = wrapper.runtimeManager->getANRDetector();
+    anrDetector->setTickInterval(std::chrono::milliseconds(1));
+    anrDetector->start(std::chrono::seconds(30));
+
+    auto waitForTicks = [&](int count) {
+        for (int i = 0; i < count; i++) {
+            auto ticked = std::make_shared<std::promise<void>>();
+            auto tickedFuture = ticked->get_future();
+            anrDetector->onNextTick([ticked]() { ticked->set_value(); });
+            ASSERT_EQ(std::future_status::ready, tickedFuture.wait_for(std::chrono::seconds(5)));
+        }
+    };
+
+    auto secondRuntime = wrapper.runtimeManager->createRuntime(wrapper.resourceLoader, 1.0);
+    auto* secondJsRuntime = secondRuntime->getJavaScriptRuntime();
+    ASSERT_NE(nullptr, secondJsRuntime);
+    secondJsRuntime->dispatchSynchronouslyOnJsThread(STRING_LITERAL("test.runtime"), [](auto& /*jsEntry*/) {});
+    // The detector is now probing the second runtime.
+    waitForTicks(3);
+
+    auto weakSecondJsRuntime = weakRef(secondJsRuntime);
+    secondJsRuntime = nullptr;
+    secondRuntime->fullTeardown();
+    secondRuntime = nullptr;
+    ASSERT_TRUE(weakSecondJsRuntime.expired());
+
+    waitForTicks(20);
+    anrDetector->stop();
 }
 
 TEST_P(RuntimeFixture, cancelsComponentCreationIfDestroyIsCalledBeforeComponentIsCreated) {

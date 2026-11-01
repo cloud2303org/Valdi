@@ -765,11 +765,13 @@ void Runtime::setRuntimeTweaks(const Ref<ValdiRuntimeTweaks>& runtimeTweaks) {
             runtimeTweaks != nullptr ? runtimeTweaks->joinJsThreadOnTeardown() : true);
         _javaScriptRuntime->setRefuseDispatchAfterJsQueueTeardown(
             runtimeTweaks != nullptr ? runtimeTweaks->refuseDispatchAfterJsQueueTeardown() : true);
+        _javaScriptRuntime->setStopWorkersOnHostTeardown(
+            runtimeTweaks != nullptr ? runtimeTweaks->enableTeardownStopOrphanedWorkers() : false);
     }
 }
 
-void Runtime::setMmapCacheDirectory(const Path& path) {
-    _resourceManager->setMmapCacheDirectory(path);
+void Runtime::setMmapCacheDirectory(const Path& path, const std::string& buildVersion) {
+    _resourceManager->setMmapCacheDirectory(path, buildVersion);
 }
 
 void Runtime::setMetrics(const Ref<Metrics>& metrics) {

@@ -5,8 +5,21 @@ This fork retains upstream Git history. `valdiroutes` is the maintained runtime 
 ## Current upstream base
 
 - Repository: https://github.com/Snapchat/Valdi
-- Tag: `beta-0.2.1`
-- Commit: `f26bee4dc170b6c929f71d4dd07d44e033f47176`
+- Branch: upstream `main` as of 2026-11-01
+- Commit: `4aa98f01a46e65ead03a8fc8cc1c21e04f2a465d`
+- Last release tag: `beta-0.2.1` (`f26bee4dc170b6c929f71d4dd07d44e033f47176`)
+
+The 2026-11-01 synchronization merges all 55 commits after that release. The
+application's vendored JSX processor must be updated with the runtime: factory-backed
+custom views use new JSXBootstrap/Renderer entry points, and `lazyImport` now accepts
+a loader callback. Keep the application's Node/Rolldown regressions in the upgrade checks.
+
+The Hermes dependency remains `260318099.0.4`, including native Promise ownership,
+adapter boundary/teardown fixes, and internal-bytecode validation. The older upstream
+Hermes AST patch is not applied to that different engine revision. The existing
+custom-module asset URL method is retained alongside upstream's optional content
+identity method. XCFramework exports retain both arm64 and x86_64 simulator slices
+for the consuming project's current module and Swift tooling.
 
 ## Initial application patch migration
 

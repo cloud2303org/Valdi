@@ -49,7 +49,6 @@ enum class JsThreadDispatchReason {
     RegisterModuleFactory,
     RegisterTypeConverter,
     CallModuleFunction,
-    PushModuleToMarshaller,
     AddModuleUnloadObserver,
     PreloadModule,
     PreloadModules,
@@ -166,6 +165,11 @@ public:
      */
     virtual std::vector<JavaScriptCapturedStacktrace> captureStackTraces(
         std::chrono::steady_clock::duration timeout) = 0;
+
+    /** Whether extra ANR diagnostics are enabled. Safe to read from any thread. */
+    virtual bool anrDiagnosticsEnabled() const {
+        return false;
+    }
 
     // Extra attribution for ANR messages (" [stuck-in: <native call>] [module: <module>]"), or empty
     // if unavailable or ANR diagnostics are off. Reads saved native state without running JS, so it

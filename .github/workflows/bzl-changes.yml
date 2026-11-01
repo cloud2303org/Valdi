@@ -23,6 +23,9 @@ on:
       - 'apps/snapshot_tests/**'
       - 'apps/helloworld/**'
       - 'valdi/src/**'
+      - 'valdi_core/src/**'
+      - 'src/valdi_modules/src/valdi/*/ios/**'
+      - 'src/valdi_modules/src/valdi/*/android/**'
       - 'snap_drawing/**'
       - 'experiments/helloworld_playground/**'
       - 'tools/valdi_web_devtools/**'
@@ -50,6 +53,9 @@ on:
       - 'apps/snapshot_tests/**'
       - 'apps/helloworld/**'
       - 'valdi/src/**'
+      - 'valdi_core/src/**'
+      - 'src/valdi_modules/src/valdi/*/ios/**'
+      - 'src/valdi_modules/src/valdi/*/android/**'
       - 'snap_drawing/**'
       - 'experiments/helloworld_playground/**'
       - 'tools/valdi_web_devtools/**'
@@ -60,6 +66,9 @@ on:
 permissions:
   contents: read
   id-token: write
+  # Read-only: tools/ci/size_report.sh downloads the size-report artifact of an earlier main run
+  # as its baseline. Fork PRs get this read scope too.
+  actions: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -67,15 +76,43 @@ concurrency:
 
 jobs:
   smoke-test:
-    name: Valdi Smoke Tests
-    runs-on: macos-26
+    name: Valdi Smoke Tests (${{ matrix.runner }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-26
+            xcode: '26.5.0'
+            test_name_pattern: ''
+          # macOS 27: its dyld rejects Rust proc-macros stripped by rustc < 1.98
+          # (rust-lang/rust#157750), which macOS 26 runners can't catch. `build ios`
+          # compiles the Rust tool crates, so that's all this leg runs: the full suite
+          # is three cold workspaces, more than this runner's ~44 GB disk / 7 GB RAM.
+          - runner: xcode-27
+            xcode: '27.0.0'
+            test_name_pattern: 'build ios'
+    runs-on: ${{ matrix.runner }}
 
     steps:
       - name: Free disk space
+        env:
+          XCODE_VERSION: ${{ matrix.xcode }}
         run: |
           # The smoke tests bootstrap two separate Bazel workspaces (ui_app +
           # cli_app) which can exhaust the runner's disk. Remove large unused
           # components to reclaim ~5-8 GB.
+          # The xcode-27 image ships several Xcodes and starts with ~40 GB free
+          # (vs ~97 GB on macos-26); keep only the one pin-xcode will select.
+          # Skip if the pin is missing so pin-xcode reports it.
+          XCODE_APP="/Applications/Xcode_${XCODE_VERSION}.app"
+          if [[ -d "$XCODE_APP" ]]; then
+            KEEP=$(cd "$XCODE_APP" && pwd -P)
+            for app in /Applications/Xcode*.app; do
+              [[ -L "$app" ]] && continue
+              [[ "$(cd "$app" && pwd -P)" == "$KEEP" ]] || sudo rm -rf "$app"
+            done
+            find /Applications -maxdepth 1 -name 'Xcode*.app' -type l ! -exec test -e {} \; -exec sudo rm -f {} \;
+          fi
           xcrun simctl delete unavailable 2>/dev/null || true
           sudo rm -rf ~/Library/Developer/CoreSimulator/Caches/* 2>/dev/null || true
           rm -rf ~/Library/Android/sdk/system-images 2>/dev/null || true
@@ -88,6 +125,8 @@ jobs:
 
       - name: Pin Xcode
         uses: ./.github/actions/pin-xcode
+        with:
+          version: ${{ matrix.xcode }}
 
       - name: Configure Bazel cache
         uses: ./.github/actions/bazel-cache
@@ -97,7 +136,7 @@ jobs:
           service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
           service_account_ro: ${{ vars.GCP_SERVICE_ACCOUNT_RO }}
           cache_bucket: ${{ vars.BAZEL_CACHE_BUCKET }}
-          cache_key: smoke-test
+          cache_key: smoke-test-${{ matrix.runner }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -124,18 +163,13 @@ jobs:
         env:
           OPEN_SOURCE_DIR: ${{ github.workspace }}
           PROJECT_ROOT: /tmp/valdi_app
-
-      - name: "Run: Hotreload Delivery Smoke"
-        # Reuses this job's watchman install and the compiler already built by the
-        # smoke tests above (warm bazel cache), so it adds a delivery assertion the
-        # macOS-only hotreload_smoke.sh can't give without a second cold build.
-        run: ./tools/ci/hotreload_delivery_smoke.sh
+          SMOKE_TEST_NAME_PATTERN: ${{ matrix.test_name_pattern }}
 
       - name: Upload test results
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: test-results-macos
+          name: test-results-${{ matrix.runner }}
           path: |
             /tmp/valdi_app/*.log
             /tmp/valdi_app/config.yaml
@@ -171,10 +205,16 @@ jobs:
           distribution: 'zulu'
           java-version: '17'
 
-      - name: Install Bazel
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install Bazel and watchman
         run: |
-          brew install bazelisk
+          brew install bazelisk watchman
           bazel --version
+          watchman --version
           # run_tests.sh invokes `bzl`; on Linux setup_linux_env.sh creates this
           # symlink, but the macOS runner only ships `bazel` from bazelisk.
           sudo ln -sf "$(command -v bazel)" /usr/local/bin/bzl
@@ -183,6 +223,34 @@ jobs:
         # On macOS the `uname != Linux` branch of run_tests.sh fires, running the
         # iOS/macOS ObjC/Swift suites that never execute on the Linux runner.
         run: ./tools/ci/run_tests.sh
+
+      - name: "Run: Hotreload Delivery Smoke"
+        # Lives here, not in the smoke-test job: it builds this (root) workspace, which
+        # shares nothing with the bootstrapped apps there (Bazel 7 vs 8, different repo
+        # names), so it was a third cold output base on that job's smallest runner.
+        if: ${{ !cancelled() }}
+        run: |
+          df -h /
+          ./tools/ci/hotreload_delivery_smoke.sh
+
+      - name: Collect test logs and crash reports
+        # The job log only shows "signal 6: Abort trap"; the abort reason is in the
+        # test log and the simulator crash report. bazel-testlogs is a symlink, so
+        # copy real files for upload-artifact. Best effort: a dangling link makes cp exit 1.
+        if: failure()
+        run: |
+          mkdir -p /tmp/macos-test-logs/testlogs
+          if [ -d bazel-testlogs/valdi ]; then cp -RL bazel-testlogs/valdi /tmp/macos-test-logs/testlogs/ || true; fi
+          if [ -d ~/Library/Logs/DiagnosticReports ]; then cp -R ~/Library/Logs/DiagnosticReports /tmp/macos-test-logs/ || true; fi
+
+      - name: Upload test logs and crash reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-test-logs
+          path: /tmp/macos-test-logs
+          if-no-files-found: ignore
+          retention-days: 7
 
   # Note: Linux CLI distribution tests moved to dedicated workflow:
   # .github/workflows/test-cli-linux.yml
@@ -273,6 +341,34 @@ jobs:
         env:
           OPEN_SOURCE_DIR: ${{ github.workspace }}
           PROJECT_ROOT: /tmp/valdi_app
+          VALDI_EXPORTED_AAR_COPY: ${{ runner.temp }}/valdi-size/hello_world_export.aar
+
+      # Warn-only module size report (step summary; annotations once VALDI_SIZE_ANNOTATE is on).
+      # Never blocks: the script exits 0, and continue-on-error covers anything unexpected.
+      # Each main push publishes its report as the baseline later PRs compare against.
+      - name: "Report: Valdi Module Sizes"
+        id: size-report
+        if: matrix.task == 'build-export'
+        continue-on-error: true
+        run: ./tools/ci/size_report.sh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VALDI_SIZE_AAR: ${{ runner.temp }}/valdi-size/hello_world_export.aar
+          VALDI_SIZE_OUT: ${{ runner.temp }}/valdi-size/size-report.json
+          VALDI_SIZE_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          VALDI_SIZE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          # Rollout phase 1 is report-only. Set to '1' to emit ::warning annotations.
+          VALDI_SIZE_ANNOTATE: '0'
+
+      - name: "Upload: Valdi size report (main baseline)"
+        if: matrix.task == 'build-export' && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.size-report.outcome == 'success'
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: valdi-size-report
+          path: ${{ runner.temp }}/valdi-size/size-report.json
+          if-no-files-found: warn
+          retention-days: 90
 
       - name: "Run: Module Tests"
         if: matrix.task == 'test-modules'
@@ -370,6 +466,13 @@ jobs:
 
       - name: Check API surface
         run: ./tools/ci/api_surface_tests.sh
+
+      # Every attribute declared in NativeTemplateElements.d.ts must be registered on both iOS
+      # and Android (or by the shared C++ runtime). Catches a deleted platform implementation
+      # that would otherwise ship as a silent no-op.
+      - name: Check native implementations
+        if: ${{ !cancelled() }}
+        run: ./tools/ci/native_impl_check.sh
 
   web-integration-test:
     name: valdi_web Integration Test

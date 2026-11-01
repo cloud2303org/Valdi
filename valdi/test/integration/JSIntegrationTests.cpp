@@ -669,6 +669,34 @@ TEST_P(JSContextFixture, unwrapsJsTypedArray) {
     ASSERT_EQ(static_cast<Byte>(7), cppTypedArray->getBuffer().data()[0]);
 }
 
+TEST_P(JSContextFixture, createsTypedArrayFromSliceOfJsArrayBuffer) {
+    SKIP_IF_V8("Ticket: 2254");
+    MAIN_THREAD_INIT();
+    auto wrapper = createWrapper();
+
+    auto jsEntry = wrapper.makeJsEntry();
+    auto& context = jsEntry.context;
+    auto& exceptionTracker = jsEntry.exceptionTracker;
+
+    auto jsTypedArray = context.evaluate("new Uint8Array([1, 2, 3, 4])", "test.js", exceptionTracker);
+    jsEntry.checkException();
+
+    auto cppTypedArray =
+        jsTypedArrayToValueTypedArray(context, jsTypedArray.get(), ReferenceInfoBuilder(), exceptionTracker);
+    jsEntry.checkException();
+    const auto& buffer = cppTypedArray->getBuffer();
+
+    auto slice = newTypedArrayFromBytesView(
+        context, Uint8Array, BytesView(buffer.getSource(), buffer.data() + 1, 2), exceptionTracker);
+    jsEntry.checkException();
+
+    auto result = context.valueToTypedArray(slice.get(), exceptionTracker);
+    jsEntry.checkException();
+
+    ASSERT_EQ(static_cast<size_t>(2), result.length);
+    ASSERT_EQ(buffer.data() + 1, result.data);
+}
+
 struct DummyObject : public Valdi::ValdiObject {
     VALDI_CLASS_HEADER_IMPL(DummyObject);
 };
@@ -1042,6 +1070,38 @@ TEST_P(JSContextFixture, hermesExecutionTerminationInterruptsPrecompiledJavaScri
 
     ASSERT_FALSE(exceptionTracker);
     exceptionTracker.clearError();
+}
+
+TEST_P(JSContextFixture, hermesPrecompilesUnicodePropertyEscapes) {
+    if (!isHermes()) {
+        GTEST_SKIP() << "This verifies the Hermes bytecode compiler used by preCompile";
+    }
+
+    MAIN_THREAD_INIT();
+    auto wrapper = createWrapper();
+    auto jsEntry = wrapper.makeJsEntry();
+    auto& context = jsEntry.context;
+    auto& exceptionTracker = jsEntry.exceptionTracker;
+    auto moduleData = context.preCompile(
+        "module.exports = /^\\p{L}+$/u.test('午前') ? 1 : 0;", "precompiled-property-escapes.js", exceptionTracker);
+    jsEntry.checkException();
+    auto bytecode = getPreCompiledJsModuleData(moduleData);
+    ASSERT_TRUE(bytecode);
+
+    auto moduleFunction =
+        context.evaluatePreCompiled(bytecode.value(), "precompiled-property-escapes.js", exceptionTracker);
+    jsEntry.checkException();
+
+    auto module = context.newObject(exceptionTracker);
+    jsEntry.checkException();
+    JSValueRef params[] = {context.newUndefined(), module, context.newUndefined()};
+    JSFunctionCallContext callContext(context, params, 3, exceptionTracker);
+    context.callObjectAsFunction(moduleFunction.get(), callContext);
+    jsEntry.checkException();
+
+    auto exports = context.getObjectProperty(module.get(), "exports", exceptionTracker);
+    jsEntry.checkException();
+    ASSERT_EQ(1, context.valueToInt(exports.get(), exceptionTracker));
 }
 
 TEST_P(JSContextFixture, javaScriptCoreExecutionTerminationInterruptsAtNativeCallBoundary) {

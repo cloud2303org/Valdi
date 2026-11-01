@@ -194,6 +194,7 @@ cc_library(
         "@fmt",
         "@harfbuzz",
         "@phmap",
+        "@xxhash",
         "@zstd",
     ],
 )
@@ -858,7 +859,7 @@ objc_library(
 
 ios_unit_test(
     name = "valdi_ios_date_formatting_module_test",
-    minimum_os_version = "13.0",
+    minimum_os_version = "15.0",
     runner = "@build_bazel_rules_apple//apple/testing/default_runner:ios_xctestrun_ordered_runner",
     deps = [":objc_date_formatting_module_tests_lib"],
 )
@@ -911,8 +912,26 @@ objc_library(
 )
 
 ios_unit_test(
+    name = "valdi_ios_date_picker_style_reset_test",
+    minimum_os_version = "15.0",
+    runner = "@build_bazel_rules_apple//apple/testing/default_runner:ios_xctestrun_ordered_runner",
+    deps = [":objc_date_picker_style_reset_tests_lib"],
+)
+
+objc_library(
+    name = "objc_date_picker_style_reset_tests_lib",
+    testonly = True,
+    srcs = ["test/ios/SCValdiDatePickerStyleResetTests.m"],
+    copts = ["-I."],
+    includes = ["src"],
+    module_name = "ValdiIosDatePickerStyleResetTests",
+    target_compatible_with = ["@platforms//os:ios"],
+    deps = [":valdi_ios"],
+)
+
+ios_unit_test(
     name = "valdi_ios_pooling_test",
-    minimum_os_version = "13.0",
+    minimum_os_version = "15.0",
     runner = "@build_bazel_rules_apple//apple/testing/default_runner:ios_xctestrun_ordered_runner",
     deps = [":objc_pooling_tests_lib"],
 )
@@ -1215,12 +1234,12 @@ cc_test(
     linkstatic = 1,
     visibility = ["//visibility:public"],
     deps = [
-        "//bzl/valdi:clientsql_native_test_library",
         ":test_hermes_lib",
         ":test_integration_lib",
         ":test_runtime_lib",
         ":test_snap_drawing_lib",
         ":test_svg_lib",
+        "//bzl/valdi:clientsql_native_test_library",
         "@gtest//:gtest_main",
     ],
 )
@@ -1363,6 +1382,7 @@ cc_binary(
     deps = [
         ":valdi_runtime_with_vm",
         ":valdi_standalone_runtime",
+        "//src/valdi_modules/src/valdi/valdi_cli:valdi_cli_native",
     ],
 )
 
@@ -1586,10 +1606,10 @@ filegroup(
 
 filegroup(
     name = "clientsql_generator_test_data",
+    testonly = True,
     srcs = [
         "BUILD.bazel",
         "test/integration/ClientSQLRuntime_tests.cpp",
     ],
-    testonly = True,
     visibility = ["//compiler/clientsql:__pkg__"],
 )

@@ -71,6 +71,7 @@
 #include "valdi/runtime/Context/ViewManagerContext.hpp"
 #include "valdi/runtime/Context/ViewNodePath.hpp"
 #include "valdi/runtime/Context/ViewNodeTree.hpp"
+#include "valdi/runtime/Context/ViewNodesAssetTrackerCallbackBridge.hpp"
 
 #include "valdi/runtime/Debugger/IDaemonClient.hpp"
 
@@ -414,7 +415,7 @@ JavaScriptRuntime::~JavaScriptRuntime() {
 }
 
 void JavaScriptRuntime::doInitialize() {
-    if (_isDisposed) {
+    if (_isDisposed || _hostTornDown) {
         return;
     }
 
@@ -487,6 +488,8 @@ void JavaScriptRuntime::teardown(bool destroyContext) {
     // Just in case postInit() was never called
     _initLock.leaveIfNotCompleted();
 
+    markWorkersHostTornDown();
+
     // Workers share this runtime's listener (see createWorker); detach them so a worker
     // outliving this runtime does not keep a dangling reference. A worker task holding a
     // RetainedListener keeps the listener's owner alive until the call completes.
@@ -502,6 +505,9 @@ void JavaScriptRuntime::teardown(bool destroyContext) {
 }
 
 void JavaScriptRuntime::teardownOnJsThread(bool destroyContext) {
+    // requestFullTeardown() reaches here without going through teardown().
+    markWorkersHostTornDown();
+
     if (_anrDetector != nullptr) {
         _anrDetector->removeTaskScheduler(this);
     }
@@ -996,6 +1002,38 @@ JSValueRef JavaScriptRuntime::runtimeSetLayoutSpecs(JSFunctionNativeCallContext&
         viewNodeTree->setLayoutSpecs(Size(static_cast<float>(width), static_cast<float>(height)),
                                      isRTL ? LayoutDirectionRTL : LayoutDirectionLTR);
     });
+
+    return callContext.getContext().newUndefined();
+}
+
+JSValueRef JavaScriptRuntime::runtimeSetViewNodeAssetTracker(JSFunctionNativeCallContext& callContext) {
+    auto contextId = getParameterAsContextId(callContext, 0);
+    CHECK_CALL_CONTEXT(callContext);
+
+    auto context = _contextManager->getContext(contextId);
+    if (context == nullptr) {
+        return callContext.getContext().newUndefined();
+    }
+
+    Ref<IViewNodesAssetTracker> assetTracker;
+    const auto callbackValue = callContext.getParameter(1);
+    if (!callContext.getContext().isValueUndefined(callbackValue)) {
+        auto callback = callContext.getParameterAsFunction(1);
+        CHECK_CALL_CONTEXT(callContext);
+        assetTracker = makeShared<ViewNodesAssetTrackerCallbackBridge>(std::move(callback));
+    }
+
+    auto listener = getListener();
+    if (!listener) {
+        return callContext.getContext().newUndefined();
+    }
+
+    listener->resolveViewNodeTree(
+        context, false, true, [assetTracker = std::move(assetTracker)](const SharedViewNodeTree& viewNodeTree) {
+            if (viewNodeTree != nullptr) {
+                viewNodeTree->setAssetTracker(assetTracker);
+            }
+        });
 
     return callContext.getContext().newUndefined();
 }
@@ -1654,8 +1692,19 @@ JSValueRef JavaScriptRuntime::loadJsModule(IJavaScriptContext& jsContext,
             _moduleResourceTracker.push_back({memoryWaterMarkBefore, 0, timestampBefore, 0});
         }
 
-        result = loadJsModuleFromBytes(
-            jsContext, jsFileContent.value().content, importPath, parameters, parametersLength, exceptionTracker);
+        bool parseFailed = false;
+        result = loadJsModuleFromBytes(jsContext,
+                                       jsFileContent.value().content,
+                                       importPath,
+                                       parameters,
+                                       parametersLength,
+                                       exceptionTracker,
+                                       &parseFailed);
+        // Parse errors depend only on the bytes, so they can reveal a corrupt cached archive. A runtime being torn
+        // down fails evaluation for its own reasons.
+        if (parseFailed && !_isDisposed) {
+            _resourceManager.reportModuleParseFailure(resourceId.bundleName);
+        }
 
         if (memoryWaterMarkBefore != 0) {
             // Compute the memory usage: watermark_after - watermark_before
@@ -1708,7 +1757,8 @@ ModuleLoadResult JavaScriptRuntime::loadJsModuleFromBytes(IJavaScriptContext& js
                                                           const StringBox& importPath,
                                                           const JSValueRef* parameters,
                                                           size_t parametersLength,
-                                                          JSExceptionTracker& exceptionTracker) {
+                                                          JSExceptionTracker& exceptionTracker,
+                                                          bool* outParseFailed) {
     // Assign global context when loading a JS module
     JavaScriptContextEntry contextEntry(_globalContext);
 
@@ -1734,6 +1784,9 @@ ModuleLoadResult JavaScriptRuntime::loadJsModuleFromBytes(IJavaScriptContext& js
     }
 
     if (!exceptionTracker) {
+        if (outParseFailed != nullptr) {
+            *outParseFailed = true;
+        }
         return std::make_pair(jsContext.newUndefined(), moduleLoadMode);
     }
 
@@ -2131,6 +2184,24 @@ JSValueRef JavaScriptRuntime::runtimeConfigureColorPalette(JSFunctionNativeCallC
     return callContext.getContext().newUndefined();
 }
 
+JSValueRef JavaScriptRuntime::runtimeSetColorPalette(JSFunctionNativeCallContext& callContext) {
+    if (!_isWorker) {
+        auto colorPaletteMap = callContext.getParameterAsValue(0);
+        CHECK_CALL_CONTEXT(callContext);
+
+        dispatchOnMainThread([weakSelf = weakRef(this), colorPaletteMap = std::move(colorPaletteMap)]() {
+            auto self = weakSelf.lock();
+            if (self != nullptr) {
+                if (auto listener = self->getListener()) {
+                    listener->configureColorPalette(STRING_LITERAL("default"), colorPaletteMap);
+                    listener->setActiveColorPalette(STRING_LITERAL("default"));
+                }
+            }
+        });
+    }
+    return callContext.getContext().newUndefined();
+}
+
 JSValueRef JavaScriptRuntime::runtimeSetActiveColorPalette(JSFunctionNativeCallContext& callContext) {
     if (!_isWorker) {
         auto name = callContext.getParameterAsString(0);
@@ -2420,6 +2491,8 @@ JSValueRef JavaScriptRuntime::runtimeCreateWorker(JSFunctionNativeCallContext& c
         std::lock_guard<Mutex> guard(_listenerMutex);
         workerRuntime->setListener(_listener, _listenerOwner);
     }
+    // Workers can create workers of their own; those must be marked when this worker tears down.
+    workerRuntime->setStopWorkersOnHostTeardown(_stopWorkersOnHostTeardown);
     workerRuntime->postInit();
     for (const auto& moduleFactory : _moduleFactories) {
         workerRuntime->registerJavaScriptModuleFactory(moduleFactory);
@@ -2454,6 +2527,11 @@ JSValueRef JavaScriptRuntime::runtimeCreateWorker(JSFunctionNativeCallContext& c
     {
         std::lock_guard<Mutex> guard(_jsWorkersMutex);
         _jsWorkers.emplace_back(weakRef(workerRuntime.get()));
+    }
+    // A worker created by a task already running when this runtime was marked joined _jsWorkers too late for
+    // markWorkersHostTornDown(). Checked after the append, so either that pass saw it or this sees the flag.
+    if (_hostTornDown) {
+        workerRuntime->markHostTornDown();
     }
     return workerJSValue;
 }
@@ -2559,6 +2637,11 @@ void JavaScriptRuntime::buildContext(Valdi::IJavaScriptContext& context,
         return;
     }
 
+    context.setObjectProperty(globalObject.get(), "globalThis", globalObject.get(), exceptionTracker);
+    if (!exceptionTracker) {
+        return;
+    }
+
     auto runtimeObject = context.newObject(exceptionTracker);
     if (!exceptionTracker) {
         return;
@@ -2616,6 +2699,15 @@ void JavaScriptRuntime::buildContext(Valdi::IJavaScriptContext& context,
     std::string_view moduleLoaderTypeStr =
         (tweaks != nullptr && tweaks->enableCommonJsModuleLoader()) ? "commonjs" : "valdi";
 
+    const auto enableModuleUnloadWorklist = tweaks != nullptr && tweaks->enableModuleUnloadWorklist();
+    _skipTrailingUnloadGc = tweaks != nullptr && tweaks->skipTrailingUnloadGc();
+    auto jsEnableModuleUnloadWorklist = context.newBool(enableModuleUnloadWorklist);
+    context.setObjectProperty(
+        runtimeObject.get(), "enableModuleUnloadWorklist", jsEnableModuleUnloadWorklist.get(), exceptionTracker);
+    if (!exceptionTracker) {
+        return;
+    }
+
     auto moduleLoaderType = context.newStringUTF8(moduleLoaderTypeStr, exceptionTracker);
     if (!exceptionTracker) {
         return;
@@ -2660,6 +2752,7 @@ void JavaScriptRuntime::buildContext(Valdi::IJavaScriptContext& context,
     JS_BIND(context, exceptionTracker, runtimeObject, "makePlatformSpecificAsset", runtimeMakePlatformSpecificAsset);
     JS_BIND(context, exceptionTracker, runtimeObject, "makeThemableAsset", runtimeMakeThemableAsset);
     JS_BIND(context, exceptionTracker, runtimeObject, "getLoadedAssetMetadata", runtimeGetLoadedAssetMetadata);
+    JS_BIND(context, exceptionTracker, runtimeObject, "setColorPalette", runtimeSetColorPalette);
     JS_BIND(context, exceptionTracker, runtimeObject, "configureColorPalette", runtimeConfigureColorPalette);
     JS_BIND(context, exceptionTracker, runtimeObject, "setActiveColorPalette", runtimeSetActiveColorPalette);
     JS_BIND(context, exceptionTracker, runtimeObject, "onMainThreadIdle", runtimeOnMainThreadIdle);
@@ -2687,6 +2780,7 @@ void JavaScriptRuntime::buildContext(Valdi::IJavaScriptContext& context,
     JS_BIND(context, exceptionTracker, runtimeObject, "destroyContext", runtimeDestroyContext);
 
     JS_BIND(context, exceptionTracker, runtimeObject, "setLayoutSpecs", runtimeSetLayoutSpecs);
+    JS_BIND(context, exceptionTracker, runtimeObject, "setViewNodeAssetTracker", runtimeSetViewNodeAssetTracker);
     JS_BIND(context, exceptionTracker, runtimeObject, "measureContext", runtimeMeasureContext);
 
     // Debugging
@@ -2812,6 +2906,30 @@ std::vector<Ref<JavaScriptRuntime>> JavaScriptRuntime::getAllWorkers() {
     }
 
     return out;
+}
+
+void JavaScriptRuntime::markWorkersHostTornDown() {
+    if (!_stopWorkersOnHostTeardown) {
+        return;
+    }
+
+    // Not getAllWorkers(): it skips and forgets disposed workers, and a disposed worker can still have work
+    // queued that reaches into this runtime's state. Mark outside the lock: dropping the last ref to a worker
+    // runs its destructor, which joins its JS thread.
+    std::vector<Ref<JavaScriptRuntime>> workers;
+    {
+        std::lock_guard<Mutex> guard(_jsWorkersMutex);
+        workers.reserve(_jsWorkers.size());
+        for (const auto& weakWorker : _jsWorkers) {
+            auto jsWorker = weakWorker.lock();
+            if (jsWorker != nullptr) {
+                workers.emplace_back(std::move(jsWorker));
+            }
+        }
+    }
+    for (const auto& jsWorker : workers) {
+        jsWorker->markHostTornDown();
+    }
 }
 
 void JavaScriptRuntime::dispatchPerformGcToWorkers() {
@@ -3087,6 +3205,7 @@ void JavaScriptRuntime::unloadUnusedModules(const Ref<AsyncGroup>& completionGro
 
     constexpr auto reason = JsThreadDispatchReason::UnloadUnusedModules;
     dispatchOnJsThreadAsync(reason, [this, completionGroup = completionGroup](JavaScriptEntryParameters& entry) {
+        VALDI_TRACE("Valdi.unloadUnusedModules");
         for (const auto& jsWorker : getAllWorkers()) {
             jsWorker->unloadUnusedModules(completionGroup);
         }
@@ -3099,13 +3218,17 @@ void JavaScriptRuntime::unloadUnusedModules(const Ref<AsyncGroup>& completionGro
             // Unload modules as much as we can, then kick off a GC.
             // Re-do this process until we can't unload a module anymore.
             auto unloaded = true;
+            auto didGc = false;
             while (unloaded) {
                 unloaded = false;
                 while (unloadNextUnusedModule(entry)) {
                     unloaded = true;
                 }
 
-                performGcNow(entry.jsContext);
+                if (!_skipTrailingUnloadGc || unloaded || !didGc) {
+                    performGcNow(entry.jsContext);
+                    didGc = true;
+                }
             }
         }
 
@@ -3505,6 +3628,7 @@ Ref<JSStackTraceProvider> JavaScriptRuntime::doCaptureCurrentStackTrace(IJavaScr
 }
 
 void JavaScriptRuntime::performGcNow(IJavaScriptContext& jsContext) {
+    VALDI_TRACE("Valdi.performGcNow");
     _hasGcScheduled = false;
     jsContext.garbageCollect();
     VALDI_DEBUG(*_logger, "Performed JS GC");
@@ -3579,8 +3703,12 @@ int32_t JavaScriptRuntime::pushModuleToMarshaller(
     Marshaller& marshaller) {
     int32_t retValue = 0;
     bool taskRan = false;
-    constexpr auto reason = JsThreadDispatchReason::PushModuleToMarshaller;
-    dispatchOnJsThreadSync(reason, [&](JavaScriptEntryParameters& jsEntry) {
+    // Callers resolving from off the JS thread have no parent label to inherit, so the module path is
+    // the only thing that points the dispatch at an owner.
+    auto attribution = anrDiagnosticsEnabled() ?
+                           STRING_FORMAT("runtime.pushModuleToMarshaller({})", path.toStringView()) :
+                           StringBox();
+    dispatchOnJsThreadSync(attribution, [&](JavaScriptEntryParameters& jsEntry) {
         taskRan = true;
         auto importResult = this->importModule(path, jsEntry);
         if (!jsEntry.exceptionTracker) {
@@ -3744,6 +3872,8 @@ std::shared_ptr<snap::valdi_core::JSRuntime> JavaScriptRuntime::createWorker() {
         std::lock_guard<Mutex> guard(_listenerMutex);
         workerRuntime->setListener(_listener, _listenerOwner);
     }
+    // Workers can create workers of their own; those must be marked when this worker tears down.
+    workerRuntime->setStopWorkersOnHostTeardown(_stopWorkersOnHostTeardown);
     workerRuntime->postInit();
     for (const auto& moduleFactory : _moduleFactories) {
         workerRuntime->registerJavaScriptModuleFactory(moduleFactory);
@@ -3754,6 +3884,11 @@ std::shared_ptr<snap::valdi_core::JSRuntime> JavaScriptRuntime::createWorker() {
     {
         std::lock_guard<Mutex> guard(_jsWorkersMutex);
         _jsWorkers.emplace_back(weakRef(workerRuntime.get()));
+    }
+    // A worker created by a task already running when this runtime was marked joined _jsWorkers too late for
+    // markWorkersHostTornDown(). Checked after the append, so either that pass saw it or this sees the flag.
+    if (_hostTornDown) {
+        workerRuntime->markHostTornDown();
     }
     return std::dynamic_pointer_cast<snap::valdi_core::JSRuntime>(*workerRuntime->getInnerSharedPtr());
 }
@@ -4065,8 +4200,13 @@ void JavaScriptRuntime::onInterrupt(IJavaScriptContext& jsContext) {
         }
 
         auto stacktrace = doCaptureCurrentStackTrace(jsContext);
-        captureSession->setCapturedStacktrace(JavaScriptCapturedStacktrace(
-            JavaScriptCapturedStacktrace::Status::RUNNING, stacktrace->getStackTrace(), Context::currentRef()));
+        auto stackTraceString = stacktrace->getStackTrace();
+        // The bundle named by the stack only feeds ANR reporting, so it rides the same gate as the breadcrumbs.
+        auto stackBundleName = anrDiagnosticsEnabled() ? stacktrace->getStackBundleName() : StringBox();
+        captureSession->setCapturedStacktrace(JavaScriptCapturedStacktrace(JavaScriptCapturedStacktrace::Status::RUNNING,
+                                                                           stackTraceString,
+                                                                           Context::currentRef(),
+                                                                           stackBundleName));
     }
 }
 
@@ -4123,8 +4263,6 @@ static StringBox dispatchReasonName(JsThreadDispatchReason reason) {
             return STRING_LITERAL("runtime.registerTypeConverter");
         case JsThreadDispatchReason::CallModuleFunction:
             return STRING_LITERAL("runtime.callModuleFunction");
-        case JsThreadDispatchReason::PushModuleToMarshaller:
-            return STRING_LITERAL("runtime.pushModuleToMarshaller");
         case JsThreadDispatchReason::AddModuleUnloadObserver:
             return STRING_LITERAL("runtime.addModuleUnloadObserver");
         case JsThreadDispatchReason::PreloadModule:
@@ -4225,6 +4363,11 @@ void JavaScriptRuntime::dispatchOnJsThreadImpl(Ref<Context> ownerContext,
                                                uint32_t delayMs,
                                                StringBox dispatchAttribution,
                                                JavaScriptThreadTask&& function) {
+    // Refused like a dispatch after the JS queue is torn down: the sync path below reads the host's
+    // MainThreadManager before the task's own check could run.
+    if (_hostTornDown) {
+        return;
+    }
     auto isOffJsThread = scheduleType == JavaScriptTaskScheduleTypeAlwaysAsync || !_dispatchQueue->isCurrent();
     if (isOffJsThread && _refuseDispatchAfterJsQueueTeardown) {
         // A disposed TaskQueue destroys a rejected task inline on the enqueuing thread. The task's
@@ -4409,6 +4552,9 @@ DispatchFunction JavaScriptRuntime::makeJsThreadDispatchFunction(Ref<Context>&& 
             retainedContext = RetainedContext(std::move(ownerContext)),
             jsTask = std::move(jsTask),
             attribution = captureANRAttribution(dispatchAttribution)]() {
+        if (_hostTornDown) {
+            return;
+        }
         // _running is cleared only by onInitError (teardownOnJsThread no longer clears it), so
         // !_running here uniquely means module-loader init failed while the context is still
         // non-null. Refuse: queued work must not run against a runtime that never finished

@@ -7,6 +7,7 @@ import { ElementId } from './IRenderedElement';
 import { IRootComponentsManager } from './IRootComponentsManager';
 import { RenderRequest } from './RenderRequest';
 import { SubmitDebugMessageFunc } from './debugging/DebugMessage';
+import { ViewNodeAssetTrackerCallback } from './IViewNodeAssetTracker';
 import { AnyFunction } from './utils/Callback';
 import { PropertyList } from './utils/PropertyList';
 
@@ -129,6 +130,7 @@ export interface ValdiRuntime extends RuntimeBase {
   createContext(manager?: IRootComponentsManager): string;
   destroyContext(contextId: string): void;
   setLayoutSpecs(contextId: string, width: number, height: number, rtl: boolean): void;
+  setViewNodeAssetTracker(contextId: string, callback: ViewNodeAssetTrackerCallback | undefined): void;
   measureContext(
     contextId: string,
     maxWidth: number,
@@ -162,6 +164,11 @@ export interface ValdiRuntime extends RuntimeBase {
 
   trace(tag: string, callback: () => any): any;
   makeTraceProxy(tag: string, callback: () => void): () => void;
+  /** Optional: only runtimes that support unscoped trace sections implement these. */
+  beginTrace?(tag: string): void;
+  endTrace?(): void;
+  /** `args` is a flat list of alternating string keys and values. */
+  instantTrace?(tag: string, args?: readonly unknown[]): void;
 
   startTraceRecording(): number;
   stopTraceRecording(id: number): any[];
@@ -188,6 +195,8 @@ export interface ValdiRuntime extends RuntimeBase {
   ): () => void;
   getLoadedAssetMetadata(loadedAsset: LoadedAsset): LoadedAssetMetadata | undefined;
 
+  /** @deprecated Use configureColorPalette() and setActiveColorPalette() instead. */
+  setColorPalette(colorPalette: ColorPalette): void;
   configureColorPalette(name: string, colorPalette: ColorPalette): void;
   setActiveColorPalette(name: string): void;
 
@@ -245,6 +254,9 @@ export interface ValdiRuntime extends RuntimeBase {
    * Gated by VALDI_MAX_VIEW_OPERATIONS_PROCESSING_TIME (same tweak as view-op throttling); true when that value > 0.
    */
   useTopDownMoveOrder: boolean;
+
+  /** Whether the module loader uses a worklist to unload unused modules. Fixed at runtime initialization. */
+  enableModuleUnloadWorklist?: boolean;
 
   buildType: string;
 }

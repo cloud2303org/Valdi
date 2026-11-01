@@ -25,6 +25,9 @@ TEST_P(TypeScriptTestFixture, canRunPersistentStoreTests) {
     runTest("persistence/test/PersistentStoreTest");
 }
 
+// The consuming project's upstream-runtime.test.ts executes ModuleLoaderUnloadTest
+// directly with upstream Jasmine. Node-only production module archives omit test/.
+
 INSTANTIATE_TEST_SUITE_P(TypeScriptTests,
                          TypeScriptTestFixture,
                          ::testing::Values(JavaScriptEngineTestCase::QuickJS),

@@ -1,6 +1,7 @@
 load("@build_bazel_rules_apple//apple:apple.bzl", "apple_xcframework")
 load("@build_bazel_rules_swift//swift:swift.bzl", "swift_library")
 load("//bzl/android:collect_android_assets.bzl", "collect_android_assets")
+load("//bzl/valdi:common.bzl", "IOS_OS_CONSTRAINT")
 load("//bzl/valdi:rewrite_hdrs.bzl", "rewrite_hdrs")
 load("//bzl/valdi:suffixed_deps.bzl", "get_suffixed_deps")
 load("//bzl/valdi:valdi_android_resource_deps.bzl", "valdi_android_resource_deps")
@@ -97,7 +98,7 @@ for src in $(SRCS); do
     fi
 done | sed '/^import ValdiCoreSwift$$/d' > $@
 """,
-            target_compatible_with = ["@platforms//os:ios"],
+            target_compatible_with = [IOS_OS_CONSTRAINT],
         )
 
         swift_library(
@@ -118,7 +119,7 @@ done | sed '/^import ValdiCoreSwift$$/d' > $@
                 "-I.",
             ] + module_aliases,
             linkopts = ["-dead_strip"],
-            target_compatible_with = ["@platforms//os:ios"],
+            target_compatible_with = [IOS_OS_CONSTRAINT],
         )
         xcframework_deps.append(":{}".format(merged_swift_name))
 
@@ -141,6 +142,8 @@ done | sed '/^import ValdiCoreSwift$$/d' > $@
         },
         ios = {
             "device": ["arm64"],
+            # The consuming Node module build and Swift tooling support both
+            # simulator slices and use the combined XCFramework slice name.
             "simulator": ["arm64", "x86_64"],
         },
         tags = ["valdi_ios_exported_library"],
@@ -180,4 +183,5 @@ done | sed '/^import ValdiCoreSwift$$/d' > $@
         npm_version = npm_version,
         exclude_jsx_global_declaration = web_exclude_jsx_global_declaration,
         modules = deps,
+        tags = ["valdi_web_exported_library"],
     )
