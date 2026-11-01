@@ -22,3 +22,4 @@ filegroup(
     testonly = True,
     visibility = ["//compiler/clientsql:__pkg__"],
 )
+exports_files(["MODULE.bazel"], visibility = ["//valdi:__pkg__"])

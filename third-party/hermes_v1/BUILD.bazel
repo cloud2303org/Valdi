@@ -78,3 +78,17 @@ py_test(
     imports = ["."],
     main = "check_internal_bytecode_test.py",
 )
+
+# Host validation/regeneration for the optional JSI helper bytecode.
+py_binary(
+    name = "prepare_jsi_helpers",
+    srcs = ["prepare_jsi_helpers.py"],
+    main = "prepare_jsi_helpers.py",
+)
+
+py_test(
+    name = "prepare_jsi_helpers_test",
+    srcs = ["prepare_jsi_helpers.py", "prepare_jsi_helpers_test.py"],
+    imports = ["."],
+    main = "prepare_jsi_helpers_test.py",
+)

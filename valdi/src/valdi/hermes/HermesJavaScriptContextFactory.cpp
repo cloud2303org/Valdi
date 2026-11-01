@@ -6,7 +6,11 @@
 //
 
 #include "valdi/hermes/HermesJavaScriptContextFactory.hpp"
+#if defined(VALDI_HERMES_USE_JSI)
+#include "valdi/hermes/HermesJsiJavaScriptContext.hpp"
+#else
 #include "valdi/hermes/HermesJavaScriptContext.hpp"
+#endif
 #include "valdi/runtime/JavaScript/JavaScriptHeapDumpBuilder.hpp"
 
 #ifdef HERMES_ENABLE_DEBUGGER
@@ -27,7 +31,11 @@ bool HermesJavaScriptContextFactory::requiresDedicatedThread() {
 
 Ref<IJavaScriptContext> HermesJavaScriptContextFactory::createJsContext(JavaScriptTaskScheduler* taskScheduler,
                                                                         ILogger& logger) {
+#if defined(VALDI_HERMES_USE_JSI)
+    return makeShared<HermesJsiJavaScriptContext>(taskScheduler, logger);
+#else
     return makeShared<HermesJavaScriptContext>(taskScheduler, logger);
+#endif
 }
 
 void HermesJavaScriptContextFactory::startJsDebuggerServer([[maybe_unused]] ILogger& logger) {
@@ -59,7 +67,11 @@ BytesView HermesJavaScriptContextFactory::dumpHeap(std::span<IJavaScriptContext*
         Valdi::JavaScriptHeapDumpBuilder heapDumpBuilder;
 
         for (auto* jsContext : jsContexts) {
+#if defined(VALDI_HERMES_USE_JSI)
+            auto heapDump = dynamic_cast<HermesJsiJavaScriptContext*>(jsContext)->dumpHeap(exceptionTracker);
+#else
             auto heapDump = dynamic_cast<HermesJavaScriptContext*>(jsContext)->dumpHeap(exceptionTracker);
+#endif
             if (!exceptionTracker) {
                 return BytesView();
             }

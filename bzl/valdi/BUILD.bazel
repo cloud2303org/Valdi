@@ -414,3 +414,27 @@ filegroup(
     testonly = True,
     visibility = ["//compiler/clientsql:__pkg__"],
 )
+
+# Experimental public-JSI backend; the engine and module protocol remain Hermes.
+bool_flag(
+    name = "hermes_use_jsi",
+    build_setting_default = False,
+    visibility = ["//visibility:public"],
+)
+
+config_setting(
+    name = "hermes_use_jsi_enabled",
+    flag_values = {":hermes_use_jsi": "true"},
+)
+
+# Also exercise the production VM-only link on desktop test hosts.
+bool_flag(
+    name = "hermes_force_lean",
+    build_setting_default = False,
+    visibility = ["//visibility:public"],
+)
+
+config_setting(
+    name = "hermes_force_lean_enabled",
+    flag_values = {":hermes_force_lean": "true"},
+)

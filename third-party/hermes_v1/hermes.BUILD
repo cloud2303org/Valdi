@@ -319,3 +319,13 @@ cc_library(
         "@valdi//third-party/hermes_v1:extensions_bytecode",
     ],
 )
+
+# Public compiler API is tooling-only; it is not a dependency of hermes_api_lean.
+cc_library(
+    name = "compile_js",
+    srcs = ["API/hermes/CompileJS.cpp"],
+    copts = COMPILER_FLAGS_COMPAT + CXX17,
+    defines = DEFINES_FULL,
+    visibility = ["//visibility:public"],
+    deps = [":hermes"],
+)
