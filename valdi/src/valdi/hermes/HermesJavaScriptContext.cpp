@@ -25,6 +25,8 @@
 #include "hermes/VM/NativeState.h"
 #include "hermes/VM/PropertyAccessor.h"
 
+#include <optional>
+
 #ifdef HERMES_ENABLE_DEBUGGER
 #include "valdi/hermes/HermesDebuggerServer.hpp"
 #endif
@@ -57,7 +59,12 @@ public:
     UnhandledPromiseCallback() : JSFunctionBase("onhandledPromiseCallback") {}
 
     JSValueRef operator()(JSFunctionNativeCallContext& callContext) noexcept final {
-        return callContext.getContext().newUndefined();
+        auto& context = callContext.getContext();
+        if (auto* listener = context.getListener()) {
+            // Hermes invokes onUnhandled(id, reason, promise).
+            listener->onUnhandledRejectedPromise(context, callContext.getParameter(1));
+        }
+        return context.newUndefined();
     }
 };
 
@@ -202,8 +209,10 @@ void HermesJavaScriptContext::initializePromiseRejectionTracker(JSExceptionTrack
         return;
     }
 
+    // onInitialize runs before IJavaScriptContext populates its cached boolean values.
+    // newBool(true) is still empty here, which would silently disable allRejections.
     IJavaScriptContext::setObjectProperty(
-        enablePromiseRejectionTrackerParams.get(), "allRejections", newBool(true).get(), exceptionTracker);
+        enablePromiseRejectionTrackerParams.get(), "allRejections", onNewBool(true).get(), exceptionTracker);
     if (!exceptionTracker) {
         return;
     }
@@ -1048,51 +1057,28 @@ Ref<StaticString> HermesJavaScriptContext::valueToStaticString(const JSValue& va
     }
 }
 
-bool HermesJavaScriptContext::valueToBool(const JSValue& value, JSExceptionTracker& exceptionTracker) {
-    hermes::vm::GCScope gcScope(*_runtime);
-    auto hermesValue = toHermesValue(value);
-    if (hermesValue.isUndefined() || hermesValue.isNull()) {
-        return false;
-    } else if (hermesValue.isNumber()) {
-        return hermesValue.getNumber() != 0;
-    } else if (hermesValue.isBool()) {
-        return hermesValue.getBool();
-    } else if (hermesValue.isString()) {
-        return hermesValue.getString()->getStringLength() != 0;
-    } else {
-        return true;
-    }
+bool HermesJavaScriptContext::valueToBool(const JSValue& value, JSExceptionTracker& /*exceptionTracker*/) {
+    return hermes::vm::toBoolean(toHermesValue(value));
 }
 
 double HermesJavaScriptContext::valueToDouble(const JSValue& value, JSExceptionTracker& exceptionTracker) {
     hermes::vm::GCScope gcScope(*_runtime);
-    auto hermesValue = toHermesValue(value);
-    if (hermesValue.isUndefined() || hermesValue.isNull()) {
-        return 0.0;
-    } else if (hermesValue.isNumber()) {
-        return hermesValue.getNumber();
-    } else if (hermesValue.isBool()) {
-        return hermesValue.getBool() ? 1.0 : 0.0;
-    } else if (hermesValue.isString()) {
-        auto stringView =
-            hermes::vm::StringPrimitive::createStringView(*_runtime, _runtime->makeHandle(hermesValue.getString()));
-        std::string utf8;
-        if (stringView.isASCII()) {
-            utf8 += std::string_view(stringView.castToCharPtr(), stringView.length());
-            ;
-        } else {
-            auto converted = Valdi::utf16ToUtf8(stringView.castToChar16Ptr(), stringView.length());
-            utf8 += std::string_view(converted.first, converted.second);
-        }
-
-        return atof(utf8.c_str()); // NOLINT(cert-err34-c)
-    } else {
+    auto rootedValue = _runtime->makeHandle(toHermesValue(value));
+    auto result = hermes::vm::toNumber_RJS(*_runtime, rootedValue);
+    if (!checkException(result.getStatus(), exceptionTracker)) {
         return 0.0;
     }
+    return result->getNumber();
 }
 
 int32_t HermesJavaScriptContext::valueToInt(const JSValue& value, JSExceptionTracker& exceptionTracker) {
-    return static_cast<int32_t>(valueToDouble(value, exceptionTracker));
+    hermes::vm::GCScope gcScope(*_runtime);
+    auto rootedValue = _runtime->makeHandle(toHermesValue(value));
+    auto result = hermes::vm::toInt32_RJS(*_runtime, rootedValue);
+    if (!checkException(result.getStatus(), exceptionTracker)) {
+        return 0;
+    }
+    return static_cast<int32_t>(result->getNumber());
 }
 
 static bool canReceiveNativeState(hermes::vm::JSObject* object) {
@@ -1112,23 +1098,7 @@ Ref<RefCountable> HermesJavaScriptContext::valueToWrappedObject(const JSValue& v
         return nullptr;
     }
 
-    auto result = hermes::vm::JSObject::getNamedOrIndexed(
-        std::move(jsObject),
-        *_runtime,
-        hermes::vm::Predefined::getSymbolID(hermes::vm::Predefined::InternalPropertyNativeState));
-
-    if (result.getStatus() == hermes::vm::ExecutionStatus::EXCEPTION) {
-        _runtime->clearThrownValue();
-        return nullptr;
-    }
-
-    if (!hermes::vm::vmisa<hermes::vm::NativeState>(result.getValue().getHermesValue())) {
-        return nullptr;
-    }
-
-    auto* nativeState = hermes::vm::vmcast<hermes::vm::NativeState>(result.getValue().get());
-
-    return unwrapNativeClassInstanceData(unsafeBridge<RefCountable>(nativeState->context()));
+    return unwrapNativeClassInstanceData(Ref<RefCountable>(getOwnNativeStateContext(*_runtime, jsObject)));
 }
 
 Ref<JSFunction> HermesJavaScriptContext::valueToFunction(const JSValue& value, JSExceptionTracker& exceptionTracker) {
@@ -1148,7 +1118,7 @@ Ref<JSFunction> HermesJavaScriptContext::valueToFunction(const JSValue& value, J
     return functionData->function;
 }
 
-static TypedArrayType getTypedArrayType(const hermes::vm::PinnedHermesValue& hermesValue) {
+static std::optional<TypedArrayType> getTypedArrayType(const hermes::vm::PinnedHermesValue& hermesValue) {
     if (hermes::vm::vmisa<hermes::vm::Uint8Array>(hermesValue)) {
         return Uint8Array;
     } else if (hermes::vm::vmisa<hermes::vm::Float32Array>(hermesValue)) {
@@ -1168,8 +1138,7 @@ static TypedArrayType getTypedArrayType(const hermes::vm::PinnedHermesValue& her
     } else if (hermes::vm::vmisa<hermes::vm::Uint32Array>(hermesValue)) {
         return Uint32Array;
     } else {
-        SC_ABORT("Unrecognized TypedArray type");
-        return Uint8Array;
+        return std::nullopt;
     }
 }
 
@@ -1194,12 +1163,16 @@ JSTypedArray HermesJavaScriptContext::valueToTypedArray(const JSValue& value, JS
         }
 
         auto type = getTypedArrayType(*hermesValue);
+        if (!type) {
+            exceptionTracker.onError("Unsupported TypedArray type (BigInt64Array and BigUint64Array are not supported)");
+            return JSTypedArray();
+        }
         auto* data = handle->data(*_runtime);
         auto size = static_cast<size_t>(handle->getByteLength());
         auto* arrayBuffer = handle->getBuffer(*_runtime);
 
         return JSTypedArray(
-            type, data, size, toJSValueRef(hermes::vm::HermesValue::encodeObjectValue(arrayBuffer, *_runtime)));
+            *type, data, size, toJSValueRef(hermes::vm::HermesValue::encodeObjectValue(arrayBuffer, *_runtime)));
     } else {
         exceptionTracker.onError("Not a TypedArray or ArrayBuffer");
         return JSTypedArray();
@@ -1211,14 +1184,7 @@ static bool hasNativeState(hermes::vm::Runtime& runtime, const hermes::vm::Handl
         return false;
     }
 
-    auto callResult = hermes::vm::JSObject::hasNamed(
-        jsObject, runtime, hermes::vm::Predefined::getSymbolID(hermes::vm::Predefined::InternalPropertyNativeState));
-    if (callResult.getStatus() == hermes::vm::ExecutionStatus::EXCEPTION) {
-        runtime.clearThrownValue();
-        return false;
-    }
-
-    return callResult.getValue();
+    return getOwnNativeStateContext(runtime, jsObject) != nullptr;
 }
 
 static bool isInstanceOf(hermes::vm::Runtime& runtime,

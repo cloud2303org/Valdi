@@ -10,6 +10,7 @@
 #include "valdi/runtime/JavaScript/JavaScriptFunctionCallContext.hpp"
 #include "valdi/runtime/Utils/RefCountableAutoreleasePool.hpp"
 #include "valdi_core/cpp/Constants.hpp"
+#include "valdi_core/cpp/Utils/SmallVector.hpp"
 
 #include "hermes/VM/NativeState.h"
 
@@ -98,14 +99,14 @@ hermes::vm::CallResult<hermes::vm::HermesValue> callTrampoline(void* context,
     auto* functionData = unsafeBridgeUnretained<JSFunctionData>(context);
 
     auto thisRef = functionData->jsContext.toJSValueRef(args.getThisArg());
-    JSValueRef outArguments[args.getArgCount()];
+    SmallVector<JSValueRef, 8> outArguments(args.getArgCount());
     for (size_t i = 0; i < args.getArgCount(); i++) {
         outArguments[i] = functionData->jsContext.toJSValueRef(args.getArg(static_cast<unsigned>(i)));
     }
 
     JSExceptionTracker exceptionTracker(functionData->jsContext);
     JSFunctionNativeCallContext callContext(functionData->jsContext,
-                                            &outArguments[0],
+                                            outArguments.empty() ? nullptr : outArguments.data(),
                                             args.getArgCount(),
                                             exceptionTracker,
                                             functionData->function->getReferenceInfo());
@@ -132,14 +133,14 @@ hermes::vm::CallResult<hermes::vm::HermesValue> callNativeClassInstanceMember(vo
     auto& jsContext = functionData->jsContext;
 
     auto argumentCount = args.getArgCount();
-    JSValueRef arguments[argumentCount];
+    SmallVector<JSValueRef, 8> arguments(argumentCount);
     for (size_t i = 0; i < argumentCount; i++) {
         arguments[i] = jsContext.toJSValueRef(args.getArg(static_cast<unsigned>(i)));
     }
 
     JSExceptionTracker exceptionTracker(jsContext);
     JSFunctionNativeCallContext callContext(jsContext,
-                                            argumentCount == 0 ? nullptr : arguments,
+                                            arguments.empty() ? nullptr : arguments.data(),
                                             argumentCount,
                                             exceptionTracker,
                                             functionData->referenceInfo);
@@ -173,14 +174,14 @@ hermes::vm::CallResult<hermes::vm::HermesValue> callNativeClassStaticMember(void
     auto& jsContext = functionData->jsContext;
 
     auto argumentCount = args.getArgCount();
-    JSValueRef arguments[argumentCount];
+    SmallVector<JSValueRef, 8> arguments(argumentCount);
     for (size_t i = 0; i < argumentCount; i++) {
         arguments[i] = jsContext.toJSValueRef(args.getArg(static_cast<unsigned>(i)));
     }
 
     JSExceptionTracker exceptionTracker(jsContext);
     JSFunctionNativeCallContext callContext(jsContext,
-                                            argumentCount == 0 ? nullptr : arguments,
+                                            arguments.empty() ? nullptr : arguments.data(),
                                             argumentCount,
                                             exceptionTracker,
                                             functionData->referenceInfo);
@@ -235,7 +236,7 @@ hermes::vm::CallResult<hermes::vm::HermesValue> callNativeClassConstructor(void*
 
     auto& jsContext = classData->jsContext;
     auto argumentCount = args.getArgCount();
-    JSValueRef arguments[argumentCount];
+    SmallVector<JSValueRef, 8> arguments(argumentCount);
     for (size_t i = 0; i < argumentCount; i++) {
         arguments[i] = jsContext.toJSValueRef(args.getArg(static_cast<unsigned>(i)));
     }
@@ -243,7 +244,7 @@ hermes::vm::CallResult<hermes::vm::HermesValue> callNativeClassConstructor(void*
     JSExceptionTracker exceptionTracker(jsContext);
     const auto& referenceInfo = classData->nativeClass->getConstructorReferenceInfo();
     JSFunctionNativeCallContext callContext(
-        jsContext, argumentCount == 0 ? nullptr : arguments, argumentCount, exceptionTracker, referenceInfo);
+        jsContext, arguments.empty() ? nullptr : arguments.data(), argumentCount, exceptionTracker, referenceInfo);
     auto thisValue = jsContext.toJSValueRef(thisObject.getHermesValue());
     callContext.setThisValue(thisValue.get());
 

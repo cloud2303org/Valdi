@@ -1182,6 +1182,23 @@ valdi_test(
     ],
 )
 
+# Engine-boundary regressions without compiling the UI integration fixtures and their modules.
+valdi_test(
+    name = "test_hermes_boundary",
+    srcs = [
+        "test/integration/HermesBoundary_tests.cpp",
+        "test/integration/JSBridgeTestFixture.cpp",
+    ],
+    hdrs = [
+        "test/integration/JSBridgeTestFixture.hpp",
+        "test/integration/JSIntegrationTestsUtils.hpp",
+    ],
+    deps = [
+        ":test_utils",
+        ":valdi_runtime_with_vm",
+    ],
+)
+
 valdi_test(
     name = "test_linux",
     srcs = glob(["test/linux/**/*.cpp"]),
