@@ -1051,6 +1051,22 @@ cc_library(
     ],
 )
 
+# Keep archive/cache regressions runnable without compiling legacy test modules.
+# The consuming Node compiler intentionally exports only production runtime modules.
+valdi_test(
+    name = "test_module_archive_cache",
+    srcs = [
+        "test/runtime/MmapBuffer_tests.cpp",
+        "test/runtime/ModuleArchiveCache_tests.cpp",
+        "test/runtime/Result_tests.cpp",
+        "test/runtime/ZStdUtils_tests.cpp",
+    ],
+    deps = [
+        ":valdi_runtime",
+        "@zstd",
+    ],
+)
+
 valdi_test(
     name = "test_runtime",
     srcs = glob(["test/runtime/**/*.cpp"]),
