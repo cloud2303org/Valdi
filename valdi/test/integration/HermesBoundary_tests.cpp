@@ -3,10 +3,12 @@
 #include "valdi/runtime/JavaScript/JSClassDefinition.hpp"
 #include "valdi/runtime/JavaScript/JSFunctionWithCallable.hpp"
 #include "valdi/runtime/JavaScript/JSPromise.hpp"
+#include "valdi/runtime/Utils/RefCountableAutoreleasePool.hpp"
 #include "valdi_core/cpp/Utils/Defer.hpp"
 #include "valdi_core/cpp/Utils/ValueMarshaller.hpp"
 
 #include <cmath>
+#include <atomic>
 #include <deque>
 #include <string>
 #include <vector>
@@ -17,6 +19,50 @@ namespace ValdiTest {
 namespace {
 
 class HermesBoundaryTest : public JSBridgeTestFixture {};
+
+class ShutdownCapture final : public SimpleRefCountable {
+public:
+    ShutdownCapture(JSValueRef value, JSPropertyNameRef property, std::atomic<int>& destroyed)
+        : _value(std::move(value)), _property(std::move(property)), _destroyed(destroyed) {}
+    ~ShutdownCapture() override {
+        _property = JSPropertyNameRef();
+        _value = JSValueRef();
+        ++_destroyed;
+    }
+    Byte bytes[4] = {};
+private:
+    JSValueRef _value;
+    JSPropertyNameRef _property;
+    std::atomic<int>& _destroyed;
+};
+
+TEST_P(HermesBoundaryTest, shutdownReleasesCapturedValuesBeforePoolDestructionEvenUnderDeferredPool) {
+    MAIN_THREAD_INIT();
+    for (bool bufferOwner : {false, true}) {
+        SCOPED_TRACE(bufferOwner ? "external buffer" : "native function");
+        std::atomic<int> destroyed{0};
+        RefCountableAutoreleasePool outerPool;
+        {
+            JSContextWrapper wrapper(getJsBridge(), nullptr);
+            auto entry = wrapper.makeJsEntry();
+            auto& context = entry.context;
+            auto owner = makeShared<ShutdownCapture>(context.newObject(entry.exceptionTracker),
+                                                     context.newPropertyName("shutdown-capture"), destroyed);
+            auto root = bufferOwner
+                ? context.newArrayBuffer(BytesView(owner, owner->bytes, sizeof(owner->bytes)), entry.exceptionTracker)
+                : context.newFunction(makeShared<JSFunctionWithCallable>(ReferenceInfoBuilder(),
+                    [owner](JSFunctionNativeCallContext& call) {
+                        (void)owner;
+                        return call.getContext().newUndefined();
+                    }), entry.exceptionTracker);
+            auto global = context.getGlobalObject(entry.exceptionTracker);
+            context.setObjectProperty(global.get(), "shutdownRoot", root.get(), entry.exceptionTracker);
+            entry.checkException();
+        }
+        // Do not wait for outerPool: it outlives the entire JS context.
+        EXPECT_EQ(1, destroyed.load());
+    }
+}
 
 JSValueRef evaluate(JSEntry& entry, const std::string& source) {
     auto result = entry.context.evaluate(source, "HermesBoundary_tests.js", entry.exceptionTracker);
@@ -94,6 +140,8 @@ TEST_P(HermesBoundaryTest, usesECMAScriptBooleanAndNumericCoercion) {
     JSContextWrapper wrapper(getJsBridge(), nullptr);
     auto entry = wrapper.makeJsEntry();
     auto& context = entry.context;
+    auto negativeZero = evaluate(entry, "-0");
+    EXPECT_TRUE(std::signbit(context.valueToDouble(negativeZero.get(), entry.exceptionTracker)));
     for (const char* source : {"NaN", "0", "-0", "0n", "''", "null", "undefined"}) {
         EXPECT_FALSE(context.valueToBool(evaluate(entry, source).get(), entry.exceptionTracker)) << source;
     }

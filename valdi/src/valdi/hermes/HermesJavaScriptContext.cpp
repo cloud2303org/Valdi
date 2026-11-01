@@ -14,6 +14,7 @@
 #include "valdi/runtime/JavaScript/JSNativeClassData.hpp"
 #include "valdi/runtime/JavaScript/JavaScriptFunctionCallContext.hpp"
 #include "valdi/runtime/JavaScript/JavaScriptUtils.hpp"
+#include "valdi/runtime/Utils/RefCountableAutoreleasePool.hpp"
 
 #include "valdi_core/cpp/Text/UTF16Utils.hpp"
 #include "valdi_core/cpp/Utils/Defer.hpp"
@@ -26,6 +27,7 @@
 #include "hermes/VM/PropertyAccessor.h"
 
 #include <optional>
+#include <cmath>
 
 #ifdef HERMES_ENABLE_DEBUGGER
 #include "valdi/hermes/HermesDebuggerServer.hpp"
@@ -123,6 +125,9 @@ HermesJavaScriptContext::HermesJavaScriptContext(JavaScriptTaskScheduler* taskSc
 }
 
 HermesJavaScriptContext::~HermesJavaScriptContext() {
+    // Shutdown finalizers can release native owners that capture JS handles.
+    // They must run before the context/pool dies, even under an outer pool.
+    auto nonDeferred = RefCountableAutoreleasePool::makeNonDeferred();
 #ifdef HERMES_ENABLE_DEBUGGER
     if (_debuggerRuntimeId != kRuntimeIdUndefined) {
         auto* debuggerService = HermesDebuggerServer::getInstance(_logger);
@@ -147,6 +152,11 @@ HermesJavaScriptContext::~HermesJavaScriptContext() {
     _float64ArrayCtor = JSValueRef();
 
     prepareForTeardown();
+    // Member destruction would otherwise free _managedValues before either VM
+    // owner. VM shutdown finalizers and custom roots still reference this pool.
+    _sharedRuntime.reset();
+    _jsiRuntime.reset();
+    _runtime = nullptr;
 }
 
 void HermesJavaScriptContext::onInitialize(JSExceptionTracker& exceptionTracker) {
@@ -1654,7 +1664,10 @@ JSValueRef HermesJavaScriptContext::toJSValueRef(const hermes::vm::HermesValue& 
     } else if (value.isBool()) {
         return newBool(value.getBool());
     } else if (value.isNumber()) {
-        return newNumber(value.getNumber());
+        const auto number = value.getNumber();
+        // The shared newNumber API caches zero. Inbound JS values must retain
+        // the distinct -0 representation (e.g. 1 / value === -Infinity).
+        return number == 0.0 && std::signbit(number) ? onNewNumber(number) : newNumber(number);
     }
 
     return toJSValueRefUncached(value);
