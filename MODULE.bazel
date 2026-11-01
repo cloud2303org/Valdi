@@ -149,7 +149,10 @@ http_archive(
     build_file = "@valdi//third-party/hermes_v1:hermes.BUILD",
     integrity = "sha256-vHWDPAB1xndg6k5EeAn43qZ65bkPJeG6cFhb1CK8alU=",
     patch_args = ["-p1"],
-    patches = ["@valdi//third-party/hermes_v1:no_fbjni.patch"],
+    patches = [
+        "@valdi//third-party/hermes_v1:no_fbjni.patch",
+        "@valdi//third-party/hermes_v1:promise_native_ownership.patch",
+    ],
     strip_prefix = "hermes-hermes-v260318099.0.4",
     url = "https://github.com/facebook/hermes/archive/refs/tags/hermes-v260318099.0.4.tar.gz",
 )

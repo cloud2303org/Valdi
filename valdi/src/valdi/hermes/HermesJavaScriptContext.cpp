@@ -68,6 +68,30 @@ public:
     }
 };
 
+// Private protocol shared with promise_native_ownership.patch in Hermes 260318099.0.4.
+class NativePromiseOwnershipCallback : public JSFunctionBase {
+public:
+    NativePromiseOwnershipCallback() : JSFunctionBase("nativePromiseOwnership") {}
+
+    JSValueRef operator()(JSFunctionNativeCallContext& call) noexcept final {
+        auto& context = static_cast<HermesJavaScriptContext&>(call.getContext());
+        if (!context.isValueNumber(call.getParameter(0))) {
+            return context.newUndefined();
+        }
+        switch (call.getParameterAsInt(0)) {
+            case 0:
+                context.recordPromiseAdoption(call.getParameter(1), call.getParameter(2));
+                return context.newUndefined();
+            case 1:
+                context.prunePromiseAdoptions();
+                // Also works during initialization, before the base context caches booleans.
+                return context.onNewBool(context.isNativeOwnedPromise(call.getParameter(1)));
+            default:
+                return context.newUndefined();
+        }
+    }
+};
+
 static hermes::vm::RuntimeConfig makeRuntimeConfig() {
     return hermes::vm::RuntimeConfig::Builder()
         // 256kb stack size to be consistent with quickjs - Hermes's default is 128kb
@@ -109,6 +133,8 @@ HermesJavaScriptContext::~HermesJavaScriptContext() {
 #endif
 
     setListener(nullptr);
+    _promiseAdoptions.clear();
+    _nativeOwnedPromises.clear();
     _emptyArrayBuffer = JSValueRef();
     _int8ArrayCtor = JSValueRef();
     _int16ArrayCtor = JSValueRef();
@@ -185,6 +211,17 @@ void HermesJavaScriptContext::onInitialize(JSExceptionTracker& exceptionTracker)
 
 void HermesJavaScriptContext::initializePromiseRejectionTracker(JSExceptionTracker& exceptionTracker) {
     auto global = getGlobalObject(exceptionTracker);
+    if (!exceptionTracker) {
+        return;
+    }
+
+    // The patched builtin captures this function when tracking is enabled, not at builtin load time.
+    auto ownershipHook = newFunction(makeShared<NativePromiseOwnershipCallback>(), exceptionTracker);
+    if (!exceptionTracker) {
+        return;
+    }
+    IJavaScriptContext::setObjectProperty(
+        global.get(), "__valdiNativePromiseOwnership", ownershipHook.get(), exceptionTracker);
     if (!exceptionTracker) {
         return;
     }
@@ -376,6 +413,116 @@ JSValueRef HermesJavaScriptContext::newFunction(const Ref<JSFunction>& callable,
     }
 
     return toJSValueRefUncached(functionResult.getValue());
+}
+
+bool HermesJavaScriptContext::isNativeOwnedPromise(const JSValue& promise) {
+    hermes::vm::GCScope gcScope(*_runtime);
+    auto target = toHandle(promise);
+    bool found = false;
+    for (auto it = _nativeOwnedPromises.begin(); it != _nativeOwnedPromises.end();) {
+        hermes::vm::GCScopeMarkerRAII marker(gcScope);
+        auto wrapper = hermes::vm::Handle<hermes::vm::JSWeakRef>::vmcast(toPinnedHermesValue(it->get()));
+        auto value = wrapper->deref(*_runtime);
+        if (value.isUndefined()) {
+            it = _nativeOwnedPromises.erase(it);
+        } else {
+            found = found || (target->isObject() && value.getObject() == target->getObject());
+            ++it;
+        }
+    }
+    return found;
+}
+
+JSValueRef HermesJavaScriptContext::newPromiseOwnershipWeakRef(const JSValue& object) {
+    hermes::vm::GCScope gcScope(*_runtime);
+    auto target = toHandle(object);
+    auto wrapper = hermes::vm::JSWeakRef::create(*_runtime, _runtime->weakRefPrototype);
+    wrapper->setTarget(*_runtime, hermes::vm::SmallHermesValue::encodeHermesValue(*target, *_runtime));
+    return toJSValueRefUncached(wrapper.getHermesValue());
+}
+
+void HermesJavaScriptContext::prunePromiseAdoptions() {
+    hermes::vm::GCScope gcScope(*_runtime);
+    for (auto it = _promiseAdoptions.begin(); it != _promiseAdoptions.end();) {
+        hermes::vm::GCScopeMarkerRAII marker(gcScope);
+        auto parent = hermes::vm::Handle<hermes::vm::JSWeakRef>::vmcast(toPinnedHermesValue(it->parent.get()));
+        auto child = hermes::vm::Handle<hermes::vm::JSWeakRef>::vmcast(toPinnedHermesValue(it->child.get()));
+        if (parent->deref(*_runtime).isUndefined() || child->deref(*_runtime).isUndefined()) {
+            it = _promiseAdoptions.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+void HermesJavaScriptContext::recordPromiseAdoption(const JSValue& parent, const JSValue& child) {
+    if (!isValueObject(parent) || !isValueObject(child)) {
+        return;
+    }
+    hermes::vm::GCScope gcScope(*_runtime);
+    prunePromiseAdoptions();
+    auto parentTarget = toHandle(parent);
+    auto childTarget = toHandle(child);
+    bool exists = false;
+    for (const auto& edge : _promiseAdoptions) {
+        hermes::vm::GCScopeMarkerRAII marker(gcScope);
+        auto from = hermes::vm::Handle<hermes::vm::JSWeakRef>::vmcast(toPinnedHermesValue(edge.parent.get()));
+        auto to = hermes::vm::Handle<hermes::vm::JSWeakRef>::vmcast(toPinnedHermesValue(edge.child.get()));
+        auto fromValue = from->deref(*_runtime);
+        auto toValue = to->deref(*_runtime);
+        if (fromValue.isObject() && toValue.isObject() &&
+            fromValue.getObject() == parentTarget->getObject() && toValue.getObject() == childTarget->getObject()) {
+            exists = true;
+            break;
+        }
+    }
+    if (!exists) {
+        auto weakParent = newPromiseOwnershipWeakRef(parent);
+        auto weakChild = newPromiseOwnershipWeakRef(child);
+        _promiseAdoptions.push_back({std::move(weakParent), std::move(weakChild)});
+    }
+    // Transfer at settlement, while the outer is still alive, even if its native wrapper was dropped.
+    if (isNativeOwnedPromise(parent)) {
+        markPromiseRejectionHandled(child);
+    }
+}
+
+void HermesJavaScriptContext::markPromiseRejectionHandled(const JSValue& promise) {
+    if (!isValueObject(promise)) {
+        return;
+    }
+    hermes::vm::GCScope gcScope(*_runtime);
+    prunePromiseAdoptions();
+    // No JS calls, property reads, or keptObjects: only VM weak references and identity comparisons.
+    // Temporary strong frontier roots keep targets safe across weak-wrapper allocations/GC.
+    std::vector<JSValueRef> frontier;
+    if (!isNativeOwnedPromise(promise)) {
+        _nativeOwnedPromises.emplace_back(newPromiseOwnershipWeakRef(promise));
+        frontier.emplace_back(JSValueRef::makeRetained(*this, promise));
+    }
+    for (size_t i = 0; i < frontier.size(); ++i) {
+        hermes::vm::GCScopeMarkerRAII nodeMarker(gcScope);
+        auto target = toHandle(frontier[i].get());
+        for (size_t edgeIndex = 0; edgeIndex < _promiseAdoptions.size(); ++edgeIndex) {
+            hermes::vm::GCScopeMarkerRAII edgeMarker(gcScope);
+            const auto& edge = _promiseAdoptions[edgeIndex];
+            auto from = hermes::vm::Handle<hermes::vm::JSWeakRef>::vmcast(toPinnedHermesValue(edge.parent.get()));
+            if (from->deref(*_runtime).isUndefined() ||
+                from->deref(*_runtime).getObject() != target->getObject()) {
+                continue;
+            }
+            auto to = hermes::vm::Handle<hermes::vm::JSWeakRef>::vmcast(toPinnedHermesValue(edge.child.get()));
+            auto childValue = to->deref(*_runtime);
+            if (childValue.isUndefined()) {
+                continue;
+            }
+            auto child = toJSValueRef(childValue);
+            if (!isNativeOwnedPromise(child.get())) {
+                _nativeOwnedPromises.emplace_back(newPromiseOwnershipWeakRef(child.get()));
+                frontier.emplace_back(std::move(child));
+            }
+        }
+    }
 }
 
 JSValueRef HermesJavaScriptContext::newWeakRef(const JSValue& object, JSExceptionTracker& exceptionTracker) {

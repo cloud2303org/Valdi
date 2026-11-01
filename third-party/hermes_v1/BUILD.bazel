@@ -4,6 +4,8 @@
 exports_files([
     "hermes.BUILD",
     "no_fbjni.patch",
+    "promise_native_ownership.patch",
+    "regenerate_internal_bytecode.py",
     "sources.bzl",
 ])
 

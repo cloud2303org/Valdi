@@ -2,7 +2,9 @@
 #include "JSIntegrationTestsUtils.hpp"
 #include "valdi/runtime/JavaScript/JSClassDefinition.hpp"
 #include "valdi/runtime/JavaScript/JSFunctionWithCallable.hpp"
+#include "valdi/runtime/JavaScript/JSPromise.hpp"
 #include "valdi_core/cpp/Utils/Defer.hpp"
+#include "valdi_core/cpp/Utils/ValueMarshaller.hpp"
 
 #include <cmath>
 #include <deque>
@@ -291,6 +293,243 @@ TEST_P(HermesBoundaryTest, rejectionTimerForwardsReasonIdentityToListener) {
         timers.clear();
         timerEntry.checkException();
         EXPECT_EQ(2u, listener.reasons.size());
+    }
+}
+
+TEST_P(HermesBoundaryTest, markingNativePromiseDoesNotExecuteJavaScript) {
+    MAIN_THREAD_INIT();
+    JSContextWrapper wrapper(getJsBridge(), nullptr);
+    auto entry = wrapper.makeJsEntry();
+    auto& context = entry.context;
+    auto promise = evaluate(entry, R"JS(
+        globalThis.markReads = 0;
+        globalThis.markJobs = 0;
+        var promise = new Promise(() => {});
+        Object.defineProperty(promise, 'then', {get() { ++markReads; throw Error('then'); }});
+        Object.defineProperty(promise, 'constructor', {get() { ++markReads; throw Error('constructor'); }});
+        Promise.resolve().then(() => { ++markJobs; });
+        Object.defineProperty(Promise, Symbol.species, {get() { ++markReads; throw Error('species'); }});
+        promise;
+    )JS");
+    // Constructing the native wrapper marks ownership even when onComplete is never called.
+    auto native = makeShared<JSPromise>(context, promise.get(), ReferenceInfoBuilder().build(),
+                                        nullptr, entry.exceptionTracker);
+    context.markPromiseRejectionHandled(promise.get()); // Idempotent.
+    entry.checkException();
+    EXPECT_EQ(0, context.valueToInt(evaluate(entry, "markReads + markJobs").get(), entry.exceptionTracker));
+    // Even a Proxy's property traps must not run during the mark operation itself.
+    auto proxy = evaluate(entry, "new Proxy({}, {get() { ++markReads; throw Error('get'); }, "
+                                 "has() { ++markReads; throw Error('has'); }})");
+    context.markPromiseRejectionHandled(proxy.get());
+    context.markPromiseRejectionHandled(context.newUndefined().get());
+    EXPECT_EQ(0, context.valueToInt(evaluate(entry, "markReads + markJobs").get(), entry.exceptionTracker));
+    entry.willExitVM();
+    entry.checkException();
+    auto nextEntry = wrapper.makeJsEntry();
+    EXPECT_EQ(1, context.valueToInt(evaluate(nextEntry, "markJobs").get(), nextEntry.exceptionTracker));
+    EXPECT_EQ(0, context.valueToInt(evaluate(nextEntry, "markReads").get(), nextEntry.exceptionTracker));
+}
+
+TEST_P(HermesBoundaryTest, ownershipGraphHandlesCyclesDuplicatesAndProxyTargetsWithoutJavaScript) {
+    MAIN_THREAD_INIT();
+    JSContextWrapper wrapper(getJsBridge(), nullptr);
+    auto entry = wrapper.makeJsEntry();
+    auto& context = entry.context;
+    auto parent = evaluate(entry, R"JS(
+        globalThis.savedOwnershipHook = __valdiNativePromiseOwnership;
+        globalThis.graphReads = 0;
+        var traps = {
+          get() { ++graphReads; throw Error('get'); },
+          has() { ++graphReads; throw Error('has'); },
+          getOwnPropertyDescriptor() { ++graphReads; throw Error('descriptor'); },
+          getPrototypeOf() { ++graphReads; throw Error('prototype'); }
+        };
+        globalThis.graphA = new Proxy({}, traps);
+        globalThis.graphB = new Proxy({}, traps);
+        globalThis.graphC = new Proxy({}, traps);
+        savedOwnershipHook(0, graphA, graphB);
+        savedOwnershipHook(0, graphB, graphC);
+        savedOwnershipHook(0, graphC, graphA);
+        savedOwnershipHook(0, graphA, graphB);
+        graphA;
+    )JS");
+    context.markPromiseRejectionHandled(parent.get());
+    context.markPromiseRejectionHandled(parent.get());
+    EXPECT_TRUE(context.valueToBool(evaluate(entry,
+        "savedOwnershipHook(1, graphA) && savedOwnershipHook(1, graphB) && "
+        "savedOwnershipHook(1, graphC) && graphReads === 0").get(), entry.exceptionTracker));
+    // The builtin must use its captured hook even if the public rendezvous name is replaced.
+    auto adopted = evaluate(entry,
+        "globalThis.__valdiNativePromiseOwnership = () => { throw Error('replaced hook'); }; "
+        "globalThis.capturedInner = new Promise(() => {}); "
+        "new Promise(resolve => resolve(capturedInner))");
+    context.markPromiseRejectionHandled(adopted.get());
+    EXPECT_TRUE(context.valueToBool(evaluate(entry,
+        "savedOwnershipHook(1, capturedInner)").get(), entry.exceptionTracker));
+    entry.checkException();
+}
+
+TEST_P(HermesBoundaryTest, rejectionTimersSuppressOnlyNativeOwnedPromiseIdentity) {
+    MAIN_THREAD_INIT();
+    JSContextWrapper wrapper(getJsBridge(), nullptr);
+    auto entry = wrapper.makeJsEntry();
+    auto& context = entry.context;
+    BoundaryPromiseListener listener;
+    std::deque<JSValueRef> timers;
+    Defer detach([&]() { context.setListener(nullptr); });
+    context.setListener(&listener);
+    auto setTimeout = context.newFunction(makeShared<JSFunctionWithCallable>(ReferenceInfoBuilder(),
+        [&](JSFunctionNativeCallContext& call) {
+            timers.emplace_back(JSValueRef::makeRetained(context, call.getParameter(0)));
+            EXPECT_GT(call.getParameterAsInt(1), 0);
+            return context.newNumber(static_cast<double>(timers.size()));
+        }), entry.exceptionTracker);
+    publish(entry, "setTimeout", setTimeout);
+    auto immediate = evaluate(entry, "globalThis.ownedReason = {}; Promise.reject(ownedReason)");
+    auto nativeImmediate = makeShared<JSPromise>(context, immediate.get(), ReferenceInfoBuilder().build(),
+                                                 nullptr, entry.exceptionTracker);
+    auto pending = evaluate(entry, "globalThis.rejectOwned = undefined; "
+                                   "new Promise((_, reject) => { rejectOwned = reject; })");
+    auto nativePending = makeShared<JSPromise>(context, pending.get(), ReferenceInfoBuilder().build(),
+                                               nullptr, entry.exceptionTracker);
+    // The unrelated rejection has the SAME reason; filtering must compare promises, not reasons.
+    evaluate(entry, "Promise.reject(ownedReason); Promise.resolve().then(() => rejectOwned(ownedReason));");
+    entry.willExitVM();
+    entry.checkException();
+    ASSERT_EQ(2u, timers.size());
+    EXPECT_TRUE(listener.reasons.empty());
+    auto timerEntry = wrapper.makeJsEntry();
+    context.garbageCollect(); // Weak wrapper roots and promise identities must survive a collection.
+    while (!timers.empty()) {
+        auto callback = std::move(timers.front());
+        timers.pop_front();
+        JSFunctionCallContext call(context, nullptr, 0, timerEntry.exceptionTracker);
+        context.callObjectAsFunction(callback.get(), call);
+        timerEntry.checkException();
+    }
+    ASSERT_EQ(1u, listener.reasons.size());
+    publish(timerEntry, "reportedReason", listener.reasons.front());
+    EXPECT_TRUE(context.valueToBool(evaluate(timerEntry, "reportedReason === ownedReason").get(),
+                                    timerEntry.exceptionTracker));
+}
+
+TEST_P(HermesBoundaryTest, nativeOwnershipIsWeakAndWrappersAreReleasedBeforeRuntimeTeardown) {
+    MAIN_THREAD_INIT();
+    // Recreate contexts to exercise teardown with both cleared and live weak targets.
+    for (size_t iteration = 0; iteration < 3; ++iteration) {
+        JSContextWrapper wrapper(getJsBridge(), nullptr);
+        JSValueRef weak;
+        {
+            auto entry = wrapper.makeJsEntry();
+            // A pending promise avoids the rejection tracker's own strong reference to a rejection.
+            auto promise = evaluate(entry, "new Promise(() => {})");
+            weak = entry.context.newWeakRef(promise.get(), entry.exceptionTracker);
+            auto native = makeShared<JSPromise>(entry.context, promise.get(), ReferenceInfoBuilder().build(),
+                                                nullptr, entry.exceptionTracker);
+            entry.checkException();
+        }
+        // JSPromise destruction asynchronously releases its stashed JS root.
+        wrapper.taskScheduler->taskQueue->flushUpToNow();
+        {
+            auto entry = wrapper.makeJsEntry();
+            entry.context.garbageCollect();
+            auto target = entry.context.derefWeakRef(weak.get(), entry.exceptionTracker);
+            entry.checkException();
+            EXPECT_TRUE(entry.context.isValueUndefined(target.get()));
+            // Marking another promise prunes the dead wrapper and leaves a live wrapper for teardown.
+            auto live = evaluate(entry, "globalThis.liveOwned = new Promise(() => {})");
+            entry.context.markPromiseRejectionHandled(live.get());
+            entry.context.garbageCollect();
+            auto liveWeak = entry.context.newWeakRef(live.get(), entry.exceptionTracker);
+            EXPECT_TRUE(entry.context.isValueEqual(live.get(),
+                entry.context.derefWeakRef(liveWeak.get(), entry.exceptionTracker).get()));
+            entry.checkException();
+        }
+        weak = JSValueRef();
+    }
+}
+
+// Exercise the patched builtin as well as the adapter: a pending-only weak test misses tracker roots.
+TEST_P(HermesBoundaryTest, droppedNativePromisesRetireRejectedAndAdoptedTrackerRecords) {
+    MAIN_THREAD_INIT();
+    for (const char* scenario : {"rejected", "adopted", "lateAdopted", "adoptedPending"}) {
+        SCOPED_TRACE(scenario);
+        JSContextWrapper wrapper(getJsBridge(), nullptr);
+        BoundaryPromiseListener listener;
+        std::deque<JSValueRef> timers;
+        auto entry = wrapper.makeJsEntry();
+        auto& context = entry.context;
+        Defer detach([&]() { context.setListener(nullptr); });
+        context.setListener(&listener);
+        auto setTimeout = context.newFunction(makeShared<JSFunctionWithCallable>(ReferenceInfoBuilder(),
+            [&](JSFunctionNativeCallContext& call) {
+                timers.emplace_back(JSValueRef::makeRetained(context, call.getParameter(0)));
+                return context.newNumber(static_cast<double>(timers.size()));
+            }), entry.exceptionTracker);
+        publish(entry, "setTimeout", setTimeout);
+        evaluate(entry, "globalThis.collectionReason = {}; globalThis.innerPromise = undefined; "
+                        "globalThis.outerPromise = undefined; globalThis.resolveOuter = undefined; "
+                        "globalThis.rejectInner = undefined;");
+        const bool late = std::string(scenario) == "lateAdopted";
+        const bool adoptedPending = std::string(scenario) == "adoptedPending";
+        {
+            const char* source;
+            if (late) {
+                source = "outerPromise = new Promise(resolve => { resolveOuter = resolve; }); outerPromise";
+            } else if (adoptedPending) {
+                source = "innerPromise = new Promise((_, reject) => { rejectInner = reject; }); "
+                         "outerPromise = new Promise(resolve => resolve(innerPromise)); outerPromise";
+            } else if (std::string(scenario) == "adopted") {
+                source = "innerPromise = Promise.reject(collectionReason); "
+                         "outerPromise = new Promise(resolve => resolve(innerPromise)); outerPromise";
+            } else {
+                source = "innerPromise = Promise.reject(collectionReason); outerPromise = innerPromise; outerPromise";
+            }
+            auto promise = evaluate(entry, source);
+            auto native = makeShared<JSPromise>(context, promise.get(), ReferenceInfoBuilder().build(),
+                                                nullptr, entry.exceptionTracker);
+            entry.checkException();
+            // Never call onComplete; drop the native wrapper BEFORE settling a pending outer.
+        }
+        entry.willExitVM();
+        entry.checkException();
+        wrapper.taskScheduler->taskQueue->flushUpToNow();
+        auto timerEntry = wrapper.makeJsEntry();
+        if (late) {
+            evaluate(timerEntry, "innerPromise = Promise.reject(collectionReason); "
+                                 "resolveOuter(innerPromise); resolveOuter = undefined;");
+        } else if (adoptedPending) {
+            evaluate(timerEntry, "rejectInner(collectionReason); rejectInner = undefined;");
+        }
+        auto outer = evaluate(timerEntry, "outerPromise");
+        auto inner = evaluate(timerEntry, "innerPromise");
+        auto reason = evaluate(timerEntry, "collectionReason");
+        auto weakOuter = context.newWeakRef(outer.get(), timerEntry.exceptionTracker);
+        auto weakInner = context.newWeakRef(inner.get(), timerEntry.exceptionTracker);
+        auto weakReason = context.newWeakRef(reason.get(), timerEntry.exceptionTracker);
+        outer = JSValueRef();
+        inner = JSValueRef();
+        reason = JSValueRef();
+        evaluate(timerEntry, "outerPromise = innerPromise = collectionReason = resolveOuter = undefined;");
+        // The outer adoption wrapper can disappear while the tracker still retains the inner.
+        context.garbageCollect();
+        EXPECT_EQ(adoptedPending ? 0u : 1u, timers.size());
+        while (!timers.empty()) {
+            auto callback = std::move(timers.front());
+            timers.pop_front();
+            JSFunctionCallContext call(context, nullptr, 0, timerEntry.exceptionTracker);
+            context.callObjectAsFunction(callback.get(), call);
+            timerEntry.checkException();
+            context.callObjectAsFunction(callback.get(), call);
+            timerEntry.checkException();
+        }
+        EXPECT_TRUE(listener.reasons.empty());
+        listener.reasons.clear(); // A failed report assertion must not itself retain the reason below.
+        context.garbageCollect();
+        EXPECT_TRUE(context.isValueUndefined(context.derefWeakRef(weakOuter.get(), timerEntry.exceptionTracker).get()));
+        EXPECT_TRUE(context.isValueUndefined(context.derefWeakRef(weakInner.get(), timerEntry.exceptionTracker).get()));
+        EXPECT_TRUE(context.isValueUndefined(context.derefWeakRef(weakReason.get(), timerEntry.exceptionTracker).get()));
+        timerEntry.checkException();
     }
 }
 

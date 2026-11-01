@@ -1,0 +1,56 @@
+--- a/lib/InternalJavaScript/01-Promise.js
++++ b/lib/InternalJavaScript/01-Promise.js
+@@ -1,6 +1,9 @@
+ /* @nolint */var initPromise = (function () {
+   'use strict';
+   var useEngineQueue = HermesInternal.useEngineQueue();
++  // Valdi 260318099.0.4 protocol: capture at tracker enable, after the host installs its hook.
++  // op 0 records an adoption; op 1 queries native ownership. The host never runs JS to mark.
++  var nativePromiseOwnership;
+   function noop() {}
+ 
+   // States:
+@@ -149,6 +152,7 @@
+       ) {
+         self._y = 3;
+         self._z = newValue;
++        if (nativePromiseOwnership) nativePromiseOwnership(0, self, newValue);
+         finale(self);
+         return;
+       } else if (typeof then === 'function') {
+@@ -446,6 +450,10 @@
+   function enable(options) {
+     options = options || {};
+     if (enabled) disable();
++    if (!nativePromiseOwnership) {
++      var ownershipHook = globalThis.__valdiNativePromiseOwnership;
++      if (typeof ownershipHook === 'function') nativePromiseOwnership = ownershipHook;
++    }
+     enabled = true;
+     var id = 0;
+     var displayId = 0;
+@@ -464,7 +472,8 @@
+       }
+     };
+     core._C = function (promise, err) {
+-      if (promise._x === 0) { // not yet handled
++      if (promise._x === 0 && // not yet handled
++          !(nativePromiseOwnership && nativePromiseOwnership(1, promise))) {
+         promise._E = id++;
+         rejections[promise._E] = {
+           displayId: null,
+@@ -485,6 +494,14 @@
+       }
+     };
+     function onUnhandled(id) {
++      var rejection = rejections[id];
++      if (!rejection) return;
++      if (nativePromiseOwnership && nativePromiseOwnership(1, rejection.promise)) {
++        // Ownership may have arrived after rejection (including through an adopted outer).
++        // Retire the closure's strong promise/reason roots without logging or onHandled warnings.
++        delete rejections[id];
++        return;
++      }
+       if (
+         options.allRejections ||
+         matchWhitelist(

@@ -12,6 +12,8 @@
 #include "valdi/hermes/HermesUtils.hpp"
 #include "valdi/runtime/Interfaces/IJavaScriptContext.hpp"
 
+#include <vector>
+
 namespace facebook::hermes {
 class HermesRuntime;
 }
@@ -72,6 +74,8 @@ public:
     JSValueRef newObjectFromNativeClass(const Ref<RefCountable>& opaque,
                                         const JSValue& cls,
                                         JSExceptionTracker& exceptionTracker) final;
+
+    void markPromiseRejectionHandled(const JSValue& promise) final;
 
     JSValueRef newWeakRef(const JSValue& object, JSExceptionTracker& exceptionTracker) final;
 
@@ -178,6 +182,22 @@ protected:
     void onInitialize(JSExceptionTracker& exceptionTracker) final;
 
 private:
+    friend class NativePromiseOwnershipCallback;
+
+    // Root the weak wrappers, never the native-owned promises themselves.
+    struct PromiseAdoption {
+        JSValueRef parent;
+        JSValueRef child;
+    };
+    // Linear weak tables: prune on every hook/mark; propagation visits each newly owned node once.
+    // Cost depends on live graph size, not the number of historical rejected promises.
+    std::vector<JSValueRef> _nativeOwnedPromises;
+    std::vector<PromiseAdoption> _promiseAdoptions;
+    JSValueRef newPromiseOwnershipWeakRef(const JSValue& object);
+    void prunePromiseAdoptions();
+    bool isNativeOwnedPromise(const JSValue& promise);
+    void recordPromiseAdoption(const JSValue& parent, const JSValue& child);
+
     [[maybe_unused]] ILogger& _logger;
     [[maybe_unused]] std::shared_ptr<facebook::hermes::HermesRuntime> _jsiRuntime;
     std::shared_ptr<hermes::vm::Runtime> _sharedRuntime;
