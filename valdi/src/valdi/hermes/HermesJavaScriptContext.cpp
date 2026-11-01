@@ -221,7 +221,7 @@ void HermesJavaScriptContext::initializePromiseRejectionTracker(JSExceptionTrack
         return;
     }
     IJavaScriptContext::setObjectProperty(
-        global.get(), "__valdiNativePromiseOwnership", ownershipHook.get(), exceptionTracker);
+        global.get(), "__valdiNativePromiseOwnership", ownershipHook.get(), false, exceptionTracker);
     if (!exceptionTracker) {
         return;
     }
