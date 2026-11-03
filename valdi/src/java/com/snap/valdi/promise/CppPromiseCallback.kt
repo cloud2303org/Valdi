@@ -1,6 +1,7 @@
 package com.snap.valdi.promise
 
 import androidx.annotation.Keep
+import com.snap.valdi.exceptions.PromiseRejectionException
 import com.snap.valdi.exceptions.messageWithCauses
 import com.snap.valdi.exceptions.valdiErrorCode
 import com.snap.valdi.utils.CppNativeHandlePair
@@ -20,7 +21,9 @@ class CppPromiseCallback<T>(nativeHandle: Long, valueMarshallerNativeHandle: Lon
         nativeOnFailure(
             this.swapNativeHandle1(),
             this.swapNativeHandle2(),
-            error.messageWithCauses(),
+            // Only an explicit rejection opts into verbatim text. An empty message is
+            // still a failure; ordinary exceptions keep their diagnostic cause chains.
+            if (error is PromiseRejectionException) error.message.orEmpty() else error.messageWithCauses(),
             error.valdiErrorCode(),
         )
     }

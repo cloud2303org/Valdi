@@ -619,7 +619,7 @@ void JavaScriptValueDelegate::setMapEntry(const JSValueRef& map,
                                           const JSValueRef& key,
                                           const JSValueRef& value,
                                           ExceptionTracker& exceptionTracker) {
-    _jsContext->setObjectProperty(map.get(), key.get(), value.get(), toJSExceptionTracker(exceptionTracker));
+    _jsContext->setMapProperty(map.get(), key.get(), value.get(), toJSExceptionTracker(exceptionTracker));
 }
 
 size_t JavaScriptValueDelegate::getMapEstimatedLength(const JSValueRef& map, ExceptionTracker& exceptionTracker) {

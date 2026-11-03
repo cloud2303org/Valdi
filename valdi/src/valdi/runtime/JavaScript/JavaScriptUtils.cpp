@@ -308,7 +308,7 @@ JSValueRef valueToJSValue(IJavaScriptContext& jsContext,
                     return jsContext.newUndefined();
                 }
 
-                jsContext.setObjectProperty(object.get(), it.first.toStringView(), value.get(), exceptionTracker);
+                jsContext.setMapProperty(object.get(), it.first.toStringView(), value.get(), exceptionTracker);
                 if (!exceptionTracker) {
                     return jsContext.newUndefined();
                 }

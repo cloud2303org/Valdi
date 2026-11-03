@@ -235,6 +235,17 @@ public:
                                    bool enumerable,
                                    JSExceptionTracker& exceptionTracker) = 0;
 
+    // Populate fresh map objects without invoking the legacy __proto__ setter.
+    // Ordinary keys keep the native setter fast path.
+    void setMapProperty(const JSValue& object,
+                        const std::string_view& propertyName,
+                        const JSValue& propertyValue,
+                        JSExceptionTracker& exceptionTracker);
+    void setMapProperty(const JSValue& object,
+                        const JSValue& propertyName,
+                        const JSValue& propertyValue,
+                        JSExceptionTracker& exceptionTracker);
+
     virtual void setObjectPropertyIndex(const JSValue& object,
                                         size_t index,
                                         const JSValue& value,
@@ -453,6 +464,10 @@ private:
     bool _tearingDown = false;
 
     std::unique_ptr<JavaScriptValueMarshaller> _valueMarshaller;
+
+    JSValueRef _mapPrototypeKey;
+    JSValueRef _defineMapProperty;
+    JSValueRef _createMapDescriptor;
 
     StashedJSValue* doGetStashedJSValue(const JSValueID& id);
 

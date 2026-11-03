@@ -35,6 +35,7 @@
 #import "valdi_core/SCValdiReferenceTable+CPP.h"
 
 #import <utils/debugging/Assert.hpp>
+#import <CoreFoundation/CoreFoundation.h>
 
 @implementation SCValdiCppObject
 
@@ -424,6 +425,10 @@ id<SCValdiFunction> FunctionFromValueFunction(const Valdi::Ref<Valdi::ValueFunct
 
             return Valdi::Value(convertedString);
         } else if ([object isKindOfClass:[NSNumber class]]) {
+            // NSNumber also boxes CFBoolean. Numeric 0/1 must remain numbers.
+            if (CFGetTypeID((__bridge CFTypeRef)object) == CFBooleanGetTypeID()) {
+                return Valdi::Value(static_cast<bool>([object boolValue]));
+            }
             return Valdi::Value([object doubleValue]);
         } else if ([object isKindOfClass:[NSDictionary class]]) {
             return ValueFromNSDictionary(object);

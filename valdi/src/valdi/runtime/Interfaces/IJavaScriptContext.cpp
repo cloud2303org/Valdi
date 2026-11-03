@@ -54,6 +54,31 @@ void IJavaScriptContext::initialize(const IJavaScriptContextConfig& config, JSEx
 
     _exportModePropertyName = newPropertyName("__exportMode__");
 
+    _mapPrototypeKey = ensureRetainedValue(newStringUTF8("__proto__", exceptionTracker));
+    if (!exceptionTracker) {
+        return;
+    }
+    // Capture intrinsics before application code can replace them. Do not evaluate
+    // source here: lean Hermes accepts only precompiled bytecode.
+    auto global = getGlobalObject(exceptionTracker);
+    if (!exceptionTracker) {
+        return;
+    }
+    auto objectConstructor = getObjectProperty(global.get(), "Object", exceptionTracker);
+    if (!exceptionTracker) {
+        return;
+    }
+    _defineMapProperty = ensureRetainedValue(
+        getObjectProperty(objectConstructor.get(), "defineProperty", exceptionTracker));
+    if (!exceptionTracker) {
+        return;
+    }
+    _createMapDescriptor = ensureRetainedValue(
+        getObjectProperty(objectConstructor.get(), "create", exceptionTracker));
+    if (!exceptionTracker) {
+        return;
+    }
+
     if (!config.disableValueMarshaller) {
         _valueMarshaller =
             std::make_unique<JavaScriptValueMarshaller>(*this, config.disableProxyObjectStore, exceptionTracker);
@@ -83,8 +108,61 @@ void IJavaScriptContext::prepareForTeardown() {
     _zeroValue = JSValueRef();
     _longConstructor = JSValueRef();
     _promiseConstructor = JSValueRef();
+    _mapPrototypeKey = JSValueRef();
+    _defineMapProperty = JSValueRef();
+    _createMapDescriptor = JSValueRef();
 
     _exportModePropertyName = JSPropertyNameRef();
+}
+
+void IJavaScriptContext::setMapProperty(const JSValue& object,
+                                        const std::string_view& propertyName,
+                                        const JSValue& propertyValue,
+                                        JSExceptionTracker& exceptionTracker) {
+    if (propertyName != "__proto__") {
+        setObjectProperty(object, propertyName, propertyValue, exceptionTracker);
+        return;
+    }
+    setMapProperty(object, _mapPrototypeKey.get(), propertyValue, exceptionTracker);
+}
+
+void IJavaScriptContext::setMapProperty(const JSValue& object,
+                                        const JSValue& propertyName,
+                                        const JSValue& propertyValue,
+                                        JSExceptionTracker& exceptionTracker) {
+    // isValueEqual compares string identities in several engines, not contents.
+    auto name = valueToString(propertyName, exceptionTracker);
+    if (!exceptionTracker) {
+        return;
+    }
+    if (name.toStringView() != "__proto__") {
+        setObjectProperty(object, propertyName, propertyValue, exceptionTracker);
+        return;
+    }
+    auto nullValue = newNull();
+    JSFunctionCallContext createContext(*this, &nullValue, 1, exceptionTracker);
+    auto descriptor = callObjectAsFunction(_createMapDescriptor.get(), createContext);
+    if (!exceptionTracker) {
+        return;
+    }
+    // Object.create(null) prevents inherited setters and descriptor fields from
+    // affecting the data descriptor, even after Object.prototype is modified.
+    auto trueValue = newBool(true);
+    setObjectProperty(descriptor.get(), "value", propertyValue, exceptionTracker);
+    if (!exceptionTracker) {
+        return;
+    }
+    for (const char* flag : {"writable", "enumerable", "configurable"}) {
+        setObjectProperty(descriptor.get(), flag, trueValue.get(), exceptionTracker);
+        if (!exceptionTracker) {
+            return;
+        }
+    }
+    JSValueRef args[] = {JSValueRef::makeUnretained(*this, object),
+                         JSValueRef::makeUnretained(*this, propertyName),
+                         std::move(descriptor)};
+    JSFunctionCallContext callContext(*this, args, 3, exceptionTracker);
+    callObjectAsFunction(_defineMapProperty.get(), callContext);
 }
 
 JSValueRef IJavaScriptContext::newBool(bool boolean) {
