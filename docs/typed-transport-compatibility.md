@@ -26,19 +26,37 @@ screens, navigation, BLE services and UI components belong to
 
 ## Regression evidence
 
-The consuming application's regression entry points are:
+The generic regression drivers and real consumer fixtures now live in this
+fork, outside the main runtime test glob:
 
 ```sh
-node --test scripts/tests/upstream-runtime-patches.test.mjs
-node --test scripts/tests/android-promise-rejection.test.mjs
+node --test --test-concurrency=1 tools/validation/typed-transport/*.test.mjs
 ```
 
-Historical baseline patches are test fixtures only after the application adopts
-this branch's immutable commit. They are not applied again during application
-builds. Those tests check that their expected corrected bytes are present in the
-pinned fork before exercising the corresponding regression controls.
+The drivers compile/read this checkout's production sources directly. Baseline
+negative controls use `git show` at the base commit above; no production patch
+application occurs in the tests. The normal source/Kotlin checks do not depend
+on an application checkout. Linked full/LEAN Hermes and Foundation host
+consumers require explicit, compatible existing build-cache inputs and skip
+when those inputs are absent. Prerequisites, commands, fixture hashes, and
+evidence boundaries are documented in
+[`tools/validation/typed-transport/README.md`](../tools/validation/typed-transport/README.md).
 
-The focused migration run on November 3, 2026 passed the canonical-file/drift
-checks and the actual Kotlin/JNI consumer: all 19 corrected consumer cases
-passed, while the baseline reproduced nine verbatim-message failures. This
-does not establish a newly exported runtime AAR/framework or device acceptance.
+On November 3, 2026, the fork's default entry point passed five tests and
+explicitly skipped the two optional native-cache tests. The actual Kotlin/JNI
+consumer passed all 19 current-source cases; substituting the baseline callback
+reproduced exactly nine verbatim-message failures.
+
+A separate sequential host run with explicit existing cache inputs passed both
+native tests. Full and LEAN Hermes passed both current-source map paths, while
+independently substituting each baseline map call site failed the LEAN consumer.
+The full current Objective-C conversion unit compiled, and its extracted
+NSNumber branch passed the linked Foundation consumer; the baseline branch
+failed on `CFBoolean`. This used previously built macOS arm64 dependency
+archives and Hermes `260318099.0.4`, recompiling the current fork's tested units
+against its headers. It did not rebuild the dependency caches.
+
+These checks do not establish a newly exported runtime AAR/framework, complete
+Objective-C bridge linkage, Android native-to-JavaScript Promise delivery, or
+device acceptance. No full runtime export, whole-workspace Bazel build, or
+Harmony implementation/build/test was performed.
