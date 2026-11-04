@@ -63,7 +63,12 @@ void Matrix::setSkewY(Scalar skewY) {
 }
 
 void Matrix::postRotate(Scalar radians, Scalar px, Scalar py) {
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+    constexpr Scalar radiansToDegrees = 57.295779513082320876f;
+    postRotateDegrees(radians * radiansToDegrees, px, py);
+#else
     postRotateDegrees(SkRadiansToDegrees(radians), px, py);
+#endif
 }
 
 void Matrix::postRotateDegrees(Scalar degrees, Scalar px, Scalar py) {
@@ -87,7 +92,11 @@ void Matrix::postScale(Scalar sx, Scalar sy) {
 }
 
 Rect Matrix::mapRect(const Rect& rect) const {
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+    return Rect::fromTgfxValue(getSkValue().mapRect(rect.getSkValue()));
+#else
     return fromSkValue<Rect>(getSkValue().mapRect(rect.getSkValue()));
+#endif
 }
 
 bool Matrix::isIdentity() const {
@@ -121,11 +130,30 @@ bool Matrix::operator!=(const Matrix& other) const {
 bool Matrix::toAffine(Scalar* affineValues) const {
     const auto& mat = getSkValue();
 
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+    if (mat.hasPerspective()) {
+        return false;
+    }
+    // TGFX stores rows; SnapDrawing's affine contract follows Skia's
+    // [scaleX, skewY, skewX, scaleY, translateX, translateY] order.
+    affineValues[0] = mat.getScaleX();
+    affineValues[1] = mat.getSkewY();
+    affineValues[2] = mat.getSkewX();
+    affineValues[3] = mat.getScaleY();
+    affineValues[4] = mat.getTranslateX();
+    affineValues[5] = mat.getTranslateY();
+    return true;
+#else
     return mat.asAffine(reinterpret_cast<SkScalar*>(affineValues));
+#endif
 }
 
 void Matrix::getAll(Scalar* values) const {
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+    getSkValue().get9(values);
+#else
     getSkValue().get9(reinterpret_cast<SkScalar*>(values));
+#endif
 }
 
 std::string Matrix::toString() const {

@@ -1,0 +1,14 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 7ad6abf..8066477 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -453,7 +453,8 @@ endif ()
+ # Auto-sync shaderc sub-dependencies (glslang, SPIRV-Tools, etc.) if any backend needs shaderc.
+ # This runs at configure time; for offline builds, run manually before cmake:
+ #   python third_party/shaderc/utils/git-sync-deps
+-if (NOT EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/third_party/shaderc/third_party/glslang)
++if ((TGFX_USE_METAL OR TGFX_USE_VULKAN OR TGFX_USE_D3D12 OR TGFX_USE_WEBGPU)
++        AND NOT EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/third_party/shaderc/third_party/glslang)
+     find_package(Python3 COMPONENTS Interpreter QUIET)
+     if (Python3_FOUND)
+         message(STATUS "Syncing shaderc sub-dependencies...")

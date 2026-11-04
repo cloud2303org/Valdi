@@ -7,9 +7,14 @@
 
 #pragma once
 
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+#include "tgfx/core/Picture.h"
+#include <memory>
+#else
 #include "include/core/SkPicture.h"
 #include "snap_drawing/cpp/Drawing/Surface/ExternalSurface.hpp"
 #include "snap_drawing/cpp/Utils/Aliases.hpp"
+#endif
 
 namespace snap::drawing {
 
@@ -20,10 +25,16 @@ namespace snap::drawing {
  It is created by the DrawingContext.
  */
 struct LayerContent {
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+    std::shared_ptr<tgfx::Picture> picture;
+
+    explicit LayerContent(const std::shared_ptr<tgfx::Picture>& picture);
+#else
     sk_sp<SkPicture> picture;
     Ref<ExternalSurfaceSnapshot> externalSurface;
 
     LayerContent(const sk_sp<SkPicture>& picture, const Ref<ExternalSurfaceSnapshot>& externalSurface);
+#endif
     LayerContent();
     ~LayerContent();
 

@@ -1,0 +1,7 @@
+{
+  "PathSHA256": "5b9a52e27650c15f443e6018e1854ecd08371e74897165577d78478a0fb9f8e7",
+  "fixtureSHA256": "f769ecf0aa709f3421d294667a53dbff9e74de3a677c01a24b93c094ccf3074b",
+  "passedControls": 15,
+  "newGPUCaseFailed": true,
+  "log": "fill-rule-red.log"
+}

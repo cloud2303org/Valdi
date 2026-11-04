@@ -8,11 +8,17 @@
 #pragma once
 
 #include "snap_drawing/cpp/Utils/Scalar.hpp"
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+#include "tgfx/core/Point.h"
+#include "tgfx/core/Rect.h"
+#else
 #include "snap_drawing/cpp/Utils/SkiaBridge.hpp"
 
 #include "include/core/SkPoint.h"
 #include "include/core/SkRect.h"
+#endif
 
+#include <algorithm>
 #include <ostream>
 
 namespace snap::drawing {
@@ -29,11 +35,21 @@ struct Vector {
     }
 
     inline bool operator==(const Vector& other) const {
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+        const Scalar values[] = {dx, dy};
+        const Scalar otherValues[] = {other.dx, other.dy};
+        return scalarsEqual<2>(values, otherValues);
+#else
         return scalarsEqual<2>(reinterpret_cast<const Scalar*>(this), reinterpret_cast<const Scalar*>(&other));
+#endif
     }
 
     inline bool operator!=(const Vector& other) const {
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+        return !(*this == other);
+#else
         return !scalarsEqual<2>(reinterpret_cast<const Scalar*>(this), reinterpret_cast<const Scalar*>(&other));
+#endif
     }
 
     static constexpr Vector makeEmpty() {
@@ -53,11 +69,21 @@ struct Size {
     }
 
     inline bool operator==(const Size& other) const {
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+        const Scalar values[] = {width, height};
+        const Scalar otherValues[] = {other.width, other.height};
+        return scalarsEqual<2>(values, otherValues);
+#else
         return scalarsEqual<2>(reinterpret_cast<const Scalar*>(this), reinterpret_cast<const Scalar*>(&other));
+#endif
     }
 
     inline bool operator!=(const Size& other) const {
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+        return !(*this == other);
+#else
         return !scalarsEqual<2>(reinterpret_cast<const Scalar*>(this), reinterpret_cast<const Scalar*>(&other));
+#endif
     }
 
     static constexpr Size makeEmpty() {
@@ -65,12 +91,26 @@ struct Size {
     }
 };
 
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+struct Point {
+#else
 struct Point : public BridgedSkValue<Point, SkPoint> {
+#endif
     Scalar x = 0;
     Scalar y = 0;
 
     constexpr Point() = default;
     constexpr Point(Scalar x, Scalar y) : x(x), y(y) {}
+
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+    constexpr tgfx::Point getSkValue() const {
+        return tgfx::Point::Make(x, y);
+    }
+
+    static constexpr Point fromTgfxValue(const tgfx::Point& point) {
+        return Point(point.x, point.y);
+    }
+#endif
 
     static constexpr Point make(Scalar x, Scalar y) {
         return Point(x, y);
@@ -104,11 +144,21 @@ struct Point : public BridgedSkValue<Point, SkPoint> {
     }
 
     inline bool operator==(const Point& other) const {
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+        const Scalar values[] = {x, y};
+        const Scalar otherValues[] = {other.x, other.y};
+        return scalarsEqual<2>(values, otherValues);
+#else
         return scalarsEqual<2>(reinterpret_cast<const Scalar*>(this), reinterpret_cast<const Scalar*>(&other));
+#endif
     }
 
     inline bool operator!=(const Point& other) const {
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+        return !(*this == other);
+#else
         return !scalarsEqual<2>(reinterpret_cast<const Scalar*>(this), reinterpret_cast<const Scalar*>(&other));
+#endif
     }
 };
 
@@ -119,7 +169,11 @@ enum FittingSizeMode {
     FittingSizeModeCenterScaleFit,
 };
 
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+struct Rect {
+#else
 struct Rect : public BridgedSkValue<Rect, SkRect> {
+#endif
     Scalar left = 0;
     Scalar top = 0;
     Scalar right = 0;
@@ -128,6 +182,16 @@ struct Rect : public BridgedSkValue<Rect, SkRect> {
     constexpr Rect() = default;
     constexpr Rect(Scalar left, Scalar top, Scalar right, Scalar bottom)
         : left(left), top(top), right(right), bottom(bottom) {}
+
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+    constexpr tgfx::Rect getSkValue() const {
+        return tgfx::Rect::MakeLTRB(left, top, right, bottom);
+    }
+
+    static constexpr Rect fromTgfxValue(const tgfx::Rect& rect) {
+        return Rect(rect.left, rect.top, rect.right, rect.bottom);
+    }
+#endif
 
     constexpr Scalar x() const {
         return left;
@@ -154,11 +218,21 @@ struct Rect : public BridgedSkValue<Rect, SkRect> {
     }
 
     inline bool operator==(const Rect& other) const {
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+        const Scalar values[] = {left, top, right, bottom};
+        const Scalar otherValues[] = {other.left, other.top, other.right, other.bottom};
+        return scalarsEqual<4>(values, otherValues);
+#else
         return scalarsEqual<4>(reinterpret_cast<const Scalar*>(this), reinterpret_cast<const Scalar*>(&other));
+#endif
     }
 
     inline bool operator!=(const Rect& other) const {
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+        return !(*this == other);
+#else
         return !scalarsEqual<4>(reinterpret_cast<const Scalar*>(this), reinterpret_cast<const Scalar*>(&other));
+#endif
     }
 
     static constexpr Rect makeLTRB(Scalar l, Scalar t, Scalar r, Scalar b) {

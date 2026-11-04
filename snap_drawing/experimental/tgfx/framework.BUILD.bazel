@@ -1,0 +1,42 @@
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+
+cc_library(
+    name = "vector",
+    srcs = [
+        "snap_drawing/src/snap_drawing/cpp/Drawing/DrawingContext.cpp",
+        "snap_drawing/src/snap_drawing/cpp/Drawing/LayerContent.cpp",
+        "snap_drawing/src/snap_drawing/cpp/Drawing/Paint.cpp",
+        "snap_drawing/src/snap_drawing/cpp/Utils/BorderRadius.cpp",
+        "snap_drawing/src/snap_drawing/cpp/Utils/Color.cpp",
+        "snap_drawing/src/snap_drawing/cpp/Utils/Geometry.cpp",
+        "snap_drawing/src/snap_drawing/cpp/Utils/LazyPath.cpp",
+        "snap_drawing/src/snap_drawing/cpp/Utils/Matrix.cpp",
+        "snap_drawing/src/snap_drawing/cpp/Utils/Path.cpp",
+    ],
+    hdrs = [
+        "libs/utils/src/utils/base/NonCopyable.hpp",
+        "snap_drawing/src/snap_drawing/cpp/Drawing/DrawingContext.hpp",
+        "snap_drawing/src/snap_drawing/cpp/Drawing/LayerContent.hpp",
+        "snap_drawing/src/snap_drawing/cpp/Drawing/Paint.hpp",
+        "snap_drawing/src/snap_drawing/cpp/Utils/BorderRadius.hpp",
+        "snap_drawing/src/snap_drawing/cpp/Utils/Color.hpp",
+        "snap_drawing/src/snap_drawing/cpp/Utils/Geometry.hpp",
+        "snap_drawing/src/snap_drawing/cpp/Utils/LazyPath.hpp",
+        "snap_drawing/src/snap_drawing/cpp/Utils/Matrix.hpp",
+        "snap_drawing/src/snap_drawing/cpp/Utils/Path.hpp",
+        "snap_drawing/src/snap_drawing/cpp/Utils/Scalar.hpp",
+        "snap_drawing/src/snap_drawing/cpp/Utils/SkiaBridge.hpp",
+        "snap_drawing/src/snap_drawing/cpp/Utils/TgfxBridge.hpp",
+    ],
+    copts = ["-std=c++20"],
+    defines = ["SNAP_DRAWING_TGFX_EXPERIMENT"],
+    includes = [
+        "snap_drawing/src",
+        "libs/utils/src",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@fmt//:fmt",
+        "@tgfx//:tgfx",
+    ],
+)

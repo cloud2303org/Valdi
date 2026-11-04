@@ -60,9 +60,13 @@ Rect Rect::makeFittingSize(Size size, FittingSizeMode mode) const {
 }
 
 bool Rect::intersects(const Rect& other) const {
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+    return tgfx::Rect::Intersects(getSkValue(), other.getSkValue());
+#else
     // Use Skia's exact floating-point comparison for general intersection checks.
     // This is important for Compositor plane optimization logic.
     return getSkValue().intersects(other.getSkValue());
+#endif
 }
 
 bool Rect::intersectsWithTolerance(const Rect& other) const {

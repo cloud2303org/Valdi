@@ -7,9 +7,13 @@
 
 #pragma once
 
-#include "include/core/SkColor.h"
 #include "snap_drawing/cpp/Utils/Scalar.hpp"
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+#include "snap_drawing/cpp/Utils/TgfxBridge.hpp"
+#else
+#include "include/core/SkColor.h"
 #include "snap_drawing/cpp/Utils/SkiaBridge.hpp"
+#endif
 
 #include <ostream>
 #include <string>
@@ -18,11 +22,25 @@ namespace snap::drawing {
 
 using ColorComponent = uint8_t;
 
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+struct Color {
+#else
 struct Color : public BridgedSkValue<Color, SkColor> {
+#endif
     uint32_t value = 0;
 
     constexpr Color() = default;
     constexpr explicit Color(uint32_t value) : value(value) {}
+
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+    tgfx::Color getSkValue() const {
+        return tgfxColorFromARGB(value);
+    }
+
+    static Color fromTgfxValue(const tgfx::Color& color) {
+        return Color(argbFromTgfxColor(color));
+    }
+#endif
 
     std::string toString() const;
 

@@ -8,9 +8,14 @@
 #pragma once
 
 #include "snap_drawing/cpp/Utils/Geometry.hpp"
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+#include "snap_drawing/cpp/Utils/TgfxBridge.hpp"
+#include "tgfx/core/Path.h"
+#else
 #include "snap_drawing/cpp/Utils/SkiaBridge.hpp"
 
 #include "include/core/SkPath.h"
+#endif
 
 #include <optional>
 #include <ostream>
@@ -22,7 +27,11 @@ class Matrix;
 
 class PathVisitor;
 
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+class Path : public WrappedTgfxValue<tgfx::Path> {
+#else
 class Path : public WrappedSkValue<SkPath> {
+#endif
 public:
     Path();
     Path(Path&& other) noexcept;
@@ -120,7 +129,9 @@ public:
 
     bool isEmpty() const;
 
+#ifndef SNAP_DRAWING_TGFX_EXPERIMENT
     std::string toString() const;
+#endif
 
     Path intersection(const Path& other) const;
 
@@ -130,7 +141,9 @@ public:
     bool operator!=(const Path& other) const;
 };
 
+#ifndef SNAP_DRAWING_TGFX_EXPERIMENT
 std::ostream& operator<<(std::ostream& os, const Path& path);
+#endif
 
 class PathVisitor {
 public:

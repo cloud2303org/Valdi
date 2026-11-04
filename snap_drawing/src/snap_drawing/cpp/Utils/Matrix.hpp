@@ -8,16 +8,25 @@
 #pragma once
 
 #include "snap_drawing/cpp/Utils/Geometry.hpp"
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+#include "snap_drawing/cpp/Utils/TgfxBridge.hpp"
+#include "tgfx/core/Matrix.h"
+#else
 #include "snap_drawing/cpp/Utils/SkiaBridge.hpp"
 
 #include "include/core/SkMatrix.h"
+#endif
 
 #include <ostream>
 #include <string>
 
 namespace snap::drawing {
 
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+class Matrix : public WrappedTgfxValue<tgfx::Matrix> {
+#else
 class Matrix : public WrappedSkValue<SkMatrix> {
+#endif
 public:
     void setIdentity();
 

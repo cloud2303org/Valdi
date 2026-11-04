@@ -7,12 +7,19 @@
 
 #pragma once
 
+#ifndef SNAP_DRAWING_TGFX_EXPERIMENT
 #include "include/core/SkScalar.h"
+#endif
+#include <cstddef>
 #include <cmath>
 
 namespace snap::drawing {
 
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+using Scalar = float;
+#else
 using Scalar = SkScalar;
+#endif
 
 inline Scalar pixelsToScalar(int pixels, float pointScale) {
     return static_cast<Scalar>(pixels) / pointScale;

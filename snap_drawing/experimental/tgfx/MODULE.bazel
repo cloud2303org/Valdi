@@ -1,0 +1,27 @@
+module(name = "snapdrawing_tgfx_experiment")
+
+bazel_dep(name = "apple_support", version = "1.22.1")
+bazel_dep(name = "rules_cc", version = "0.2.20")
+
+new_local_repository = use_repo_rule(
+    "@bazel_tools//tools/build_defs/repo:local.bzl",
+    "new_local_repository",
+)
+
+new_local_repository(
+    name = "framework",
+    path = ".local/framework",
+    build_file = "//:framework.BUILD.bazel",
+)
+
+new_local_repository(
+    name = "tgfx",
+    path = ".local/tgfx",
+    build_file = "//:tgfx.BUILD.bazel",
+)
+
+new_local_repository(
+    name = "fmt",
+    path = ".local/fmt",
+    build_file = "//:fmt.BUILD.bazel",
+)

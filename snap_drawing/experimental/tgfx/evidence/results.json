@@ -1,0 +1,156 @@
+{
+  "date": "2026-11-04T02:36:21.554833+00:00",
+  "frameworkBase": "51cec8ae3645c7e778c9f36fbe4b3bffba1ccddf",
+  "platform": "macOS-arm64 OpenGL offscreen",
+  "inputs": {
+    "tgfxCommit": "4cf8991d5a3a010c9314538dd2fea937593b206b",
+    "tgfxSource": "/Users/cloud/project/ValdiNativeRoutes/.tools/vendor/tgfx",
+    "tgfxLibrary": "/Users/cloud/project/ValdiNativeRoutes/.tools/build/tgfx-prototype-mac/tgfx.a",
+    "tgfxLibrarySHA256": "d3b77813cd2a368d48296b6eef0ead83cb310b3684883e563959bfe0c5247960",
+    "tgfxCMakeSHA256": "dee697614f67b77a9ad97ad2d5a8e89a0a8d8766a3b6960dd5f512aee49fc7fb",
+    "tgfxBuildPatchSHA256": "f75feab89885f3a92b4e7e714f81c838045516e5dc911f80f17ce04a6575cb20",
+    "fmtSource": "/private/var/tmp/_bazel_cloud/bb3f5689ee31b0d35fe121336a2187dd/external/valdi++_repo_rules+fmt",
+    "fmtHeaderSHA256": "64efb8feb847689215b4d5076c57dda8592664875c0be28893c499b4e853bf5f"
+  },
+  "dependencySourceTrees": [
+    {
+      "name": "vendor_tools",
+      "fileCount": 21,
+      "treeManifestSHA256": "254655d815dcade2c46d3e4bee14fba5f6c8a5244a838b59390417f04c34eb06"
+    },
+    {
+      "name": "pathkit",
+      "fileCount": 160,
+      "treeManifestSHA256": "262bdca66d6e73ad5f2259ba3fa8a709a73b842e60249f98495e8e88e1ecfc80"
+    },
+    {
+      "name": "skcms",
+      "fileCount": 14,
+      "treeManifestSHA256": "ac642295c4aaa857343b7224cad0fc254202db50a670147629b12490a884b017"
+    },
+    {
+      "name": "concurrentqueue",
+      "fileCount": 1830,
+      "treeManifestSHA256": "c6737702738d093d593376351a72432ab03e5b7f9af78f21937f26a587520613"
+    },
+    {
+      "name": "highway",
+      "fileCount": 258,
+      "treeManifestSHA256": "29e39b5034c84a3d7324a3ecf15d04cbd1bec03232ee89223ba7cee991b7f02d"
+    }
+  ],
+  "sourceHashes": {
+    "snap_drawing/experimental/tgfx/.bazelversion": "4fa9948d0ae7007cbd1cc05768bc3e7cc6ec46ad0ea84c87df79e7a0c48d76b4",
+    "snap_drawing/experimental/tgfx/.gitignore": "feb2faa8e75b8063ca9466af088ebf1b07bf63c3d18dd6631c10864686ff2962",
+    "snap_drawing/experimental/tgfx/BUILD.bazel": "71fde3353f0f17d362fd074f70f2a586785ddfc4beacbbc324957df36a728a73",
+    "snap_drawing/experimental/tgfx/MODULE.bazel": "b2a0d2c9c936a959213c7f4b79bb01afd8b61b19c03768eb5f3acee814a1127f",
+    "snap_drawing/experimental/tgfx/README.md": "672dfd9b24a46c989a23fbe61796d0720e407c0f0bb52235807896003e3bacee",
+    "snap_drawing/experimental/tgfx/build_tgfx.sh": "053eab1c0cb58421fd0aebc23110968acc192c5568cf08fc47fa0ca4a846c0f5",
+    "snap_drawing/experimental/tgfx/fmt.BUILD.bazel": "445476f2f12da31471b57dce89196fe6713d33b5df73118f69068255a7fcf9d1",
+    "snap_drawing/experimental/tgfx/framework.BUILD.bazel": "6a441306a3e83c1dfbf4b8f2038368395179cf6bd6662672ee16fa29029c377b",
+    "snap_drawing/experimental/tgfx/patches/tgfx-opengl-shader-sync.patch": "f75feab89885f3a92b4e7e714f81c838045516e5dc911f80f17ce04a6575cb20",
+    "snap_drawing/experimental/tgfx/prepare.py": "dc41db6b0c9acf5711a29668e95b8e606feca11e2055350a3cf56092a9cc881b",
+    "snap_drawing/experimental/tgfx/tgfx.BUILD.bazel": "ffec65ea8fd5a79abeca7c2df58ec87414ce2f79c0c82b7a4b78036e2fdae8ea",
+    "snap_drawing/experimental/tgfx/vector_test.mm": "f769ecf0aa709f3421d294667a53dbff9e74de3a677c01a24b93c094ccf3074b",
+    "snap_drawing/src/snap_drawing/cpp/Drawing/DrawingContext.cpp": "658d78c11e5d3f1259d4378743025c9bf0e91787fdb53888d68b32547de387b3",
+    "snap_drawing/src/snap_drawing/cpp/Drawing/DrawingContext.hpp": "b059c827a6e3163e5f33fedfbc435eaafac7cd8a7af753bf592fa65293057fc8",
+    "snap_drawing/src/snap_drawing/cpp/Drawing/LayerContent.cpp": "a1cb4863cac82033623f55095ce0ada7f01d44a73b8d70ef8742266a1c3b8937",
+    "snap_drawing/src/snap_drawing/cpp/Drawing/LayerContent.hpp": "2dcda86de3d2aeb593c05160bb15e779086e8bdf36e98cd68b86e49b5dcb153d",
+    "snap_drawing/src/snap_drawing/cpp/Drawing/Paint.cpp": "78065b31374e84721a7bff301f615dcf04fcff95d810c3d085d03f482ef35b3c",
+    "snap_drawing/src/snap_drawing/cpp/Drawing/Paint.hpp": "d7d9c5a1c47fc17bd837b6924d7a71c8ef1efb5684c6f13f0eca03c27ba3b1dc",
+    "snap_drawing/src/snap_drawing/cpp/Utils/Color.hpp": "2060bea25660a2dbe10d6578673947475decaf3a20a362bddabfba30e501097a",
+    "snap_drawing/src/snap_drawing/cpp/Utils/Geometry.cpp": "21c6d06508a237b29e18acd39b6c59b2de05a6686a52bc09eaa125c6b20f693c",
+    "snap_drawing/src/snap_drawing/cpp/Utils/Geometry.hpp": "fede822a4abb947cb65988fbf47a3b7fa477bf3555eabb6be1cd4110ef17f509",
+    "snap_drawing/src/snap_drawing/cpp/Utils/LazyPath.hpp": "8b6515049a62ca8470bc379e073a2c626bc74cdf4bbee32a9c0b5779435cd4a4",
+    "snap_drawing/src/snap_drawing/cpp/Utils/Matrix.cpp": "ee1d173b85ff36c5e3205a1a5afa985f590670ba14c05eb27cf0f0d69d8c4e3e",
+    "snap_drawing/src/snap_drawing/cpp/Utils/Matrix.hpp": "3fae5c0fc3fa2296c5f85f66aa4f389577b0f30ed5efe104dc77aa1510c15d9b",
+    "snap_drawing/src/snap_drawing/cpp/Utils/Path.cpp": "01a6faccae8b8b7e8c493e876115fa122dc119c0e79c80f30f4d025be017b1a8",
+    "snap_drawing/src/snap_drawing/cpp/Utils/Path.hpp": "a788d6645a6bc5ce81da9f43c355bb9464520fafe50db700f13f2a1247ba6423",
+    "snap_drawing/src/snap_drawing/cpp/Utils/Scalar.hpp": "5beb62b58cb8fd0a07fdc267a625a9114194975d019a7c9a61bac03bccbbae52",
+    "snap_drawing/src/snap_drawing/cpp/Utils/TgfxBridge.hpp": "d493dd8aa6e05e05309339ee0fa0a8eb23606aece59f31b928cafe806e1c7eb8"
+  },
+  "logHashes": {
+    "/tmp/valdi-tgfx-prototype-20261104/fill-rule-green.log": "500be268b007e0b82ab4bac5526d768c542dea95f65efef71108978d51ccc0db",
+    "/tmp/valdi-tgfx-prototype-20261104/fill-rule-sanitizer-green.log": "dda7fae0a11eef86948109b97465432860296f73a9a32dc1234a62a6049525ef",
+    "/tmp/valdi-tgfx-prototype-20261104/vector-bazel-attempt4.log": "700ed211774eba477fb39a534cb3ff34f22e2fe25ef7f91c14d121a3e19c4aa3",
+    "/tmp/valdi-tgfx-prototype-20261104/vector-bazel-attempt1.log": "7472cdfed6f0bcf18b642dee5db3f3d1446f36eebfa894af77496ba0acfdc71c",
+    "/tmp/valdi-tgfx-prototype-20261104/vector-bazel-attempt2.log": "11efb3849507bbc945cabbf3e61ddfb59c717f0ce630bb386c729bbc0d9f71e2",
+    "/tmp/valdi-tgfx-prototype-20261104/vector-bazel-attempt3.log": "efe7ccd5ed2875c505658b41560e20a411b09ed5499cab75a9720d6cd7529b30",
+    "/tmp/valdi-tgfx-prototype-20261104/default-Path-final.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "/tmp/valdi-tgfx-prototype-20261104/build-attempt1.log": "9370bea7af87f12c198ce120ba8af4170df3df42089aa512f605728f9c87de03",
+    "/tmp/valdi-tgfx-prototype-20261104/vector-sanitizer-attempt1.log": "de2160f6fc12b14d3f183b67bbeddb2c5c0b8ea6a1c724e18ca796dddcb04817",
+    "/tmp/valdi-tgfx-prototype-20261104/configure-attempt2.log": "532f1faaddaf4972163608cfed785a63848d40b15c1162179016a4dd6d684b05",
+    "/tmp/valdi-tgfx-prototype-20261104/fill-rule-red.log": "cd49c58bc1896388ff4f757d0aca5d87c7ca6d2c1fd13c31762f0fa6f7be97b1",
+    "/tmp/valdi-tgfx-prototype-20261104/configure-attempt1.log": "322e085112dbb8eaeb6cb267d2caf3c787b38ce9066d6d2becd2026af51764cd",
+    "/tmp/valdi-tgfx-prototype-20261104/default-skia-attempt2.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "opt": {
+    "passed": 16,
+    "gpuCases": 9,
+    "log": "/tmp/valdi-tgfx-prototype-20261104/fill-rule-green.log"
+  },
+  "sanitizer": {
+    "passed": 16,
+    "adapterAndFixture": "address,undefined",
+    "tgfxLibrary": "Release uninstrumented",
+    "leakDetection": false,
+    "haltOnUB": true,
+    "log": "/tmp/valdi-tgfx-prototype-20261104/fill-rule-sanitizer-green.log"
+  },
+  "defaultSkia": {
+    "objectsCompiled": 9,
+    "first8Commands": "/tmp/valdi-tgfx-prototype-20261104/default-skia-attempt1/results.json",
+    "DrawingContextCommand": "/tmp/valdi-tgfx-prototype-20261104/default-skia-attempt2.json",
+    "fullLink": false,
+    "correctedPathCommand": "/tmp/valdi-tgfx-prototype-20261104/default-Path-final.json",
+    "objectHashes": {
+      "/tmp/valdi-tgfx-prototype-20261104/default-skia-attempt1/Utils-LazyPath.o": "4c842c8dc405dc49dfbfcd3a0d4e041d94bbfdbe575214095437c69ffff96e63",
+      "/tmp/valdi-tgfx-prototype-20261104/default-skia-attempt1/Utils-Path.o": "5b2cf08089ca5f706aac8d149196954f2ff8114526703d2211a634536cf35aee",
+      "/tmp/valdi-tgfx-prototype-20261104/default-skia-attempt1/Utils-BorderRadius.o": "e9ed52be41af84be925a731f6b101f4700386f7021e48facc9eb443bcd851895",
+      "/tmp/valdi-tgfx-prototype-20261104/default-skia-attempt1/Drawing-Paint.o": "49e8714f6c9fefcfce4ab6518b1c1fcb67614ece265a7cdd6fa42ccbfc74d3ca",
+      "/tmp/valdi-tgfx-prototype-20261104/default-skia-attempt1/Utils-Color.o": "eb5748ff4185e0f2d328037ed3349333deec467cc2dcb111c5fcc22a48f38ad9",
+      "/tmp/valdi-tgfx-prototype-20261104/default-skia-attempt1/Utils-Matrix.o": "636aa510d007c1afe6dc83e0ffcb94f452498fded827a8ab0adf61922ed73784",
+      "/tmp/valdi-tgfx-prototype-20261104/default-skia-attempt1/Utils-Geometry.o": "5d3be34a73b8ea2f9ea73a5cad46bf346d58f5e8c6d960eec3c2f0687b73e9b2",
+      "/tmp/valdi-tgfx-prototype-20261104/default-skia-attempt1/Drawing-LayerContent.o": "c362c0991d005b4ba1b42988478f3f8f00f44428b2fbe5266fba4723f084ebc1",
+      "/tmp/valdi-tgfx-prototype-20261104/default-DrawingContext.o": "576b9e08a007c358bfbf9d8e580259ed23fffe6d7931d4fb3ed39b545fdc3550",
+      "/tmp/valdi-tgfx-prototype-20261104/default-Path-final.o": "5b2cf08089ca5f706aac8d149196954f2ff8114526703d2211a634536cf35aee"
+    }
+  },
+  "mainCheckouts": [
+    {
+      "repo": "/Users/cloud/project/ValdiNativeRoutes",
+      "head": "fe809ae8320b5b8c64723819fb6045bf173eb76f",
+      "status": ""
+    },
+    {
+      "repo": "/Users/cloud/project/Valdi-node-only",
+      "head": "51cec8ae3645c7e778c9f36fbe4b3bffba1ccddf",
+      "status": ""
+    }
+  ],
+  "mobileOrFullRuntimeValidation": false,
+  "mobileObjectCompile": {
+    "passed": 18,
+    "platforms": [
+      "android-arm64-api24-ndk27.1.12297006",
+      "ios-simulator-arm64-ios16.0"
+    ],
+    "commands": "mobile-object-commands.json",
+    "TGFXmobileDependencyBuiltOrLinked": false
+  },
+  "reviewCorrection": {
+    "issue": "TGFX empty append copies source fill rule",
+    "sameFixture": true,
+    "fixtureSHA256": "f769ecf0aa709f3421d294667a53dbff9e74de3a677c01a24b93c094ccf3074b",
+    "red": {
+      "passedControls": 15,
+      "failedPixelCase": 1,
+      "log": "/tmp/valdi-tgfx-prototype-20261104/fill-rule-red.log"
+    },
+    "green": 16
+  },
+  "binaryHashes": {
+    "/tmp/valdi-tgfx-prototype-20261104/bazel/execroot/_main/bazel-out/darwin_arm64-dbg/bin/vector_test": "9b9b529ffd70fac11bef6054a1930c5f58d153d26f45e4c92770054304e2f582",
+    "/tmp/valdi-tgfx-prototype-20261104/bazel/execroot/_main/bazel-out/darwin_arm64-opt/bin/vector_test": "c8d31d85ff009823ad8fb8f58a7f9a41805e4e191f8c45e735da44591f7e4360"
+  }
+}

@@ -9,17 +9,26 @@
 
 #include "utils/base/NonCopyable.hpp"
 
+#ifndef SNAP_DRAWING_TGFX_EXPERIMENT
 #include "valdi_core/cpp/Interfaces/IBitmap.hpp"
+#endif
 
 #include "snap_drawing/cpp/Drawing/LayerContent.hpp"
 #include "snap_drawing/cpp/Drawing/Paint.hpp"
 
+#ifndef SNAP_DRAWING_TGFX_EXPERIMENT
 #include "snap_drawing/cpp/Utils/Image.hpp"
+#endif
 #include "snap_drawing/cpp/Utils/Matrix.hpp"
 #include "snap_drawing/cpp/Utils/Path.hpp"
 
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+#include "tgfx/core/Canvas.h"
+#include "tgfx/core/PictureRecorder.h"
+#else
 #include "include/core/SkCanvas.h"
 #include "include/core/SkPictureRecorder.h"
+#endif
 
 #include <optional>
 
@@ -27,7 +36,9 @@ namespace snap::drawing {
 
 class BorderRadius;
 class LazyPath;
+#ifndef SNAP_DRAWING_TGFX_EXPERIMENT
 class ExternalSurface;
+#endif
 
 class DrawingContext : public snap::NonCopyable {
 public:
@@ -59,6 +70,7 @@ public:
      */
     void drawPaint(const Paint& paint, const Path& path);
 
+#ifndef SNAP_DRAWING_TGFX_EXPERIMENT
     /**
      Draw the bitmap into the current draw bounds, scaling the bitmap with the given FittingSizeMode
      */
@@ -70,6 +82,7 @@ public:
     void drawImage(const Image& image, const Rect& imageRect, const Rect& targetRect, const Paint* paint);
 
     void drawExternalSurface(const Ref<ExternalSurface>& externalSurface);
+#endif
 
     void clipPath(const Path& path);
 
@@ -83,13 +96,22 @@ public:
 
     const Rect& drawBounds() const;
 
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+    tgfx::Canvas* canvas();
+#else
     SkCanvas* canvas();
+#endif
 
 private:
     Rect _drawBounds;
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+    tgfx::PictureRecorder _recorder;
+    tgfx::Canvas* _canvas = nullptr;
+#else
     SkPictureRecorder _recorder;
     Ref<ExternalSurface> _externalSurface;
     SkCanvas* _canvas = nullptr;
+#endif
 };
 
 } // namespace snap::drawing

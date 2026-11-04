@@ -1,0 +1,3 @@
+.local/
+bazel-*
+MODULE.bazel.lock

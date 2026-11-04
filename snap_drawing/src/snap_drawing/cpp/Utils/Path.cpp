@@ -6,22 +6,32 @@
 //
 
 #include "snap_drawing/cpp/Utils/Path.hpp"
+#ifndef SNAP_DRAWING_TGFX_EXPERIMENT
 #include "include/core/SkStream.h"
 #include "include/pathops/SkPathOps.h"
+#endif
 #include "snap_drawing/cpp/Utils/Matrix.hpp"
 
 namespace snap::drawing {
 
 Path::Path() = default;
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+Path::Path(Path&& other) noexcept : WrappedTgfxValue<tgfx::Path>(std::move(other.getSkValue())) {}
+
+Path::Path(const Path& other) noexcept : WrappedTgfxValue<tgfx::Path>(other.getSkValue()) {}
+#else
 Path::Path(Path&& other) noexcept : WrappedSkValue<SkPath>(std::move(other.getSkValue())) {}
 
 Path::Path(const Path& other) noexcept : WrappedSkValue<SkPath>(other.getSkValue()) {}
+#endif
 
 Path::~Path() = default;
 
+#ifndef SNAP_DRAWING_TGFX_EXPERIMENT
 static SkPathDirection getPathDirection(bool clockwise) {
     return clockwise ? SkPathDirection::kCW : SkPathDirection::kCCW;
 }
+#endif
 
 Path& Path::operator=(Path&& other) noexcept {
     if (&other != this) {
@@ -45,11 +55,25 @@ bool Path::operator!=(const Path& other) const {
 }
 
 void Path::addRoundRect(const Rect& bounds, Scalar radii[8], bool clockwise) {
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+    const std::array<tgfx::Point, 4> corners = {{
+        tgfx::Point::Make(radii[0], radii[1]),
+        tgfx::Point::Make(radii[2], radii[3]),
+        tgfx::Point::Make(radii[4], radii[5]),
+        tgfx::Point::Make(radii[6], radii[7]),
+    }};
+    getSkValue().addRoundRect(bounds.getSkValue(), corners, !clockwise);
+#else
     getSkValue().addRoundRect(bounds.getSkValue(), &radii[0], getPathDirection(clockwise));
+#endif
 }
 
 void Path::addRoundRect(const Rect& bounds, Scalar rx, Scalar ry, bool clockwise) {
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+    getSkValue().addRoundRect(bounds.getSkValue(), rx, ry, !clockwise);
+#else
     getSkValue().addRoundRect(bounds.getSkValue(), rx, ry, getPathDirection(clockwise));
+#endif
 }
 
 bool Path::isEmpty() const {
@@ -85,11 +109,19 @@ void Path::close() {
 }
 
 void Path::addRect(const Rect& bounds, bool clockwise) {
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+    getSkValue().addRect(bounds.getSkValue(), !clockwise);
+#else
     getSkValue().addRect(bounds.getSkValue(), getPathDirection(clockwise));
+#endif
 }
 
 void Path::addOval(const Rect& bounds, bool clockwise) {
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+    getSkValue().addOval(bounds.getSkValue(), !clockwise);
+#else
     getSkValue().addOval(bounds.getSkValue(), getPathDirection(clockwise));
+#endif
 }
 
 void Path::arcTo(const Rect& oval, Scalar startAngle, Scalar sweepAngle) {
@@ -97,7 +129,14 @@ void Path::arcTo(const Rect& oval, Scalar startAngle, Scalar sweepAngle) {
 }
 
 void Path::addPath(const Path& path) {
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+    // TGFX copies the source fill rule when the destination is empty.
+    const auto fillType = getSkValue().getFillType();
+#endif
     getSkValue().addPath(path.getSkValue());
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+    getSkValue().setFillType(fillType);
+#endif
 }
 
 void Path::transform(const Matrix& matrix) {
@@ -105,8 +144,14 @@ void Path::transform(const Matrix& matrix) {
 }
 
 Path Path::intersection(const Path& other) const {
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+    Path output(*this);
+    // TGFX mutates the left operand and exposes no result/success boolean.
+    output.getSkValue().addPath(other.getSkValue(), tgfx::PathOp::Intersect);
+#else
     Path output;
     Op(getSkValue(), other.getSkValue(), kIntersect_SkPathOp, &output.getSkValue());
+#endif
 
     output.getSkValue().setFillType(getSkValue().getFillType());
     return output;
@@ -116,9 +161,14 @@ std::optional<Rect> Path::getBounds() const {
     if (isEmpty()) {
         return std::nullopt;
     }
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+    return Rect::fromTgfxValue(getSkValue().getBounds());
+#else
     return {fromSkValue<Rect>(getSkValue().getBounds())};
+#endif
 }
 
+#ifndef SNAP_DRAWING_TGFX_EXPERIMENT
 std::string Path::toString() const {
     SkDynamicMemoryWStream stream;
     getSkValue().dump(&stream, true);
@@ -132,8 +182,56 @@ std::string Path::toString() const {
 
     return output;
 }
+#endif
 
 void Path::visit(PathVisitor& visitor) const {
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+    for (const auto& segment : getSkValue()) {
+        const auto* points = segment.points;
+        switch (segment.verb) {
+            case tgfx::PathVerb::Move:
+                visitor.move(Point::fromTgfxValue(points[0]));
+                break;
+            case tgfx::PathVerb::Line:
+                visitor.line(Point::fromTgfxValue(points[0]), Point::fromTgfxValue(points[1]));
+                break;
+            case tgfx::PathVerb::Quad:
+                visitor.quad(Point::fromTgfxValue(points[0]),
+                             Point::fromTgfxValue(points[1]),
+                             Point::fromTgfxValue(points[2]));
+                break;
+            case tgfx::PathVerb::Conic: {
+                if (visitor.shouldConvertConicToQuad()) {
+                    const auto quads = tgfx::Path::ConvertConicToQuads(
+                        points[0], points[1], points[2], segment.conicWeight, 1);
+                    // Degenerate conics need not produce the requested two quads.
+                    for (size_t i = 0; i + 2 < quads.size(); i += 2) {
+                        visitor.quad(Point::fromTgfxValue(quads[i]),
+                                     Point::fromTgfxValue(quads[i + 1]),
+                                     Point::fromTgfxValue(quads[i + 2]));
+                    }
+                } else {
+                    visitor.conic(Point::fromTgfxValue(points[0]),
+                                  Point::fromTgfxValue(points[1]),
+                                  Point::fromTgfxValue(points[2]),
+                                  segment.conicWeight);
+                }
+                break;
+            }
+            case tgfx::PathVerb::Cubic:
+                visitor.cubic(Point::fromTgfxValue(points[0]),
+                              Point::fromTgfxValue(points[1]),
+                              Point::fromTgfxValue(points[2]),
+                              Point::fromTgfxValue(points[3]));
+                break;
+            case tgfx::PathVerb::Close:
+                visitor.close();
+                break;
+            case tgfx::PathVerb::Done:
+                return;
+        }
+    }
+#else
     SkPath::Iter it(getSkValue(), false);
     SkPoint points[4];
     SkPoint quads[5];
@@ -180,10 +278,13 @@ void Path::visit(PathVisitor& visitor) const {
                 return;
         }
     }
+#endif
 }
 
+#ifndef SNAP_DRAWING_TGFX_EXPERIMENT
 std::ostream& operator<<(std::ostream& os, const Path& path) {
     return os << path.toString();
 }
+#endif
 
 } // namespace snap::drawing

@@ -1,0 +1,24 @@
+load("@rules_cc//cc:cc_import.bzl", "cc_import")
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+
+cc_import(
+    name = "native",
+    static_library = "tgfx.a",
+)
+
+cc_library(
+    name = "tgfx",
+    hdrs = glob(["include/tgfx/**/*.h"]),
+    includes = ["include"],
+    linkopts = [
+        "-framework Cocoa",
+        "-framework Foundation",
+        "-framework ApplicationServices",
+        "-framework QuartzCore",
+        "-framework CoreMedia",
+        "-framework OpenGL",
+        "-liconv",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [":native"],
+)

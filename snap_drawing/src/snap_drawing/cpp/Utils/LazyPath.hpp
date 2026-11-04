@@ -21,7 +21,11 @@ public:
     LazyPath();
     ~LazyPath();
 
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+    bool update(Scalar width, Scalar height) {
+#else
     constexpr bool update(Scalar width, Scalar height) {
+#endif
         return update(Size::make(width, height));
     }
 

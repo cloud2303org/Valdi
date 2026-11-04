@@ -6,12 +6,15 @@
 //
 
 #include "snap_drawing/cpp/Drawing/DrawingContext.hpp"
+#ifndef SNAP_DRAWING_TGFX_EXPERIMENT
 #include "snap_drawing/cpp/Drawing/Surface/ExternalSurface.hpp"
 #include "snap_drawing/cpp/Utils/BitmapUtils.hpp"
+#include "valdi_core/cpp/Interfaces/IBitmap.hpp"
+#endif
 #include "snap_drawing/cpp/Utils/BorderRadius.hpp"
 #include "snap_drawing/cpp/Utils/LazyPath.hpp"
 
-#include "valdi_core/cpp/Interfaces/IBitmap.hpp"
+#include <algorithm>
 
 namespace snap::drawing {
 
@@ -21,12 +24,19 @@ DrawingContext::~DrawingContext() = default;
 
 LayerContent DrawingContext::finish() {
     LayerContent content;
+#ifndef SNAP_DRAWING_TGFX_EXPERIMENT
     if (_externalSurface != nullptr) {
         content.externalSurface = Valdi::makeShared<ExternalSurfaceSnapshot>(std::move(_externalSurface));
     }
+#endif
 
     if (_canvas != nullptr) {
         content.picture = _recorder.finishRecordingAsPicture();
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+        // TGFX returns nullptr for an empty recording. Clear the active canvas
+        // in either case so repeated finish() and a fresh recording are coherent.
+        _canvas = nullptr;
+#endif
     }
 
     return content;
@@ -61,6 +71,7 @@ void DrawingContext::drawPaint(const Paint& paint, const Rect& targetRect) {
     canvas()->drawRect(targetRect.getSkValue(), paint.getSkValue());
 }
 
+#ifndef SNAP_DRAWING_TGFX_EXPERIMENT
 void DrawingContext::drawBitmap(const Valdi::Ref<Valdi::IBitmap>& bitmap, FittingSizeMode fittingSizeMode) {
     auto imageResult = Image::makeFromBitmap(bitmap, false);
     if (!imageResult) {
@@ -82,6 +93,7 @@ void DrawingContext::drawImage(const Image& image, const Rect& imageRect, const 
                             paint != nullptr ? &paint->getSkValue() : nullptr,
                             SkCanvas::kStrict_SrcRectConstraint);
 }
+#endif
 
 void DrawingContext::clipPath(const Path& path) {
     canvas()->clipPath(path.getSkValue(), true);
@@ -99,22 +111,46 @@ const Rect& DrawingContext::drawBounds() const {
     return _drawBounds;
 }
 
+#ifndef SNAP_DRAWING_TGFX_EXPERIMENT
 void DrawingContext::drawExternalSurface(const Ref<ExternalSurface>& externalSurface) {
     SC_ASSERT(_externalSurface == nullptr);
     _externalSurface = externalSurface;
 }
+#endif
 
 int DrawingContext::save() {
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+    return canvas()->save() + 1;
+#else
     return canvas()->save();
+#endif
 }
 
 void DrawingContext::restore(int count) {
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+    auto* target = canvas();
+    // Translate the Skia count convention without overflowing for INT_MIN.
+    // TGFX subtracts its requested count from an unsigned stack size.
+    const int nativeCount = count <= 1 ? 0 : count - 1;
+    target->restoreToCount(std::clamp(nativeCount, 0, target->getSaveCount()));
+#else
     canvas()->restoreToCount(count);
+#endif
 }
 
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+tgfx::Canvas* DrawingContext::canvas() {
+#else
 SkCanvas* DrawingContext::canvas() {
+#endif
     if (_canvas == nullptr) {
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+        // The original bounds are cull hints, not an implicit clip. TGFX's
+        // recorder has no bounds argument; retain drawBounds() for callers.
+        _canvas = _recorder.beginRecording();
+#else
         _canvas = _recorder.beginRecording(_drawBounds.getSkValue());
+#endif
     }
 
     return _canvas;

@@ -1,0 +1,20 @@
+load("@rules_cc//cc:cc_test.bzl", "cc_test")
+
+exports_files([
+    "framework.BUILD.bazel",
+    "tgfx.BUILD.bazel",
+    "fmt.BUILD.bazel",
+])
+
+objc_library(
+    name = "vector_test_main",
+    srcs = ["vector_test.mm"],
+    copts = ["-std=c++20"],
+    deps = ["@framework//:vector"],
+    alwayslink = True,
+)
+
+cc_test(
+    name = "vector_test",
+    deps = [":vector_test_main"],
+)
