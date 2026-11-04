@@ -42,7 +42,8 @@ const DEFAULT_RULES = {
   '@typescript-eslint/member-ordering': 'warn',
   '@typescript-eslint/explicit-function-return-type': ['error', { allowExpressions: true }],
   '@typescript-eslint/no-unsafe-return': 'error',
-  '@typescript-eslint/no-unused-vars': 'error',
+  // Unused parameters are allowed when prefixed with _, for stubs that must keep a native or DOM signature.
+  '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
   '@typescript-eslint/no-unsafe-member-access': 'error',
   '@typescript-eslint/no-unsafe-call': 'error',
   '@typescript-eslint/no-misused-promises': 'error',
@@ -134,6 +135,8 @@ const RELAXED_MODULES = [
   'valdi_protobuf',
   'valdi_standalone',
   'valdi_test',
+  // The web renderer was imported from Snapchat/Valdi#148, written before these rules existed.
+  'web_renderer',
 ];
 
 module.exports = {
@@ -141,7 +144,9 @@ module.exports = {
   parser: '@typescript-eslint/parser',
   parserOptions: {
     tsconfigRootDir: __dirname,
-    project: ['./tsconfig.json'],
+    // lint_modules.sh points this at tsconfig.generated.json, which adds the compiler-generated
+    // TypeScript (res.ts, Strings.d.ts, ClientSQL sources). See generated_tsconfig.js.
+    project: [process.env.VALDI_LINT_TSCONFIG || './tsconfig.json'],
   },
   ignorePatterns: [
     '**/node_modules/**',

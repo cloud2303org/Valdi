@@ -780,6 +780,23 @@ JSValueRef JavaScriptRuntime::runtimeConfigureCallback(JSFunctionNativeCallConte
     return callContext.getContext().newUndefined();
 }
 
+JSValueRef JavaScriptRuntime::runtimeWithCallbackAttribution(JSFunctionNativeCallContext& callContext) {
+    auto callback = callContext.getParameter(1);
+    if (!callContext.getContext().isValueFunction(callback)) {
+        return callContext.throwError(Error("Expecting callback function"));
+    }
+    JSFunctionCallContext callbackContext(callContext.getContext(), nullptr, 0, callContext.getExceptionTracker());
+    if (!anrDiagnosticsActiveOnJsThread()) {
+        return callContext.getContext().callObjectAsFunction(callback, callbackContext);
+    }
+    auto attribution = callContext.getParameterAsString(0);
+    CHECK_CALL_CONTEXT(callContext);
+    attribution = JavaScriptANRAttribution::boundedLabel(attribution);
+    ScopedNativeCallActivity activity(this, attribution);
+    ScopedCallbackAttribution callbackScope(this, attribution);
+    return callContext.getContext().callObjectAsFunction(callback, callbackContext);
+}
+
 JSValueRef JavaScriptRuntime::runtimeMakeANRAttributionProxy(JSFunctionNativeCallContext& callContext) {
     auto callback = callContext.getParameter(1);
     if (!anrDiagnosticsEnabled()) {
@@ -2727,6 +2744,7 @@ void JavaScriptRuntime::buildContext(Valdi::IJavaScriptContext& context,
     JS_BIND(context, exceptionTracker, runtimeObject, "bytesToString", runtimeBytesToString);
     JS_BIND(context, exceptionTracker, runtimeObject, "configureCallback", runtimeConfigureCallback);
     JS_BIND(context, exceptionTracker, runtimeObject, "makeANRAttributionProxy", runtimeMakeANRAttributionProxy);
+    JS_BIND(context, exceptionTracker, runtimeObject, "withCallbackAttribution", runtimeWithCallbackAttribution);
     JS_BIND(context, exceptionTracker, runtimeObject, "getViewNodeDebugInfo", runtimeGetViewNodeDebugInfo);
     JS_BIND(context, exceptionTracker, runtimeObject, "getLayoutDebugInfo", runtimeGetLayoutDebugInfo);
     JS_BIND(context, exceptionTracker, runtimeObject, "getNativeNodeForElementId", runtimeGetNativeNodeForElementId);
@@ -4490,16 +4508,27 @@ JavaScriptANRAttribution JavaScriptRuntime::swapANRAttribution(JavaScriptANRAttr
     return attribution;
 }
 
-Shared<const JavaScriptANRAttribution> JavaScriptRuntime::captureANRAttribution(const StringBox& dispatchAttribution) {
+Shared<const JavaScriptANRAttribution> JavaScriptRuntime::captureANRAttribution(const Context& ownerContext,
+                                                                               const StringBox& dispatchAttribution) {
     if (!anrDiagnosticsEnabled()) {
         return nullptr;
     }
 
     JavaScriptANRAttribution attribution;
+    StringBox dispatcherScopeName;
     // Another thread submitting work is not a child of the task currently running on this runtime.
     if (isInJsThread()) {
         std::lock_guard<Mutex> lock(_nativeCallActivityMutex);
         attribution = _anrAttribution;
+        auto* dispatcherContext = ContextBase::current();
+        if (dispatcherContext != nullptr) {
+            dispatcherScopeName = dispatcherContext->getScopeName();
+        }
+    }
+    // A scoped runtime's scope name is the owner label its creator passed in. Record it where work enters
+    // the runtime, not on every task the runtime dispatches to itself.
+    if (ownerContext.getScopeName() != dispatcherScopeName) {
+        attribution.push(ownerContext.getScopeName());
     }
     attribution.push(dispatchAttribution);
     if (attribution.empty()) {
@@ -4510,6 +4539,11 @@ Shared<const JavaScriptANRAttribution> JavaScriptRuntime::captureANRAttribution(
 
 bool JavaScriptRuntime::isReadyForANRDetection() const {
     return _bootstrapCompleted;
+}
+
+const StringBox& JavaScriptRuntime::getCallbackAttribution() {
+    SC_ASSERT(isInJsThread());
+    return _callbackAttribution;
 }
 
 std::string JavaScriptRuntime::getANRAttributionInfo() const {
@@ -4541,6 +4575,7 @@ DispatchFunction JavaScriptRuntime::makeJsThreadDispatchFunction(Ref<Context>&& 
                                                                  JavaScriptThreadTask&& jsTask,
                                                                  StringBox dispatchAttribution) {
     SC_ASSERT(ownerContext != nullptr);
+    auto attribution = captureANRAttribution(*ownerContext, dispatchAttribution);
     return [this,
             // Retain the runtime for the task's lifetime so an in-flight JS-thread task can't have a
             // member freed under it by a runtime whose last external ref was dropped on another thread.
@@ -4551,7 +4586,8 @@ DispatchFunction JavaScriptRuntime::makeJsThreadDispatchFunction(Ref<Context>&& 
             retainedSelf = (_joinJsThreadOnTeardown ? strongSmallRef(this) : Ref<JavaScriptRuntime>()),
             retainedContext = RetainedContext(std::move(ownerContext)),
             jsTask = std::move(jsTask),
-            attribution = captureANRAttribution(dispatchAttribution)]() {
+            callbackAttribution = anrDiagnosticsActiveOnJsThread() ? _callbackAttribution : StringBox(),
+            attribution = std::move(attribution)]() {
         if (_hostTornDown) {
             return;
         }
@@ -4590,8 +4626,10 @@ DispatchFunction JavaScriptRuntime::makeJsThreadDispatchFunction(Ref<Context>&& 
                 // VM exit can drain microtasks that enqueue children of this dispatch.
                 ScopedANRAttribution attributionScope(*this, attribution.get());
                 JavaScriptEntryParameters jsEntry(jsContext, exceptionTracker, ownerContext);
-
-                jsTask(jsEntry);
+                {
+                    ScopedCallbackAttribution callbackScope(this, callbackAttribution);
+                    jsTask(jsEntry);
+                }
             }
 
             if (!exceptionTracker) {

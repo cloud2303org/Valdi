@@ -1,5 +1,5 @@
-import { getValdiRuntime } from './ValdiRuntimeProvider';
 import { IComponent } from './IComponent';
+import { getValdiRuntime } from './ValdiRuntimeProvider';
 
 /**
  * By default, bridged objects from native are disposed after onDestroy()
@@ -79,14 +79,20 @@ export function asyncWithProtectedRefsForContextId<T>(contextId: string, asyncAc
  * Evaluate the given block with a global native refs scope.
  * Any native references emitted while the block is evaluated
  * will be associated with the global native references, which
- * aren't destroyed when a root component is destroyed.
+ * aren't destroyed when a root component is destroyed. The stable attribution label
+ * identifies the owner of callbacks exported in the block, including later native invocations.
+ * The scope ends when the block returns; it does not wrap arbitrary Promise continuations.
  */
-export function withGlobalNativeRefs<T>(cb: () => T): T {
-  getValdiRuntime().pushCurrentContext(undefined);
+export function withGlobalNativeRefs<T>(attribution: string, cb: () => T): T {
+  if (!attribution) {
+    throw new Error('Global native references require attribution');
+  }
+  const runtime = getValdiRuntime();
+  runtime.pushCurrentContext(undefined);
   try {
-    return cb();
+    return runtime.withCallbackAttribution(attribution, cb);
   } finally {
-    getValdiRuntime().popCurrentContext();
+    runtime.popCurrentContext();
   }
 }
 
@@ -108,9 +114,9 @@ export function withLocalNativeRefs<T>(contextId: string, cb: () => T): T {
 /**
  * Given an async function, returns a new async function with native references that will be protected
  * for the duration of the async execution.
- * 
+ *
  * This is a convenience for:
- * 
+ *
  * ```ts
  * async function someAsyncFunction() {
  *  const dispose = protectNativeRefsForCurrentContextId();
@@ -124,9 +130,9 @@ export function withLocalNativeRefs<T>(contextId: string, cb: () => T): T {
  *  }
  * }
  * ```
- * 
+ *
  * This can be written as:
- * 
+ *
  * ```ts
  * const someAsyncFunction = withCurrentContextProtected(async () => {
  *  // do async work

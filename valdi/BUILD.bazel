@@ -858,6 +858,24 @@ objc_library(
 )
 
 ios_unit_test(
+    name = "valdi_ios_pinch_scroll_test",
+    minimum_os_version = "15.0",
+    runner = "@build_bazel_rules_apple//apple/testing/default_runner:ios_xctestrun_ordered_runner",
+    deps = [":objc_pinch_scroll_tests_lib"],
+)
+
+objc_library(
+    name = "objc_pinch_scroll_tests_lib",
+    testonly = True,
+    srcs = ["test/ios/SCValdiPinchScrollViewTests.m"],
+    copts = ["-I."],
+    includes = ["src"],
+    module_name = "ValdiIosPinchScrollTests",
+    target_compatible_with = ["@platforms//os:ios"],
+    deps = [":valdi_ios"],
+)
+
+ios_unit_test(
     name = "valdi_ios_date_formatting_module_test",
     minimum_os_version = "15.0",
     runner = "@build_bazel_rules_apple//apple/testing/default_runner:ios_xctestrun_ordered_runner",
@@ -1129,6 +1147,25 @@ valdi_test(
         "//valdi/testdata/resources/modules/test:test_native",
         "//valdi/testdata/resources/modules/test2:test2_native",
         "//valdi/testdata/resources/modules/test_async_strict:test_async_strict_native",
+    ],
+)
+
+valdi_test(
+    name = "test_callback_attribution",
+    srcs = [
+        "test/integration/CallbackAttribution_tests.cpp",
+        "test/integration/JSBridgeTestFixture.cpp",
+        "test/integration/RuntimeTestsUtils.cpp",
+    ],
+    hdrs = [
+        "test/integration/JSBridgeTestFixture.hpp",
+        "test/integration/RuntimeTestsUtils.hpp",
+    ],
+    deps = [
+        ":test_utils",
+        ":valdi_runtime_with_vm",
+        "//src/valdi_modules/src/valdi/valdi_core:valdi_core_native",
+        "//tsn",
     ],
 )
 

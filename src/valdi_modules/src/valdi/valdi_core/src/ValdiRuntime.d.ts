@@ -5,9 +5,9 @@ import { NativeView } from 'valdi_tsx/src/NativeView';
 import { Asset, PlatformAssetOverrides, ThemableAssetMap } from './Asset';
 import { ElementId } from './IRenderedElement';
 import { IRootComponentsManager } from './IRootComponentsManager';
+import { ViewNodeAssetTrackerCallback } from './IViewNodeAssetTracker';
 import { RenderRequest } from './RenderRequest';
 import { SubmitDebugMessageFunc } from './debugging/DebugMessage';
-import { ViewNodeAssetTrackerCallback } from './IViewNodeAssetTracker';
 import { AnyFunction } from './utils/Callback';
 import { PropertyList } from './utils/PropertyList';
 
@@ -114,6 +114,8 @@ export interface ValdiRuntime extends RuntimeBase {
   configureCallback<F extends AnyFunction>(options: number, func: F): void;
   /** Associates a stable label with direct calls and native dispatches of the returned callback. */
   makeANRAttributionProxy?<F extends AnyFunction>(attribution: string, func: F): F;
+  /** Runs a block with ownership captured by callbacks exported to native within the block. */
+  withCallbackAttribution<T>(attribution: string, callback: () => T): T;
   getViewNodeDebugInfo(
     contextId: string,
     elementId: ElementId,

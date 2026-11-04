@@ -5,11 +5,13 @@ This fork retains upstream Git history. `valdiroutes` is the maintained runtime 
 ## Current upstream base
 
 - Repository: https://github.com/Snapchat/Valdi
-- Branch: upstream `main` as of 2026-11-01
-- Commit: `4aa98f01a46e65ead03a8fc8cc1c21e04f2a465d`
+- Branch: upstream `main` as of 2026-11-04
+- Commit: `9b7a20d5bc690492d9fc15e0977a3fa9d1834f5e`
 - Last release tag: `beta-0.2.1` (`f26bee4dc170b6c929f71d4dd07d44e033f47176`)
 
-The 2026-11-01 synchronization merges all 55 commits after that release. The
+The 2026-11-04 synchronization includes all 21 commits after the previous
+`4aa98f01` base, including the complete Web renderer changes. The earlier
+2026-11-01 synchronization merged all 55 commits after that release. The
 application's vendored JSX processor must be updated with the runtime: factory-backed
 custom views use new JSXBootstrap/Renderer entry points, and `lazyImport` now accepts
 a loader callback. Keep the application's Node/Rolldown regressions in the upgrade checks.
@@ -20,6 +22,16 @@ Hermes AST patch is not applied to that different engine revision. The existing
 custom-module asset URL method is retained alongside upstream's optional content
 identity method. XCFramework exports retain both arm64 and x86_64 simulator slices
 for the consuming project's current module and Swift tooling.
+
+The new callback-attribution API must ship with its matching TypeScript modules:
+`withGlobalNativeRefs` now requires an explicit owner label and calls
+`runtime.withCallbackAttribution`. Android keeps the fork's custom asset URL
+resolution while also supporting upstream's optional custom-module identity
+provider. The Web renderer, browser WebView implementation, observers, animations,
+and integration harness remain in the merged source.
+
+TGFX is an archived experiment on `experiment/tgfx-prototype-20261104`; it is not
+part of this synchronization. The maintained runtime continues to use Skia.
 
 ## Initial application patch migration
 

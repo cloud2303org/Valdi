@@ -7404,6 +7404,113 @@ TEST_P(RuntimeFixture, callSyncWithDeadlineWaitsFullDeadlineWhenCircuitBreakerDi
     ASSERT_EQ(4.0, countSyncCalls(function));
 }
 
+namespace {
+// Long enough that an unbounded wait is unmistakable, short enough that a regressed call site fails
+// the elapsed-time assertion instead of hanging the suite.
+constexpr auto kCallSiteStall = std::chrono::seconds(3);
+constexpr auto kCallSiteBound = std::chrono::milliseconds(1500);
+
+// Parks the JS thread until the returned promise is fulfilled or kCallSiteStall elapses.
+std::promise<void> stallJsThreadAtMost(RuntimeWrapper& wrapper) {
+    std::promise<void> release;
+    auto released = release.get_future().share();
+    wrapper.runtime->getJavaScriptRuntime()->dispatchOnJsThreadAsync(
+        STRING_LITERAL("test.runtime"), [released](auto& /*jsEntry*/) { released.wait_for(kCallSiteStall); });
+    return release;
+}
+
+template<typename F>
+std::chrono::steady_clock::duration measure(F&& fn) {
+    auto start = std::chrono::steady_clock::now();
+    fn();
+    return std::chrono::steady_clock::now() - start;
+}
+
+Ref<ValueFunction> getMainThreadCountSyncCallFunction(RuntimeWrapper& wrapper) {
+    auto fnResult = getCountSyncCallFunction(wrapper);
+    EXPECT_TRUE(fnResult) << fnResult.description();
+    if (!fnResult) {
+        return nullptr;
+    }
+    auto function = fnResult.value();
+    auto* jsFunction = dynamic_cast<ValueFunctionWithJSValue*>(function.get());
+    EXPECT_NE(nullptr, jsFunction);
+    if (jsFunction != nullptr) {
+        jsFunction->setShouldBlockMainThread(true);
+    }
+    return function;
+}
+} // namespace
+
+// The scroll view asks JS for a snap target synchronously when the finger lifts. With a stalled JS
+// thread that call must give up at the input deadline and report failure, not hold the UI thread
+// until JS drains.
+TEST_P(RuntimeFixture, scrollDragEndingCallSiteReturnsWithinDeadlineWhileJsThreadIsStalled) {
+    ASSERT_TRUE(wrapper.runtime->getMainThreadManager().currentThreadIsMainThread());
+    auto fnResult = getCountSyncCallFunction(wrapper);
+    ASSERT_TRUE(fnResult) << fnResult.description();
+    auto function = fnResult.value();
+    ASSERT_EQ(1.0, countSyncCalls(function));
+
+    ViewNodeScrollState scrollState;
+    scrollState.setOnDragEndingCallback(Ref<ValueFunction>(function));
+
+    auto release = stallJsThreadAtMost(wrapper);
+
+    Result<std::optional<Point>> result = {std::nullopt};
+    auto elapsed = measure([&]() { result = scrollState.notifyOnDragEnding(Point(0, 0), Point(0, 0), Point(0, 0)); });
+    ASSERT_LT(elapsed, kCallSiteBound);
+    ASSERT_FALSE(result);
+
+    release.set_value();
+    wrapper.flushJsQueue();
+}
+
+// Drag start, drag end and scroll end handlers exported to run in sync with the main thread are
+// invoked from the UI thread on every gesture. A stalled JS thread must cost each of them at most the
+// input deadline, and the handlers must still run once JS drains.
+TEST_P(RuntimeFixture, scrollLifecycleCallSitesReturnWithinDeadlineWhileJsThreadIsStalled) {
+    ASSERT_TRUE(wrapper.runtime->getMainThreadManager().currentThreadIsMainThread());
+    auto function = getMainThreadCountSyncCallFunction(wrapper);
+    ASSERT_NE(nullptr, function);
+    ASSERT_EQ(1.0, countSyncCalls(function));
+
+    ViewNodeScrollState scrollState;
+    scrollState.setOnDragStartCallback(Ref<ValueFunction>(function));
+    scrollState.setOnDragEndCallback(Ref<ValueFunction>(function));
+    scrollState.setOnScrollEndCallback(Ref<ValueFunction>(function));
+
+    auto release = stallJsThreadAtMost(wrapper);
+
+    ASSERT_LT(measure([&]() { scrollState.notifyOnDragStart(Point(0, 0), Point(0, 0), Point(0, 0)); }), kCallSiteBound);
+    ASSERT_LT(measure([&]() { scrollState.notifyOnDragEnd(Point(0, 10), Point(0, 10), Point(0, 0)); }), kCallSiteBound);
+    ASSERT_LT(measure([&]() { scrollState.notifyOnScrollEnd(Point(0, 10), Point(0, 10)); }), kCallSiteBound);
+
+    release.set_value();
+    wrapper.flushJsQueue();
+
+    ASSERT_EQ(5.0, countSyncCalls(function));
+}
+
+// Per-frame scroll callbacks exported to run in sync with the main thread are throttled: a stalled JS
+// thread must not turn a scroll frame into an unbounded wait on the UI thread.
+TEST_P(RuntimeFixture, scrollOnScrollCallSiteReturnsWithinBoundWhileJsThreadIsStalled) {
+    ASSERT_TRUE(wrapper.runtime->getMainThreadManager().currentThreadIsMainThread());
+    auto function = getMainThreadCountSyncCallFunction(wrapper);
+    ASSERT_NE(nullptr, function);
+    ASSERT_EQ(1.0, countSyncCalls(function));
+
+    ViewNodeScrollState scrollState;
+    scrollState.setOnScrollCallback(Ref<ValueFunction>(function));
+
+    auto release = stallJsThreadAtMost(wrapper);
+
+    ASSERT_LT(measure([&]() { scrollState.notifyOnScroll(Point(0, 5), Point(0, 5), Point(0, 1)); }), kCallSiteBound);
+
+    release.set_value();
+    wrapper.flushJsQueue();
+}
+
 // The teardown case (resolving after the runtime is disposed reports the distinguishable
 // kResolutionSkippedDuringTeardownErrorCode) is covered end-to-end by the iOS
 // SCValdiJSRuntimeModuleErrorTests teardown regression, which induces disposal on the correct
@@ -8964,6 +9071,82 @@ TEST_P(RuntimeFixture, showStackTraceResponsibleForEmittingDanglingReference) {
     }
 
     ASSERT_EQ(static_cast<size_t>(1), messageHandler->messages().debugMessages.size());
+}
+
+TEST_P(RuntimeFixture, namesUnlabeledScopedRuntimeTaskAfterItsScopeForANRAttribution) {
+    wrapper.teardown();
+    auto tweaks = makeShared<TestTweakValueProvider>().toShared();
+    tweaks->config.setMapValue("VALDI_ENABLE_MODULE_LOAD_DIAGNOSTICS", Value(true));
+    wrapper = RuntimeWrapper(getJsBridge(), getTSNMode(), false, tweaks);
+    auto* runtime = wrapper.runtime->getJavaScriptRuntime();
+    auto objectsManager = runtime->createNativeObjectsManager("MyFeature.MyCallsite");
+
+    auto getStringAsyncFn = getJsModulePropertyWithSchema(
+        wrapper.runtime, objectsManager, nullptr, "test/src/Promise", "getStringAsync", "f(): p<s>");
+    ASSERT_TRUE(getStringAsyncFn) << getStringAsyncFn.description();
+    auto callResult = getStringAsyncFn.value().getFunction()->call(ValueFunctionFlagsPropagatesError, {});
+    ASSERT_TRUE(callResult) << callResult.description();
+    auto promise = callResult.value().getTypedRef<Promise>();
+    ASSERT_NE(nullptr, promise);
+
+    // The completion runs in an unlabeled task owned by the scoped runtime's context.
+    std::promise<std::string> completionInfo;
+    promise->onComplete([&](const Result<Value>&) { completionInfo.set_value(runtime->getANRAttributionInfo()); });
+    auto completionFuture = completionInfo.get_future();
+    ASSERT_EQ(std::future_status::ready, completionFuture.wait_for(std::chrono::seconds(30)));
+    EXPECT_EQ(" [stuck-in: MyFeature.MyCallsite]", completionFuture.get());
+
+    runtime->dispatchSynchronouslyOnJsThread(STRING_LITERAL("test.barrier"), [](auto&) {});
+    EXPECT_EQ("", runtime->getANRAttributionInfo());
+}
+
+TEST_P(RuntimeFixture, leadsScopedRuntimeANRAttributionWithItsScope) {
+    wrapper.teardown();
+    auto tweaks = makeShared<TestTweakValueProvider>().toShared();
+    tweaks->config.setMapValue("VALDI_ENABLE_MODULE_LOAD_DIAGNOSTICS", Value(true));
+    wrapper = RuntimeWrapper(getJsBridge(), getTSNMode(), false, tweaks);
+    auto* runtime = wrapper.runtime->getJavaScriptRuntime();
+    auto objectsManager = runtime->createNativeObjectsManager("MyFeature.MyCallsite");
+
+    auto receiveError = getJsModulePropertyAsUntypedFunction(
+        wrapper.runtime, objectsManager, "test/src/ErrorPropagation", "receiveError");
+    ASSERT_TRUE(receiveError) << receiveError.description();
+
+    std::string attribution;
+    auto callback = makeShared<ValueFunctionWithCallable>([&](const auto&) {
+        ScopedNativeCallActivity activity(runtime, STRING_LITERAL("test.nativeWork"));
+        attribution = runtime->getANRAttributionInfo();
+        return Value::undefined();
+    });
+    auto result = receiveError.value()->call(ValueFunctionFlagsCallSync, {Value(callback)});
+    ASSERT_TRUE(result) << result.description();
+
+    EXPECT_NE(std::string::npos, attribution.find("[stuck-in: test.nativeWork]")) << attribution;
+    EXPECT_NE(std::string::npos, attribution.find("[attribution: MyFeature.MyCallsite -> ")) << attribution;
+}
+
+TEST_P(RuntimeFixture, dropsScopedRuntimeANRAttributionWhenANestedCallReturns) {
+    wrapper.teardown();
+    auto tweaks = makeShared<TestTweakValueProvider>().toShared();
+    tweaks->config.setMapValue("VALDI_ENABLE_MODULE_LOAD_DIAGNOSTICS", Value(true));
+    wrapper = RuntimeWrapper(getJsBridge(), getTSNMode(), false, tweaks);
+    auto* runtime = wrapper.runtime->getJavaScriptRuntime();
+    auto objectsManager = runtime->createNativeObjectsManager("MyFeature.MyCallsite");
+
+    auto receiveError = getJsModulePropertyAsUntypedFunction(
+        wrapper.runtime, objectsManager, "test/src/ErrorPropagation", "receiveError");
+    ASSERT_TRUE(receiveError) << receiveError.description();
+
+    // An unlabeled task that calls into the scoped runtime keeps running after the call returns.
+    std::string attribution;
+    runtime->dispatchOnJsThreadSync(Ref<Context>(), [&](auto&) {
+        auto callback = makeShared<ValueFunctionWithCallable>([](const auto&) { return Value::undefined(); });
+        auto result = receiveError.value()->call(ValueFunctionFlagsCallSync, {Value(callback)});
+        ASSERT_TRUE(result) << result.description();
+        attribution = runtime->getANRAttributionInfo();
+    });
+
+    EXPECT_EQ("", attribution);
 }
 
 TEST_P(RuntimeFixture, scopeNameAppearsInDisposedReferenceError) {
@@ -10715,7 +10898,8 @@ TEST_P(RuntimeFixture, capturesBundleNamedByStackWhenANRDiagnosticsAreEnabled) {
     tweakModule->config.setMapValue("VALDI_ENABLE_MODULE_LOAD_DIAGNOSTICS", Valdi::Value(static_cast<bool>(true)));
     wrapper = RuntimeWrapper(getJsBridge(), getTSNMode(), false, tweakModule);
 
-    wrapper.hotReload(STRING_LITERAL("valdi_core"), STRING_LITERAL("src/Symbolicator.js"), bundleNamingSymbolicatorBody());
+    wrapper.hotReload(
+        STRING_LITERAL("valdi_core"), STRING_LITERAL("src/Symbolicator.js"), bundleNamingSymbolicatorBody());
 
     auto output = captureStackTracesWhileLooping(wrapper);
 
@@ -10727,7 +10911,8 @@ TEST_P(RuntimeFixture, capturesBundleNamedByStackWhenANRDiagnosticsAreEnabled) {
 TEST_P(RuntimeFixture, dropsBundleNamedByStackWhenANRDiagnosticsAreDisabled) {
     ASSERT_FALSE(wrapper.runtime->getJavaScriptRuntime()->anrDiagnosticsEnabled());
 
-    wrapper.hotReload(STRING_LITERAL("valdi_core"), STRING_LITERAL("src/Symbolicator.js"), bundleNamingSymbolicatorBody());
+    wrapper.hotReload(
+        STRING_LITERAL("valdi_core"), STRING_LITERAL("src/Symbolicator.js"), bundleNamingSymbolicatorBody());
 
     auto output = captureStackTracesWhileLooping(wrapper);
 
@@ -11032,6 +11217,10 @@ TEST_P(RuntimeFixture, recordsAttributionForOwnerlessJsThreadDispatch) {
 
     auto* jsRuntime = wrapper.runtime->getJavaScriptRuntime();
 
+    // The live runtime owns several threads; a fork()ed child can inherit one of their locks held and
+    // never reach the assert. "threadsafe" re-execs the binary instead (see
+    // AsyncStrictModeSyncCallAssertsOnMainThread).
+    GTEST_FLAG_SET(death_test_style, "threadsafe");
     EXPECT_DEATH(
         {
             jsRuntime->dispatchOnJsThread(
@@ -11800,6 +11989,106 @@ TEST_P(RuntimeFixture, supportsModuleRegisteredThroughModuleRegistry) {
     ASSERT_TRUE(evalResult) << evalResult.description();
 
     ASSERT_EQ(7, evalResult.value().toInt());
+}
+
+// Marshalled arguments and object properties must stay visible to a conservative stack-scanning GC
+// (JavaScriptCore) while the rest of the call is being marshalled. Spilling them into a heap buffer
+// past a small inline capacity (8 arguments, 32 properties) let the GC collect them mid-call.
+static constexpr size_t kMarshallingGCElementsCount = 2000;
+
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define VALDI_MARSHALLING_GC_TEST_ASAN 1
+#endif
+#elif defined(__SANITIZE_ADDRESS__)
+#define VALDI_MARSHALLING_GC_TEST_ASAN 1
+#endif
+
+static bool skipsMarshallingGCTest(bool isJSCore) {
+#ifdef VALDI_MARSHALLING_GC_TEST_ASAN
+    // ASan's fake stack hides address-taken locals from JavaScriptCore's conservative stack scan.
+    return isJSCore;
+#else
+    return false;
+#endif
+}
+
+static Value makeMarshallingGCArray(size_t slot) {
+    ValueArrayBuilder builder;
+    std::string padding(64, 'x');
+    for (size_t i = 0; i < kMarshallingGCElementsCount; i++) {
+        builder.append(Value(StringCache::getGlobal().makeString(fmt::format("v{}_{}_{}", slot, i, padding))));
+    }
+    return Value(builder.build());
+}
+
+TEST_P(RuntimeFixture, typedCallWithManyArgumentsKeepsArgumentsAliveAcrossGC) {
+    if (skipsMarshallingGCTest(isJSCore())) {
+        GTEST_SKIP() << "JavaScriptCore's conservative GC cannot scan ASan's fake stack";
+    }
+
+    constexpr size_t kArgumentsCount = 40;
+
+    std::string schema = "f(d";
+    for (size_t i = 0; i < kArgumentsCount; i++) {
+        schema += ", a<s>";
+    }
+    schema += "): s";
+
+    auto function = getJsModulePropertyWithSchema(wrapper.runtime, "test/src/MarshallingGC", "checkArguments", schema);
+    ASSERT_TRUE(function) << function.description();
+
+    std::vector<Value> parameters;
+    parameters.emplace_back(static_cast<double>(kMarshallingGCElementsCount));
+    for (size_t i = 0; i < kArgumentsCount; i++) {
+        parameters.emplace_back(makeMarshallingGCArray(i));
+    }
+
+    for (size_t iteration = 0; iteration < 3; iteration++) {
+        auto result = function.value().getFunction()->call(
+            static_cast<ValueFunctionFlags>(ValueFunctionFlagsCallSync | ValueFunctionFlagsPropagatesError),
+            parameters.data(),
+            parameters.size());
+        ASSERT_TRUE(result) << result.description();
+        ASSERT_EQ(fmt::format("ok:{}", kArgumentsCount), result.value().toStringBox().slowToString());
+    }
+}
+
+TEST_P(RuntimeFixture, typedObjectWithManyPropertiesKeepsPropertiesAliveAcrossGC) {
+    if (skipsMarshallingGCTest(isJSCore())) {
+        GTEST_SKIP() << "JavaScriptCore's conservative GC cannot scan ASan's fake stack";
+    }
+
+    constexpr size_t kPropertiesCount = 40;
+
+    std::string schema = "f(d, d, c 'ManyPropertiesObject'{";
+    for (size_t i = 0; i < kPropertiesCount; i++) {
+        if (i > 0) {
+            schema += ", ";
+        }
+        schema += fmt::format("'p{}': a<s>", i);
+    }
+    schema += "}): s";
+
+    auto function = getJsModulePropertyWithSchema(wrapper.runtime, "test/src/MarshallingGC", "checkObject", schema);
+    ASSERT_TRUE(function) << function.description();
+
+    auto object = Value();
+    for (size_t i = 0; i < kPropertiesCount; i++) {
+        object.setMapValue(fmt::format("p{}", i), makeMarshallingGCArray(i));
+    }
+
+    std::vector<Value> parameters = {
+        Value(static_cast<double>(kMarshallingGCElementsCount)), Value(static_cast<double>(kPropertiesCount)), object};
+
+    for (size_t iteration = 0; iteration < 3; iteration++) {
+        auto result = function.value().getFunction()->call(
+            static_cast<ValueFunctionFlags>(ValueFunctionFlagsCallSync | ValueFunctionFlagsPropagatesError),
+            parameters.data(),
+            parameters.size());
+        ASSERT_TRUE(result) << result.description();
+        ASSERT_EQ(fmt::format("ok:{}", kPropertiesCount), result.value().toStringBox().slowToString());
+    }
 }
 
 INSTANTIATE_TEST_SUITE_P(RuntimeTests,
