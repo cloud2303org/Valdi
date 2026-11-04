@@ -32,9 +32,10 @@ TGFX append corrected it; the same 16-case fixture then passed.
 Default Skia compilation, without the experimental define, also succeeded
 for the same nine source files using real cached Skia/runtime headers. This
 was object compilation, not a full Skia runtime link or application test.
-The nine adapted files also compiled to Android arm64 and iOS simulator arm64
-objects (18 objects). Those are header/API portability checks; the mobile
-TGFX library was not built or linked, and no mobile renderer was executed.
+The subsequent mobile verification cross-built real TGFX libraries, linked
+the nine adapted files into standalone iOS/Android probes, and ran the same
+16 checks successfully on both simulators. Build details, replay results and
+limits are in `mobile/README.md`.
 
 ## Dependencies
 
@@ -103,8 +104,8 @@ substitute.
   behavior and antialiased edges are not certified as equivalent.
 - Pixel assertions target stable interior/exterior samples; there is no
   image-wide Skia/TGFX comparison or universal geometry-parity claim.
-- No Android/iOS TGFX dependency build or executable link, simulator/device
-  run, full Valdi/JS runtime or production application switch was performed.
+- Mobile verification covers standalone probes on simulators. No physical
+  device, full Valdi/JS runtime or production application switch was performed.
 - The approximately 5 MiB TGFX archive has optional functionality disabled.
   It is not comparable with the complete production Skia archive, and is not
   evidence of an application-size reduction.
@@ -116,9 +117,11 @@ surface. No Skia/TGFX layout or ABI casts are used.
 
 ## Evidence
 
-`evidence/results.json` records local inputs, source/artifact hashes, test
-outcomes, and paths/hashes for preserved logs. `evidence/opt-test.txt` and
-`evidence/sanitizer-test.txt` contain the successful test output.
+`evidence/results.json` preserves the original `8a42d138` checkpoint's inputs,
+hashes and results. Its source manifest describes that historical commit,
+before the shared-fixture extraction. `evidence/mobile-results.json` records
+the later mobile source/build/runtime evidence. The original successful test
+outputs remain in `evidence/opt-test.txt` and `evidence/sanitizer-test.txt`.
 
 The first three Bazel attempts failed during target/toolchain setup; the fourth
 compiled and ran the initial 15 checks. The review regression made the final

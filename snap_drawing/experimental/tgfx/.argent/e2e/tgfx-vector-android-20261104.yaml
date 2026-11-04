@@ -1,0 +1,20 @@
+steps:
+  - launch: io.valdiroutes.tgfxprobe
+  - await:
+      visible:
+        id: probe_results
+      timeout: 15000
+  - await:
+      idle: true
+  - await:
+      text:
+        in:
+          id: probe_results
+        contains: PASS 16/16
+      timeout: 20000
+  - await:
+      text:
+        in:
+          id: probe_results
+        contains: RESULT 16 cases passed with real TGFX GPU rendering
+      timeout: 15000

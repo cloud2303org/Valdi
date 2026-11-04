@@ -1,0 +1,25 @@
+steps:
+  - launch: io.valdiroutes.tgfxprobe
+  - tool: await-ui-element
+    args:
+      condition: visible
+      selector:
+        identifier: tgfx-status
+      timeoutMs: 15000
+  - await:
+      idle: true
+      timeout: 30000
+  - tool: await-ui-element
+    args:
+      condition: text
+      selector:
+        identifier: tgfx-status
+      expectedText: PASS 16/16
+      textMatch: equals
+      timeoutMs: 20000
+  - tool: await-ui-element
+    args:
+      condition: visible
+      selector:
+        text: RESULT 16 cases passed with real TGFX GPU rendering
+      timeoutMs: 15000

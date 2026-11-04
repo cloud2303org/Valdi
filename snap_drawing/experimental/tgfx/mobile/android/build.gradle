@@ -1,0 +1,53 @@
+plugins {
+    id 'com.android.application' version '9.4.1'
+}
+
+layout.buildDirectory.set(layout.projectDirectory.dir('.local/build'))
+
+android {
+    namespace = 'io.valdiroutes.tgfxprobe'
+    compileSdk = 36
+    buildToolsVersion = '36.0.0'
+
+    defaultConfig {
+        applicationId = 'io.valdiroutes.tgfxprobe'
+        minSdk = 24
+        targetSdk = 36
+        versionCode = 1
+        versionName = '0.1'
+        ndk {
+            abiFilters 'arm64-v8a'
+        }
+    }
+
+    sourceSets {
+        main {
+            jniLibs.srcDirs = ['.local/jniLibs']
+        }
+    }
+
+    buildFeatures {
+        buildConfig = false
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled = false
+        }
+    }
+}
+
+// Native compilation belongs to the separate mobile CMake project.
+tasks.named('preBuild').configure {
+    doFirst {
+        def probe = file('.local/jniLibs/arm64-v8a/libsnap_tgfx_probe.so')
+        if (!probe.isFile()) {
+            throw new GradleException("Missing prebuilt JNI library: ${probe}. See README.md.")
+        }
+    }
+}

@@ -1,0 +1,20 @@
+[
+  {
+    "name": "zlib",
+    "commit": "da607da739fa6047df13e66a2af6b8bec7c2a498",
+    "url": "https://codeload.github.com/madler/zlib/tar.gz/da607da739fa6047df13e66a2af6b8bec7c2a498",
+    "archiveSHA256": "b9258cf6254e7f7c37f1cd61dba943a1c5ea3cff5718c789834dac359094f5f7"
+  },
+  {
+    "name": "libpng",
+    "commit": "3061454d980de7d53608f594194cfac722721d2a",
+    "url": "https://codeload.github.com/glennrp/libpng/tar.gz/3061454d980de7d53608f594194cfac722721d2a",
+    "archiveSHA256": "a2569b7553971e36e86c8f75b9d1b5abbe92c436e05169afe3f0072e937f3536"
+  },
+  {
+    "name": "freetype",
+    "commit": "0a0221a1347e2f1e07c395263540026e9a0aa7c7",
+    "url": "https://codeload.github.com/freetype/freetype/tar.gz/0a0221a1347e2f1e07c395263540026e9a0aa7c7",
+    "archiveSHA256": "11cd478953fc1d382f20a233b8e2aed6c31b47cbf0568c4bdb3334bcc1550698"
+  }
+]

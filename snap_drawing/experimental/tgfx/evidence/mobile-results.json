@@ -1,0 +1,183 @@
+{
+  "date": "2026-11-04T03:18:03.319728+00:00",
+  "base": "8a42d1387a89dd314f779201f3a05e2f34ef2363",
+  "tgfxCommit": "4cf8991d5a3a010c9314538dd2fea937593b206b",
+  "scope": "Standalone real TGFX+9 actual SnapDrawing source units. No full Valdi/Hermes or physical-device validation.",
+  "sourceHashes": {
+    "snap_drawing/experimental/tgfx/.argent/e2e/tgfx-vector-android-20261104.yaml": "80f186e4144b6a7c0097dddf05e04016d34b6a9782d64303ced7eb564713e9b7",
+    "snap_drawing/experimental/tgfx/.argent/e2e/tgfx-vector-ios-20261104.yaml": "253d2289649c674b8a39685cd688596b1f7c8858fbc912f7916311a3fd81d817",
+    "snap_drawing/experimental/tgfx/BUILD.bazel": "97e59456a0cf9e11f3452b6f61afbc2cbb9f8f48577ea96e3fdc388b49c999fa",
+    "snap_drawing/experimental/tgfx/README.md": "c4740e965bec25e761d3a1dc8b29b5996e6aedbe3892b471144145e48f66540b",
+    "snap_drawing/experimental/tgfx/mobile/CMakeLists.txt": "80a3b266b1bcf8fcf5797c80c7be7e5fd17493689e468f21c434f78f9b6fe3ae",
+    "snap_drawing/experimental/tgfx/mobile/README.md": "328133541b17580b76e9e1949071c8c516585071c83b3b86df62e72c0812d36a",
+    "snap_drawing/experimental/tgfx/mobile/android/.gitignore": "3f1284c5b462ef65fcd3be63fddb5a1ebc8af66d337137d9c9f9e23aa135ba6c",
+    "snap_drawing/experimental/tgfx/mobile/android/README.md": "2770e33a75cea7f59138d442713d448fd5194747356da907a81530765c54e2bd",
+    "snap_drawing/experimental/tgfx/mobile/android/build.gradle": "144c610f769af828ffe37fa5e8073219ac33890c7d8060f81fbf1fdad708a436",
+    "snap_drawing/experimental/tgfx/mobile/android/gradle.properties": "7e6a7f0aedf5892eaa45c291582611a346d3d23e23a43dc09e06422d7580d4f4",
+    "snap_drawing/experimental/tgfx/mobile/android/probe.cpp": "a4fb1c049359dbab018069ee977ae56083e74a771a94b2e7e892173090ecc546",
+    "snap_drawing/experimental/tgfx/mobile/android/settings.gradle": "72274dd0e5fc8c24afdbee540e591792648aa0ebfa63301b872cdca8c99eb268",
+    "snap_drawing/experimental/tgfx/mobile/android/src/main/AndroidManifest.xml": "42ddfc8bfc60f674df286404efab25d3c6ab793a152628fc5131f98c45aab487",
+    "snap_drawing/experimental/tgfx/mobile/android/src/main/java/io/valdiroutes/tgfxprobe/ProbeActivity.java": "5af30cab44a2826b1459fe64776a0390edd440e40c1768f091dab1d3beededc4",
+    "snap_drawing/experimental/tgfx/mobile/android/src/main/res/layout/probe.xml": "1f611848949ac35d8ce5ae3e7e7f410012b7cdd15c96ca5d2dc8d0ff7b98ad7e",
+    "snap_drawing/experimental/tgfx/mobile/ios/Info.plist": "4e390ed3b14126994c54f1848ff54c2d0109bd5a2122a1cb4afe2b3725cdeb88",
+    "snap_drawing/experimental/tgfx/mobile/ios/main.mm": "7033d45299410da358aba04f960dbd09cd6355011c1b1b92e22ebacd3f88f89d",
+    "snap_drawing/experimental/tgfx/vector_checks.cpp": "83ad3d10d949e643c00dd9f88fdcffd7d44c29a5b6999dfae14f10b6c50f3425",
+    "snap_drawing/experimental/tgfx/vector_checks.hpp": "630a3425d9a69652570a6bbb618b91235567c128de6bf856f0c0ac2ede8e5e5c",
+    "snap_drawing/experimental/tgfx/vector_test.mm": "ca97beb9ed377fdd5d4e55c9d261ece99c3e08e13a0dfd5bbbdfa6489cd1ae97"
+  },
+  "unchangedDrawingInputs": {
+    "snap_drawing/src/snap_drawing/cpp/Drawing/DrawingContext.cpp": "658d78c11e5d3f1259d4378743025c9bf0e91787fdb53888d68b32547de387b3",
+    "snap_drawing/src/snap_drawing/cpp/Drawing/DrawingContext.hpp": "b059c827a6e3163e5f33fedfbc435eaafac7cd8a7af753bf592fa65293057fc8",
+    "snap_drawing/src/snap_drawing/cpp/Drawing/LayerContent.cpp": "a1cb4863cac82033623f55095ce0ada7f01d44a73b8d70ef8742266a1c3b8937",
+    "snap_drawing/src/snap_drawing/cpp/Drawing/LayerContent.hpp": "2dcda86de3d2aeb593c05160bb15e779086e8bdf36e98cd68b86e49b5dcb153d",
+    "snap_drawing/src/snap_drawing/cpp/Drawing/Paint.cpp": "78065b31374e84721a7bff301f615dcf04fcff95d810c3d085d03f482ef35b3c",
+    "snap_drawing/src/snap_drawing/cpp/Drawing/Paint.hpp": "d7d9c5a1c47fc17bd837b6924d7a71c8ef1efb5684c6f13f0eca03c27ba3b1dc",
+    "snap_drawing/src/snap_drawing/cpp/Utils/Color.hpp": "2060bea25660a2dbe10d6578673947475decaf3a20a362bddabfba30e501097a",
+    "snap_drawing/src/snap_drawing/cpp/Utils/Geometry.cpp": "21c6d06508a237b29e18acd39b6c59b2de05a6686a52bc09eaa125c6b20f693c",
+    "snap_drawing/src/snap_drawing/cpp/Utils/Geometry.hpp": "fede822a4abb947cb65988fbf47a3b7fa477bf3555eabb6be1cd4110ef17f509",
+    "snap_drawing/src/snap_drawing/cpp/Utils/LazyPath.hpp": "8b6515049a62ca8470bc379e073a2c626bc74cdf4bbee32a9c0b5779435cd4a4",
+    "snap_drawing/src/snap_drawing/cpp/Utils/Matrix.cpp": "ee1d173b85ff36c5e3205a1a5afa985f590670ba14c05eb27cf0f0d69d8c4e3e",
+    "snap_drawing/src/snap_drawing/cpp/Utils/Matrix.hpp": "3fae5c0fc3fa2296c5f85f66aa4f389577b0f30ed5efe104dc77aa1510c15d9b",
+    "snap_drawing/src/snap_drawing/cpp/Utils/Path.cpp": "01a6faccae8b8b7e8c493e876115fa122dc119c0e79c80f30f4d025be017b1a8",
+    "snap_drawing/src/snap_drawing/cpp/Utils/Path.hpp": "a788d6645a6bc5ce81da9f43c355bb9464520fafe50db700f13f2a1247ba6423",
+    "snap_drawing/src/snap_drawing/cpp/Utils/Scalar.hpp": "5beb62b58cb8fd0a07fdc267a625a9114194975d019a7c9a61bac03bccbbae52",
+    "snap_drawing/src/snap_drawing/cpp/Utils/TgfxBridge.hpp": "d493dd8aa6e05e05309339ee0fa0a8eb23606aece59f31b928cafe806e1c7eb8"
+  },
+  "artifacts": {
+    "/Users/cloud/project/ValdiNativeRoutes/.tools/build/tgfx-prototype-ios-sim/tgfx.a": "0afb7ad1cb4f4878b0484f02842149b3e96e2875f80a12ff3e04c94d89e07aa1",
+    "/Users/cloud/project/ValdiNativeRoutes/.tools/build/tgfx-prototype-android-arm64/tgfx.a": "8736bbad0c8d6b707b5d53a482290c0541ebbfc6cc1229e8a9ba38b46f128f61",
+    "/Users/cloud/.config/superpowers/worktrees/Valdi-node-only/tgfx-prototype-20261104/snap_drawing/experimental/tgfx/.local/ios-app/TGFXVectorProbe.app/TGFXVectorProbe": "17a0a5a895ea6282aee53b3beb99fd964fbaa0b77722bd3c396c1307241e2407",
+    "/Users/cloud/.config/superpowers/worktrees/Valdi-node-only/tgfx-prototype-20261104/snap_drawing/experimental/tgfx/.local/android-native/libsnap_tgfx_probe.so": "acc865019430389b99c432b003fbf8e0d25b4508cb59365b6b2e4a25426a298d",
+    "/Users/cloud/.config/superpowers/worktrees/Valdi-node-only/tgfx-prototype-20261104/snap_drawing/experimental/tgfx/mobile/android/.local/build/outputs/apk/debug/SnapTgfxProbe-debug.apk": "c2e6d83c5bf968a98608d801af4c80ee4a7f5bb883d4e2a12bc7dade5901898a",
+    "/Users/cloud/.config/superpowers/worktrees/Valdi-node-only/tgfx-prototype-20261104/snap_drawing/experimental/tgfx/mobile/android/.local/jniLibs/arm64-v8a/libc++_shared.so": "e69496a4aeb51ebe61d0775ae9fefc76eee640f12317aa5174da67e5d4ec8fd6",
+    "/Users/cloud/.config/superpowers/worktrees/Valdi-node-only/tgfx-prototype-20261104/snap_drawing/experimental/tgfx/mobile/android/.local/jniLibs/arm64-v8a/libsnap_tgfx_probe.so": "acc865019430389b99c432b003fbf8e0d25b4508cb59365b6b2e4a25426a298d",
+    "/Users/cloud/.config/superpowers/worktrees/Valdi-node-only/tgfx-prototype-20261104/snap_drawing/experimental/tgfx/.local/ios-app/TGFXVectorProbe.app/Info.plist": "4e390ed3b14126994c54f1848ff54c2d0109bd5a2122a1cb4afe2b3725cdeb88",
+    "/Users/cloud/.config/superpowers/worktrees/Valdi-node-only/tgfx-prototype-20261104/snap_drawing/experimental/tgfx/.local/ios-app/TGFXVectorProbe.app/_CodeSignature/CodeResources": "8fdef5724a4fa9669da94ed4be660718c65f83bcf35959c97909a8a9ba20a24e"
+  },
+  "packagedELFHashes": {
+    "lib/arm64-v8a/libc++_shared.so": "e69496a4aeb51ebe61d0775ae9fefc76eee640f12317aa5174da67e5d4ec8fd6",
+    "lib/arm64-v8a/libsnap_tgfx_probe.so": "acc865019430389b99c432b003fbf8e0d25b4508cb59365b6b2e4a25426a298d"
+  },
+  "nativeBuildMetadataHashes": {
+    "/Users/cloud/project/ValdiNativeRoutes/.tools/build/tgfx-prototype-ios-sim/CMakeCache.txt": "0960add4c48b0505fcaeaf5ab8e5d6709df5f09b2ce51815ef5acee4bb550ec7",
+    "/Users/cloud/project/ValdiNativeRoutes/.tools/build/tgfx-prototype-ios-sim/build.ninja": "69c20a71ffa6f566e269f534b6c62f2f76eda07d03eeb18a09fd889894d541c5",
+    "/Users/cloud/project/ValdiNativeRoutes/.tools/build/tgfx-prototype-ios-sim/CMakeFiles/rules.ninja": "1b6ad78c00454c4c221062fc15b1b89641e3bf1c9a88c1bcffe35883a1ee619a",
+    "/Users/cloud/project/ValdiNativeRoutes/.tools/build/tgfx-prototype-ios-sim/.ninja_deps": "63950113414c77001815b662e02859e80c9d0ed34ed4864d6549d9be6651fb10",
+    "/Users/cloud/project/ValdiNativeRoutes/.tools/build/tgfx-prototype-ios-sim/.ninja_log": "8f2509dc35e44dfbf069c1b2896cfefae6f4a27e9c7cb9fe29c1189e8965ad00",
+    "/Users/cloud/project/ValdiNativeRoutes/.tools/build/tgfx-prototype-android-arm64/CMakeCache.txt": "c4ab2459eae2641637edc04b8c8bac56d1dc6d14872e50e2be32b4c669c90c0f",
+    "/Users/cloud/project/ValdiNativeRoutes/.tools/build/tgfx-prototype-android-arm64/build.ninja": "931faa88840b6a6c46a7f0e0e6fb6d6a30871074496035aa189567e57bc225a2",
+    "/Users/cloud/project/ValdiNativeRoutes/.tools/build/tgfx-prototype-android-arm64/CMakeFiles/rules.ninja": "fb09a37be91498bd8c4f77c711b8b45fa6073010fb763d680b32e6e1bfac367b",
+    "/Users/cloud/project/ValdiNativeRoutes/.tools/build/tgfx-prototype-android-arm64/.ninja_deps": "bbed00e3ec79c2b87657c948c549fa7b49225d4316449c0a4167f5d62f841256",
+    "/Users/cloud/project/ValdiNativeRoutes/.tools/build/tgfx-prototype-android-arm64/.ninja_log": "2ded24f734345d764468e77a3626da3b7cf5f52e50c562fe49303ca7b5c7d700",
+    "/Users/cloud/.config/superpowers/worktrees/Valdi-node-only/tgfx-prototype-20261104/snap_drawing/experimental/tgfx/.local/ios-app/CMakeCache.txt": "96b2ddb8228db425c1143fd57da10433a3662026e17ec36d94b6954b087b62f8",
+    "/Users/cloud/.config/superpowers/worktrees/Valdi-node-only/tgfx-prototype-20261104/snap_drawing/experimental/tgfx/.local/ios-app/build.ninja": "7b75333c60ce697ab391fdb5785516f3f03063656c33f71885419adc965c1c06",
+    "/Users/cloud/.config/superpowers/worktrees/Valdi-node-only/tgfx-prototype-20261104/snap_drawing/experimental/tgfx/.local/ios-app/CMakeFiles/rules.ninja": "4b961d9e6ba81cadd65a080294a66de1b3b96782b04b5a8298598550acd2619e",
+    "/Users/cloud/.config/superpowers/worktrees/Valdi-node-only/tgfx-prototype-20261104/snap_drawing/experimental/tgfx/.local/ios-app/.ninja_deps": "a2b16c8b087bb0c549f9266dd649391ad393a2bfce94b038d03b552c0338f25c",
+    "/Users/cloud/.config/superpowers/worktrees/Valdi-node-only/tgfx-prototype-20261104/snap_drawing/experimental/tgfx/.local/ios-app/.ninja_log": "9b16df778741c1f91d04066ad6ba74c1c394059edfddfb95c8a092d2423bce38",
+    "/Users/cloud/.config/superpowers/worktrees/Valdi-node-only/tgfx-prototype-20261104/snap_drawing/experimental/tgfx/.local/android-native/CMakeCache.txt": "c3d054d879aaf914f5b7ea4ed839ec0afc7ef5e2944650bd868ca33f5ef5618b",
+    "/Users/cloud/.config/superpowers/worktrees/Valdi-node-only/tgfx-prototype-20261104/snap_drawing/experimental/tgfx/.local/android-native/build.ninja": "3b5fc648056ef2bc2230d1da4226a755b79569eb9cce211bcda3f934b7656d7d",
+    "/Users/cloud/.config/superpowers/worktrees/Valdi-node-only/tgfx-prototype-20261104/snap_drawing/experimental/tgfx/.local/android-native/CMakeFiles/rules.ninja": "2d8e8c07e4e234eb928d43974dfdfd2258d7e75606297c1aa16149e702e1534f",
+    "/Users/cloud/.config/superpowers/worktrees/Valdi-node-only/tgfx-prototype-20261104/snap_drawing/experimental/tgfx/.local/android-native/.ninja_deps": "dddccdc662c62e7f52c34a958dc7c7c991e8a1126392d8e6e2df2f57b2f6e285",
+    "/Users/cloud/.config/superpowers/worktrees/Valdi-node-only/tgfx-prototype-20261104/snap_drawing/experimental/tgfx/.local/android-native/.ninja_log": "5b31f721c9de06234bb91aafd524912bd68ddef818d49d9da26db49098e6df86"
+  },
+  "logHashes": {
+    "/tmp/valdi-tgfx-mobile-20261104/android-library-configure-attempt2.log": "0be41e5f9cfcb2d41756f8a4152e3db030210bbe5e308e3845f1a88baaef13fd",
+    "/tmp/valdi-tgfx-mobile-20261104/ios-final-e2e-result.txt": "47158abf78881ee3736ce36c5b145806eb72257b48dd85fdad9a491755dd2198",
+    "/tmp/valdi-tgfx-mobile-20261104/shared-macos-sanitizers.log": "a3bdb8ffd64365abd098f55ed8f02a5ae314e808803c7ea3f97f924f041a79c5",
+    "/tmp/valdi-tgfx-mobile-20261104/android-library-configure-attempt1.log": "f2564ef6b15fcdc6e430cd736646a13827f0db153b962b986981eef0b2f22ab4",
+    "/tmp/valdi-tgfx-mobile-20261104/android-final-e2e-result.txt": "1fbd1915badab89cdd51c0aae0b1072decb13bebd74e65ee7c075606ca06a17d",
+    "/tmp/valdi-tgfx-mobile-20261104/android-probe-configure-attempt1.log": "73e77fecf1028230712c22a19453bdcda15fd6dc741b2ce41087821498e93f77",
+    "/tmp/valdi-tgfx-mobile-20261104/native-slot-release.json": "2d3ec89528a6de49d184b993d57a68f192eac590b624cdcb3cd2f9701f9473bc",
+    "/tmp/valdi-tgfx-mobile-20261104/android-library-build-attempt1.log": "a6b0234c92e1985e9c6f9e9e3a4314baff19678b93ed0b1bb9ab5f0e5cb4d314",
+    "/tmp/valdi-tgfx-mobile-20261104/android-staged-libraries.json": "ce697025821a632902028ac8652f0401206baf63951e200426829cdb2e71a451",
+    "/tmp/valdi-tgfx-mobile-20261104/ios-configure-attempt1.log": "452f9c9fcd1b1ae93a93e18909e97182176d790fb301f8c5e199b20d2c3d368a",
+    "/tmp/valdi-tgfx-mobile-20261104/ios-final-sign.log": "d09b79b953702f03894b14abfbe542a2e25f3125b510947d9221afa4ea979bf0",
+    "/tmp/valdi-tgfx-mobile-20261104/android-library-build-attempt2.log": "fb2d7416f7fa3a9c5890b227d3338e4b0ba748a6e3980ca885defc0c24806938",
+    "/tmp/valdi-tgfx-mobile-20261104/shared-macos-checks.log": "59ac34e1bb192fc5156e8002bfdcde2ff559945b72e8d532569d734d4f8b4ee4",
+    "/tmp/valdi-tgfx-mobile-20261104/ios-library-build-attempt1.log": "1be41d3ab90743e28f6f4351bd5772a500a12aeb0974b4ea9379c677415cd8f4",
+    "/tmp/valdi-tgfx-mobile-20261104/android-apk-build-attempt1.log": "d9c8b4b35165826d7c6b2d9c8f8cb08a3b4a751748a9b78b05cdff2f7ce75833",
+    "/tmp/valdi-tgfx-mobile-20261104/android-apk-build-attempt2.log": "eff92881c5a77611662b93ddb40285d93c95625acf2a038aec35abd63e307e4e",
+    "/tmp/valdi-tgfx-mobile-20261104/argent-tool-note.txt": "d93248fc21fab505887bf00fd765563900a7973f7cf7d4603ac1e40d7852bee2",
+    "/tmp/valdi-tgfx-mobile-20261104/ios-app-final-input-check.log": "5c0d1bba20b0f07b85ea81284d1137efa6018f626c912b847759e2b4dfe74057",
+    "/tmp/valdi-tgfx-mobile-20261104/android-recording-unpolished.yaml": "509df339edef4bbc1ebf120c69856ee6ed227d8161ec1060322456e337bf9e5b",
+    "/tmp/valdi-tgfx-mobile-20261104/ios-replay-first-flow.yaml": "fe4f53bb512c468d453fc60fc99a975dcc4d16619841623937936ac8fa1ccbe6",
+    "/tmp/valdi-tgfx-mobile-20261104/ios-app-build-attempt1.log": "ac5e8c59444bcf4a27ff1ff157761ddd080d81d0456784abdbeb946dc2d390fc",
+    "/tmp/valdi-tgfx-mobile-20261104/android-jni-dependencies.txt": "6c328cf99a9c0601268919aff352026eb275e2388c7f0ddc98f3610c69b359db",
+    "/tmp/valdi-tgfx-mobile-20261104/check-body-preservation.json": "fd55f04f0619b228163b3ec1af199362fc07fa46d45e34a5834b660d00376c32",
+    "/tmp/valdi-tgfx-mobile-20261104/ios-final-sign-verify.log": "bd9f2a6178337816b077e6b7ee8a28e45615442110eb57cd0771afea33a3d7c8",
+    "/tmp/valdi-tgfx-mobile-20261104/ios-initial-e2e-warning.txt": "07fe164809e461fd8a2cb52fbd089e70bda0a41d404207f2eae7e365c4b8e49d",
+    "/tmp/valdi-tgfx-mobile-20261104/ios-recording-unpolished.yaml": "f6f04adac52f03513d0dfe3f566d2e138cd57c713035413bba093838eded6611",
+    "/tmp/valdi-tgfx-mobile-20261104/android-probe-build-attempt1.log": "41564158f4d99ed20f096ad17e0405b0952d41c97323507eb7c5b4d3f134c8f3",
+    "/tmp/valdi-tgfx-mobile-20261104/ios-sign.log": "d09b79b953702f03894b14abfbe542a2e25f3125b510947d9221afa4ea979bf0",
+    "/tmp/valdi-tgfx-mobile-20261104/android-probe-build-attempt2.log": "6cf5d82051600512b489afe5d08e5b6a25652ca1ce884a51b242e0b0b1a10e50",
+    "/tmp/valdi-tgfx-mobile-20261104/ios-app-configure-attempt1.log": "94b20e2f036ae7e4e61f81891f91c63a5bef3b75de7ec7b3745bc273c19a0882",
+    "/tmp/valdi-tgfx-mobile-20261104/dependencies/zlib.log": "7ec1b5f3c47f51f55af1ac78f362b7ab59211539f3af7b28bb63ec8aafd2a7f4",
+    "/tmp/valdi-tgfx-mobile-20261104/dependencies/libpng.log": "300e8f245f28529447f3e2b65c036d6f93d9025fcb15ba2ad00879ad2068c53c",
+    "/tmp/valdi-tgfx-mobile-20261104/dependencies/freetype.log": "06e35bfb06add9febd9df4b7ebcd66fe916f3b6b12226f18c5869049158619e6",
+    "/tmp/valdi-tgfx-mobile-20261104/dependencies/receipts.json": "4d48f2c7e78f2be765aa7c95399190c8a3bdae91f0efaaeff44d14ab96ee8c36"
+  },
+  "nativeSlotRelease": {
+    "releasedAt": "2026-11-04T03:16:36.469458+00:00",
+    "activeNativeExecutables": [],
+    "nativeCommandsComplete": true
+  },
+  "mainCheckouts": [
+    {
+      "path": "/Users/cloud/project/ValdiNativeRoutes",
+      "head": "fe809ae8320b5b8c64723819fb6045bf173eb76f",
+      "status": ""
+    },
+    {
+      "path": "/Users/cloud/project/Valdi-node-only",
+      "head": "51cec8ae3645c7e778c9f36fbe4b3bffba1ccddf",
+      "status": ""
+    }
+  ],
+  "ios": {
+    "device": "1F4AB5E1-D782-420A-81A8-2AF0AFE8AA67",
+    "runtime": "iOS26.5 arm64 simulator",
+    "backend": "OpenGL ES / actual TGFX EAGL",
+    "nativeCasesPassed": 16,
+    "finalE2E": {
+      "passed": 5,
+      "failed": 0,
+      "errored": 0,
+      "warnings": 0,
+      "seconds": 22.8
+    },
+    "initialIdleWarningPreserved": true,
+    "finalIdleTimeoutMs": 30000
+  },
+  "android": {
+    "device": "emulator-5554",
+    "avd": "ValdiRoutes_NoHwKeyboard",
+    "runtime": "AndroidAPI36 arm64 emulator",
+    "backend": "OpenGL ES/EGL, actual TGFX, FreeType enabled",
+    "nativeCasesPassed": 16,
+    "finalE2E": {
+      "passed": 5,
+      "failed": 0,
+      "errored": 0,
+      "warnings": 0,
+      "seconds": 2.8
+    },
+    "link": "--no-undefined, actual TGFX archive + matching libc++_shared"
+  },
+  "host": {
+    "sharedOptPassed": 16,
+    "sharedASanUBSanPassed": 16,
+    "dependencySanitizerInstrumentation": false,
+    "mobileSanitizerInstrumentation": false
+  },
+  "preservedFailures": [
+    "AndroidJNIlink1:FreeTypeOFF missing PathRasterizer plus GLESv3 link dependency",
+    "AndroidAPKbuild1:missing dependencyResolutionManagement repositories",
+    "iOS initial livewait:AX did not expose UITextView container id",
+    "iOS firstreplay:unknown stillness at15s, final30s passed",
+    "iOS finalartifact relink invalidated previous signature; re-signed, reinstalled and revalidated finalartifact"
+  ],
+  "evidenceScreenshots": {
+    "ios-simulator-result.png": "c0af3bdb4be10b798bdd484face3c6fe8afe464beb3f1b4b02fcc7c723d78901",
+    "android-emulator-result.png": "1cbdf56b413a45efc29f66aaabb40c860c28b35f512fbba01bee9b64d4ead3d8"
+  }
+}
