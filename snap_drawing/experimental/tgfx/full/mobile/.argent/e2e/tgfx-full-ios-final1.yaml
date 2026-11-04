@@ -1,0 +1,18 @@
+steps:
+  - launch: io.valdiroutes.tgfxfullprobe
+  - tool: await-ui-element
+    args:
+      bundleId: io.valdiroutes.tgfxfullprobe
+      condition: visible
+      selector:
+        identifier: tgfx-full-status
+      timeoutMs: 10000
+  - tool: await-ui-element
+    args:
+      bundleId: io.valdiroutes.tgfxfullprobe
+      condition: text
+      selector:
+        identifier: tgfx-full-status
+      expectedText: FAIL 234/259
+      textMatch: equals
+      timeoutMs: 10000

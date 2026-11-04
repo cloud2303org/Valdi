@@ -110,7 +110,7 @@ Ref<LoadableTypeface> FontFamilyWithLoadableTypefaces::resolveLoadableTypeface(F
     return std::move(bestLoadableTypeface.value().second);
 }
 
-Ref<Typeface> FontFamilyWithLoadableTypefaces::matchStyle(SkFontMgr& fontMgr, FontStyle fontStyle) {
+Ref<Typeface> FontFamilyWithLoadableTypefaces::matchStyle(NativeFontManager& fontMgr, FontStyle fontStyle) {
     while (!_typefaces.empty()) {
         auto loadableTypeface = resolveLoadableTypeface(fontStyle);
         if (loadableTypeface == nullptr) {

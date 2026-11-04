@@ -1,0 +1,150 @@
+{
+  "date": "2026-11-04",
+  "round": "run5 variable-layout original custom-data ownership",
+  "testCount": 32,
+  "newCases": 0,
+  "fixtureSourceAndAllAssertionsUnchanged": true,
+  "validation": "source/API inspection, prior-source preservation, SHA-256 and whitespace only; no compilation/native execution",
+  "parentPriorRun": {
+    "log": "/tmp/valdi-tgfx-full-20261104/backend-checks-run5.log",
+    "sha256": "3cf8317ce955508360fb9378fd5a3e0916a6b0f92f91f616fe6073f59e859f8a",
+    "textPassed": 29,
+    "textFailed": 3,
+    "failures": [
+      "text.variable-layout-gpu-coverage.wght",
+      "text.variable-layout-gpu-coverage.wdth",
+      "text.variable-layout-gpu-coverage.opsz"
+    ],
+    "allTwelveShadowCasesPassed": true
+  },
+  "nativeResultAfterCorrection": "unexecuted; parent must rebuild and rerun unchanged 32-case suite",
+  "preservation": {
+    "archiveDirectory": "/tmp/valdi-tgfx-full-20261104/text-run5-preserved",
+    "receiptSHA256": "62cbacbaaa037829835cbe8f7cee58735a975f5b095d33a530b19e32e32bb57f",
+    "allPriorFrozenPayloadsVerifiedBeforeEditing": true,
+    "priorCompositionManifestSHA256": "f891cfcbda756b1a96138832b21075ea1ef38c6e1c1d45ebdb2246252ff7f7d8"
+  },
+  "modifiedThisRound": [
+    "snap_drawing/src/snap_drawing/cpp/Text/TextLayoutBuilder.cpp",
+    "snap_drawing/experimental/tgfx/full/tests/text-data/PROVENANCE.md",
+    "snap_drawing/experimental/tgfx/full/tests/text-data/RUN5_VARIABLE_LAYOUT_LIFETIME.md",
+    "snap_drawing/experimental/tgfx/full/tests/text-data/run5-text-lifetime-source-freeze.json"
+  ],
+  "files": [
+    {
+      "path": "snap_drawing/src/snap_drawing/cpp/Text/TextLayoutBuilder.cpp",
+      "bytes": 63103,
+      "sha256": "1ca6fa7b13e4c3acf9da5288027a75d7d4413f01ddff12bf7b61df47e74be79e"
+    },
+    {
+      "path": "snap_drawing/experimental/tgfx/full/tests/text_checks.cpp",
+      "bytes": 75091,
+      "sha256": "c0fbd8f87c8559e86028692bfcdc6da3a0e81b0920efbcc30a538ea420689a80"
+    },
+    {
+      "path": "snap_drawing/experimental/tgfx/full/tests/text_checks.hpp",
+      "bytes": 1269,
+      "sha256": "828e977ef612249155e335665ffe2f142c63b7022cdadfa6b3ebc1f88a02e2a5"
+    },
+    {
+      "path": "snap_drawing/src/snap_drawing/cpp/Layers/TextLayer.cpp",
+      "bytes": 37528,
+      "sha256": "b3d3b8d480ae53a18372a838852e5bfa7c64b712468d7802935050ca759dcf14"
+    },
+    {
+      "path": "snap_drawing/src/snap_drawing/cpp/Layers/TextLayer.hpp",
+      "bytes": 9580,
+      "sha256": "ae8700af75ffa09ee04a082577b12fad8405af56cd9f05fd4ac266b26b036607"
+    },
+    {
+      "path": "snap_drawing/experimental/tgfx/full/tests/text-data/COMPOSITION_SHADOW_ROUND3.md",
+      "bytes": 6368,
+      "sha256": "644d366618f81a42283ede8ae9b04c2510767327189d0530f219b1a2d1243bbf"
+    },
+    {
+      "path": "snap_drawing/experimental/tgfx/full/tests/text-data/CORETEXT_RUN4_DIAGNOSIS.md",
+      "bytes": 8868,
+      "sha256": "9d507142aede178147cf0e25e050508e3a6b489840d86375e393b21c14f96d30"
+    },
+    {
+      "path": "snap_drawing/experimental/tgfx/full/tests/text-data/NotoSans-LICENSE.txt",
+      "bytes": 4377,
+      "sha256": "0dab92d0544f7b233403f14b84a663bdbfa746982eda629e7f4f9ffe1b036feb"
+    },
+    {
+      "path": "snap_drawing/experimental/tgfx/full/tests/text-data/NotoSans-Regular.ttf",
+      "bytes": 569208,
+      "sha256": "b85c38ecea8a7cfb39c24e395a4007474fa5a4fc864f6ee33309eb4948d232d5"
+    },
+    {
+      "path": "snap_drawing/experimental/tgfx/full/tests/text-data/OFL.txt",
+      "bytes": 4395,
+      "sha256": "454ec26838f2b8f2e2588e759dd3742577e0d305d3359a7b81c86641fcab7d21"
+    },
+    {
+      "path": "snap_drawing/experimental/tgfx/full/tests/text-data/PROVENANCE.md",
+      "bytes": 19335,
+      "sha256": "558dcfbc5d16ab7f6120151d952d5a5dddbf879da748a0da548c84cc108cd681"
+    },
+    {
+      "path": "snap_drawing/experimental/tgfx/full/tests/text-data/RUN5_VARIABLE_LAYOUT_LIFETIME.md",
+      "bytes": 6292,
+      "sha256": "086385f26ca863d6ff7836b3c7b076171e3adca8c31239532a30bd5adae452ce"
+    },
+    {
+      "path": "snap_drawing/experimental/tgfx/full/tests/text-data/RobotoFlex.ttf",
+      "bytes": 1775480,
+      "sha256": "94a7ea95ccee28c54885a507e3cc0a534ce41ec61d413935df0e07261a7ffe63"
+    },
+    {
+      "path": "snap_drawing/experimental/tgfx/full/tests/text-data/collection-font.json",
+      "bytes": 757,
+      "sha256": "8b781ee5ac53f314d1c515b1d8630297b493a916b7bd9d9aa7c701a5866c1556"
+    },
+    {
+      "path": "snap_drawing/experimental/tgfx/full/tests/text-data/collection-manifest.json",
+      "bytes": 1172,
+      "sha256": "6fbe1378576f21fe5f07ca089d2ea16ac18a416762b789173c36be2434a33161"
+    },
+    {
+      "path": "snap_drawing/experimental/tgfx/full/tests/text-data/composition-shadow-source-freeze.json",
+      "bytes": 5906,
+      "sha256": "f891cfcbda756b1a96138832b21075ea1ef38c6e1c1d45ebdb2246252ff7f7d8"
+    },
+    {
+      "path": "snap_drawing/experimental/tgfx/full/tests/text-data/coretext_run4_probe.cpp.txt",
+      "bytes": 10847,
+      "sha256": "3009bd4824dda0def37ce65b568a19ff072b7e1646c55bc94eb75e654eb59061"
+    },
+    {
+      "path": "snap_drawing/experimental/tgfx/full/tests/text-data/generate_collection.py",
+      "bytes": 4710,
+      "sha256": "29c62508dfd2383d6df9a7d3ce3d92e0caaf5ff8eeea2330f7f72026811b6992"
+    },
+    {
+      "path": "snap_drawing/experimental/tgfx/full/tests/text-data/listing.json",
+      "bytes": 1718,
+      "sha256": "0ab1290544ff7b9aafd90450da363f10ebf06894651358e0b79ffd3ee7bb9ba9"
+    },
+    {
+      "path": "snap_drawing/experimental/tgfx/full/tests/text-data/receipt.json",
+      "bytes": 766,
+      "sha256": "470929aa9f098b5dce00364861141c360e7a416104d8b9c60fe139972bca7171"
+    },
+    {
+      "path": "snap_drawing/experimental/tgfx/full/tests/text-data/run4-preservation-receipt.json",
+      "bytes": 2482,
+      "sha256": "28b084abfa27bcdeb4bd12524e8696ba2731feb91c1ac15465fed94da9c44b0e"
+    },
+    {
+      "path": "snap_drawing/experimental/tgfx/full/tests/text-data/selected-face.ttc",
+      "bytes": 2344708,
+      "sha256": "30af1141f412f2490e3f724856223b5a6e0040ca9e6d28f8f667dc216e51c725"
+    },
+    {
+      "path": "snap_drawing/experimental/tgfx/full/tests/text-data/shadow-source-freeze.json",
+      "bytes": 1853,
+      "sha256": "3329d7db201d55a40d6d9e15d9c85e38ada3d5dd421f70f0366087de8c772a75"
+    }
+  ]
+}

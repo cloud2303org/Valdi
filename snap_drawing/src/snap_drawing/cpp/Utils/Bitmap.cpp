@@ -1,3 +1,50 @@
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+#include "snap_drawing/cpp/Utils/Bitmap.hpp"
+#include "snap_drawing/cpp/Utils/TgfxMedia.hpp"
+#include <algorithm>
+#include <limits>
+
+namespace snap::drawing {
+Bitmap::Bitmap(const Valdi::BitmapInfo& info, Valdi::Ref<Valdi::Bytes> pixels)
+    : _info(info), _pixels(std::move(pixels)) {}
+
+Valdi::BitmapInfo Bitmap::getInfo() const { return _info; }
+
+void* Bitmap::lockBytes() {
+    std::lock_guard<std::mutex> guard(_mutex);
+    if (_pixels == nullptr) { return nullptr; }
+    if (_locks++ == 0) { _lockedPixels = _pixels; }
+    return _lockedPixels->data();
+}
+
+void Bitmap::unlockBytes() {
+    std::lock_guard<std::mutex> guard(_mutex);
+    if (_locks && --_locks == 0) { _lockedPixels = nullptr; }
+}
+
+void Bitmap::dispose() {
+    std::lock_guard<std::mutex> guard(_mutex);
+    // A no-copy image owns a lock; disposal cannot invalidate its pinned data.
+    _pixels = nullptr;
+}
+
+Valdi::Result<Ref<Bitmap>> Bitmap::make(const Valdi::BitmapInfo& info) {
+    auto normalizedInfo = info;
+    const auto bytesPerPixel = Valdi::BitmapInfo::bytesPerPixelForColorType(info.colorType);
+    if (info.width <= 0 || bytesPerPixel == 0 ||
+        static_cast<size_t>(info.width) > std::numeric_limits<size_t>::max() / bytesPerPixel) {
+        return Valdi::Error("Invalid bitmap size, stride or format");
+    }
+    normalizedInfo.rowBytes = std::max(info.rowBytes, static_cast<size_t>(info.width) * bytesPerPixel);
+    if (!tgfxMediaValidBitmapInfo(normalizedInfo)) {
+        return Valdi::Error("Invalid bitmap size, stride or format");
+    }
+    auto bytes = Valdi::makeShared<Valdi::Bytes>();
+    bytes->resize(normalizedInfo.rowBytes * static_cast<size_t>(normalizedInfo.height));
+    return Valdi::makeShared<Bitmap>(normalizedInfo, std::move(bytes));
+}
+} // namespace snap::drawing
+#else
 //
 //  Bitmap.cpp
 //  snap_drawing
@@ -42,3 +89,5 @@ Valdi::Result<Ref<Bitmap>> Bitmap::make(const Valdi::BitmapInfo& info) {
 }
 
 } // namespace snap::drawing
+
+#endif

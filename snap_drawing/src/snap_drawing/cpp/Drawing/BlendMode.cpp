@@ -6,10 +6,76 @@
 //
 
 #include "snap_drawing/cpp/Drawing/BlendMode.hpp"
-#include "include/core/SkBlendMode.h"
 
 namespace snap::drawing {
 
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+tgfx::BlendMode toSkBlendMode(BlendMode blendMode) {
+    switch (blendMode) {
+        case BlendModeClear:
+            return tgfx::BlendMode::Clear;
+        case BlendModeSrc:
+            return tgfx::BlendMode::Src;
+        case BlendModeDst:
+            return tgfx::BlendMode::Dst;
+        case BlendModeSrcOver:
+            return tgfx::BlendMode::SrcOver;
+        case BlendModeDstOver:
+            return tgfx::BlendMode::DstOver;
+        case BlendModeSrcIn:
+            return tgfx::BlendMode::SrcIn;
+        case BlendModeDstIn:
+            return tgfx::BlendMode::DstIn;
+        case BlendModeSrcOut:
+            return tgfx::BlendMode::SrcOut;
+        case BlendModeDstOut:
+            return tgfx::BlendMode::DstOut;
+        case BlendModeSrcATop:
+            return tgfx::BlendMode::SrcATop;
+        case BlendModeDstATop:
+            return tgfx::BlendMode::DstATop;
+        case BlendModeXor:
+            return tgfx::BlendMode::Xor;
+        case BlendModePlus:
+            return tgfx::BlendMode::PlusLighter;
+        case BlendModeModulate:
+            return tgfx::BlendMode::Modulate;
+        case BlendModeScreen:
+        case BlendModeLastCoeffMode:
+            return tgfx::BlendMode::Screen;
+        case BlendModeOverlay:
+            return tgfx::BlendMode::Overlay;
+        case BlendModeDarken:
+            return tgfx::BlendMode::Darken;
+        case BlendModeLighten:
+            return tgfx::BlendMode::Lighten;
+        case BlendModeColorDodge:
+            return tgfx::BlendMode::ColorDodge;
+        case BlendModeColorBurn:
+            return tgfx::BlendMode::ColorBurn;
+        case BlendModeHardLight:
+            return tgfx::BlendMode::HardLight;
+        case BlendModeSoftLight:
+            return tgfx::BlendMode::SoftLight;
+        case BlendModeDifference:
+            return tgfx::BlendMode::Difference;
+        case BlendModeExclusion:
+            return tgfx::BlendMode::Exclusion;
+        case BlendModeMultiply:
+        case BlendModeLastSeparableMode:
+            return tgfx::BlendMode::Multiply;
+        case BlendModeHue:
+            return tgfx::BlendMode::Hue;
+        case BlendModeSaturation:
+            return tgfx::BlendMode::Saturation;
+        case BlendModeColor:
+            return tgfx::BlendMode::Color;
+        case BlendModeLuminosity:
+            return tgfx::BlendMode::Luminosity;
+    }
+    return tgfx::BlendMode::SrcOver;
+}
+#else
 SkBlendMode toSkBlendMode(BlendMode blendMode) {
     switch (blendMode) {
         case BlendModeClear:
@@ -76,5 +142,6 @@ SkBlendMode toSkBlendMode(BlendMode blendMode) {
             return SkBlendMode::kLuminosity;
     }
 }
+#endif
 
 } // namespace snap::drawing

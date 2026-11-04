@@ -8,7 +8,7 @@
 #include "snap_drawing/cpp/Text/FontFamily.hpp"
 #include "snap_drawing/cpp/Text/Typeface.hpp"
 
-#include "include/core/SkFontMgr.h"
+#include "snap_drawing/cpp/Text/NativeFontManager.hpp"
 
 namespace snap::drawing {
 

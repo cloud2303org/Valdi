@@ -1,3 +1,6 @@
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+#include "snap_drawing/cpp/Drawing/GraphicsContext/TGFXGrGraphicsContextImpl.hpp"
+#else
 //
 //  GrGraphicsContext.cpp
 //  snap_drawing-macos
@@ -82,3 +85,4 @@ GrDirectContext& GrGraphicsContext::getGrContext() const {
 } // namespace snap::drawing
 
 #endif
+#endif // SNAP_DRAWING_TGFX_EXPERIMENT

@@ -10,7 +10,7 @@
 #include "snap_drawing/cpp/Text/FontFamily.hpp"
 #include "valdi_core/cpp/Utils/FlatMap.hpp"
 
-class SkFontStyleSet;
+#include "snap_drawing/cpp/Text/NativeFontManager.hpp"
 
 namespace snap::drawing {
 
@@ -21,15 +21,15 @@ class Typeface;
  */
 class FontFamilyWithStyleSet : public FontFamily {
 public:
-    FontFamilyWithStyleSet(const sk_sp<SkFontStyleSet>& fontStyleSet, const String& familyName);
+    FontFamilyWithStyleSet(const NativeFontStyleSetHandle& fontStyleSet, const String& familyName);
     ~FontFamilyWithStyleSet() override;
 
-    Ref<Typeface> matchStyle(SkFontMgr& fontMgr, FontStyle fontStyle) override;
+    Ref<Typeface> matchStyle(NativeFontManager& fontMgr, FontStyle fontStyle) override;
 
 private:
-    sk_sp<SkFontStyleSet> _fontStyleSet;
-    Valdi::FlatMap<SkTypefaceID, Ref<Typeface>> _typefaces;
-    Valdi::FlatMap<FontStyle, SkTypefaceID> _fontIdByStyle;
+    NativeFontStyleSetHandle _fontStyleSet;
+    Valdi::FlatMap<uint32_t, Ref<Typeface>> _typefaces;
+    Valdi::FlatMap<FontStyle, uint32_t> _fontIdByStyle;
 };
 
 } // namespace snap::drawing

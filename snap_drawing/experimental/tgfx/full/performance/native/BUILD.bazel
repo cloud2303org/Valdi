@@ -1,0 +1,72 @@
+load("@build_bazel_rules_apple//apple:apple.bzl", "apple_static_library")
+
+package(default_visibility = ["//visibility:public"])
+
+# The same consumer and dependency closure in both runs. Select the backend
+# solely with --define=snap_drawing_backend=tgfx (omit for default Skia).
+# No ValdiRuntime app export, JS engine, managed benchmark or check suite.
+cc_library(
+    name = "render_performance",
+    srcs = [
+        "gpu_target.cpp",
+        "gpu_target.hpp",
+        "render_performance.cpp",
+        "skia_android_context.cpp",
+    ],
+    hdrs = ["render_performance.hpp"],
+    copts = ["-std=c++20"],
+    linkstatic = True,
+    linkopts = select({
+        "@snap_platforms//conditions:android": [
+            "-landroid",
+            "-lEGL",
+            "-lGLESv3",
+            "-llog",
+            "-ljnigraphics",
+        ],
+        "//conditions:default": [],
+    }),
+    deps = [
+        # The platform facade pulls alwayslinked Valdi JNI adapters on Android.
+        # This fixture needs only the actual shared drawing implementation;
+        # Apple platform sources enter once through apple_offscreen_context.
+        "//snap_drawing:snap_drawing_cc",
+        "//valdi_core:valdi_core_cc",
+    ] + select({
+        "//bzl/conditions:ios": [":apple_offscreen_context"],
+        "//bzl/conditions:macos": [":apple_offscreen_context"],
+        "//conditions:default": [],
+    }),
+)
+
+objc_library(
+    name = "apple_offscreen_context",
+    srcs = ["skia_apple_context.mm"],
+    copts = ["-std=c++20", "-fobjc-arc"],
+    sdk_frameworks = ["Metal"],
+    deps = [
+        "//snap_drawing",
+        "//valdi_core:valdi_core_cc",
+    ],
+)
+
+cc_binary(
+    name = "librender_performance.so",
+    srcs = ["android/bridge.cpp"],
+    copts = ["-std=c++20"],
+    linkshared = True,
+    linkstatic = True,
+    linkopts = ["-Wl,--no-undefined"],
+    target_compatible_with = ["@platforms//os:android"],
+    deps = [
+        ":render_performance",
+        "//libs/utils:utils_core_cc",
+    ],
+)
+
+apple_static_library(
+    name = "render_performance_ios",
+    platform_type = "ios",
+    minimum_os_version = "15.0",
+    deps = [":render_performance"],
+)

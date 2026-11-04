@@ -1,0 +1,68 @@
+import groovy.json.JsonSlurper
+
+plugins {
+    // AGP 9 supplies Kotlin support; no Compose or externalNativeBuild.
+    id 'com.android.application' version '9.4.1'
+}
+
+def stage = file('../.local/android_arm64')
+layout.buildDirectory.set(layout.projectDirectory.dir('../.local/android-build'))
+
+android {
+    namespace = 'io.valdiroutes.tgfxapp'
+    compileSdk = 36
+    buildToolsVersion = '36.0.0'
+    defaultConfig {
+        applicationId = 'io.valdiroutes.tgfxapp'
+        minSdk = 24
+        targetSdk = 36
+        versionCode = 1
+        versionName = '1.0'
+        ndk { abiFilters 'arm64-v8a' }
+    }
+    sourceSets {
+        main {
+            kotlin.directories.add(new File(stage, 'generated/android').absolutePath)
+            assets.srcDir(new File(stage, 'package'))
+            res.srcDir(new File(stage, 'generated/resources/android'))
+            // Parent supplies the exact NDK shared runtime here if not in the AAR.
+            jniLibs.srcDir('../.local/android-jniLibs')
+        }
+    }
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+    buildTypes {
+        release { minifyEnabled = false }
+    }
+}
+
+dependencies {
+    implementation files(new File(stage, 'runtime/valdi_runtime.aar'))
+    implementation 'androidx.appcompat:appcompat:1.7.1'
+    implementation 'androidx.dynamicanimation:dynamicanimation:1.1.0'
+    // ValdiRuntimeManager directly observes ProcessLifecycleOwner. Local AARs
+    // do not carry their external Maven dependency metadata.
+    implementation 'androidx.lifecycle:lifecycle-process:2.2.0'
+    implementation 'androidx.exifinterface:exifinterface:1.3.3'
+}
+
+tasks.named('preBuild').configure {
+    doFirst {
+        def prepared = new File(stage, 'prepared.json')
+        if (!prepared.isFile()) throw new GradleException('Run reviewed bridge/prepare.mts for android_arm64 first')
+        def receipt = new JsonSlurper().parse(prepared)
+        if (receipt.schema != 2 || receipt.kind != 'tgfx-valdi-app-stage' || receipt.profile != 'android_arm64'
+                || receipt.provenance.backend != 'tgfx' || receipt.provenance.engine != 'hermes')
+            throw new GradleException('Wrong experimental runtime stage')
+        def node = providers.gradleProperty('nodeBinary').getOrElse('node')
+        def checked = providers.exec {
+            ignoreExitValue = true
+            commandLine node, file('../bridge/check-stage.mjs').absolutePath, stage.absolutePath
+        }
+        logger.lifecycle(checked.standardOutput.asText.get())
+        if (checked.result.get().exitValue != 0) logger.error(checked.standardError.asText.get())
+        checked.result.get().assertNormalExitValue()
+    }
+}

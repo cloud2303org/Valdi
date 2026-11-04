@@ -1,0 +1,15 @@
+executionPrerequisite: The reviewed ARM64 TGFX Valdi acceptance APK with the PixelCopy gate is installed.
+steps:
+  - tool: restart-app
+    args:
+      bundleId: io.valdiroutes.tgfxapp
+      activity: io.valdiroutes.tgfxapp.SnapDrawingAcceptanceActivity
+  - await:
+      visible: { id: tgfx_app_status }
+      timeout: 15000
+  - await:
+      text:
+        in: { id: tgfx_app_status }
+        equals: tgfx-app-status PASS 9/9 root=snapdrawing
+      timeout: 30000
+  - await: { idle: true, stableFor: 1200, timeout: 9000 }

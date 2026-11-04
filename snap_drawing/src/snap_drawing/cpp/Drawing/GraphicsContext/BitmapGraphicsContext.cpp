@@ -1,3 +1,6 @@
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+#include "snap_drawing/cpp/Drawing/GraphicsContext/TGFXBitmapGraphicsContextImpl.hpp"
+#else
 //
 //  BitmapGraphicsContext.cpp
 //  snap_drawing
@@ -125,3 +128,5 @@ Valdi::Result<Valdi::BytesView> BitmapGraphicsContext::bitmapToPNG(const Valdi::
 }
 
 } // namespace snap::drawing
+
+#endif // SNAP_DRAWING_TGFX_EXPERIMENT

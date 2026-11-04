@@ -1,0 +1,118 @@
+diff --git a/src/loaders/webp/webp/types.h b/src/loaders/webp/webp/types.h
+index edac198..1a55682 100644
+--- a/src/loaders/webp/webp/types.h
++++ b/src/loaders/webp/webp/types.h
+@@ -13,6 +13,113 @@
+ 
+ #ifndef WEBP_WEBP_TYPES_H_
+ #define WEBP_WEBP_TYPES_H_
++#define kVP8Log2Range ThorvgPrivate_kVP8Log2Range
++#define kVP8NewRange ThorvgPrivate_kVP8NewRange
++
++// Isolate ThorVG's premultiplied WebP fork from the full libwebp linked by TGFX.
++// Both implementations keep their actual source, types and decoding semantics.
++#define VP8CheckSignature ThorvgPrivate_VP8CheckSignature
++#define VP8Clear ThorvgPrivate_VP8Clear
++#define VP8Decode ThorvgPrivate_VP8Decode
++#define VP8DecodeMB ThorvgPrivate_VP8DecodeMB
++#define VP8DecompressAlphaRows ThorvgPrivate_VP8DecompressAlphaRows
++#define VP8Delete ThorvgPrivate_VP8Delete
++#define VP8DspInit ThorvgPrivate_VP8DspInit
++#define VP8EnterCritical ThorvgPrivate_VP8EnterCritical
++#define VP8ExitCritical ThorvgPrivate_VP8ExitCritical
++#define VP8FiltersInit ThorvgPrivate_VP8FiltersInit
++#define VP8GetCPUInfo ThorvgPrivate_VP8GetCPUInfo
++#define VP8GetHeaders ThorvgPrivate_VP8GetHeaders
++#define VP8GetInfo ThorvgPrivate_VP8GetInfo
++#define VP8GetSignedValue ThorvgPrivate_VP8GetSignedValue
++#define VP8GetValue ThorvgPrivate_VP8GetValue
++#define VP8HFilter16 ThorvgPrivate_VP8HFilter16
++#define VP8HFilter16i ThorvgPrivate_VP8HFilter16i
++#define VP8HFilter8 ThorvgPrivate_VP8HFilter8
++#define VP8HFilter8i ThorvgPrivate_VP8HFilter8i
++#define VP8InitBitReader ThorvgPrivate_VP8InitBitReader
++#define VP8InitClipTables ThorvgPrivate_VP8InitClipTables
++#define VP8InitFrame ThorvgPrivate_VP8InitFrame
++#define VP8InitIoInternal ThorvgPrivate_VP8InitIoInternal
++#define VP8InitScanline ThorvgPrivate_VP8InitScanline
++#define VP8LAddGreenToBlueAndRed ThorvgPrivate_VP8LAddGreenToBlueAndRed
++#define VP8LAddGreenToBlueAndRed_C ThorvgPrivate_VP8LAddGreenToBlueAndRed_C
++#define VP8LBuildHuffmanTable ThorvgPrivate_VP8LBuildHuffmanTable
++#define VP8LCheckSignature ThorvgPrivate_VP8LCheckSignature
++#define VP8LClear ThorvgPrivate_VP8LClear
++#define VP8LColorCacheClear ThorvgPrivate_VP8LColorCacheClear
++#define VP8LColorCacheInit ThorvgPrivate_VP8LColorCacheInit
++#define VP8LColorIndexInverseTransformAlpha ThorvgPrivate_VP8LColorIndexInverseTransformAlpha
++#define VP8LConvertBGRAToRGBA ThorvgPrivate_VP8LConvertBGRAToRGBA
++#define VP8LConvertBGRAToRGBA_C ThorvgPrivate_VP8LConvertBGRAToRGBA_C
++#define VP8LConvertFromBGRA ThorvgPrivate_VP8LConvertFromBGRA
++#define VP8LDecodeAlphaHeader ThorvgPrivate_VP8LDecodeAlphaHeader
++#define VP8LDecodeAlphaImageStream ThorvgPrivate_VP8LDecodeAlphaImageStream
++#define VP8LDecodeHeader ThorvgPrivate_VP8LDecodeHeader
++#define VP8LDecodeImage ThorvgPrivate_VP8LDecodeImage
++#define VP8LDelete ThorvgPrivate_VP8LDelete
++#define VP8LDoFillBitWindow ThorvgPrivate_VP8LDoFillBitWindow
++#define VP8LDspInit ThorvgPrivate_VP8LDspInit
++#define VP8LGetInfo ThorvgPrivate_VP8LGetInfo
++#define VP8LHtreeGroupsFree ThorvgPrivate_VP8LHtreeGroupsFree
++#define VP8LHtreeGroupsNew ThorvgPrivate_VP8LHtreeGroupsNew
++#define VP8LHuffmanTablesAllocate ThorvgPrivate_VP8LHuffmanTablesAllocate
++#define VP8LHuffmanTablesDeallocate ThorvgPrivate_VP8LHuffmanTablesDeallocate
++#define VP8LInitBitReader ThorvgPrivate_VP8LInitBitReader
++#define VP8LInverseTransform ThorvgPrivate_VP8LInverseTransform
++#define VP8LMapColor32b ThorvgPrivate_VP8LMapColor32b
++#define VP8LMapColor8b ThorvgPrivate_VP8LMapColor8b
++#define VP8LNew ThorvgPrivate_VP8LNew
++#define VP8LPredictors ThorvgPrivate_VP8LPredictors
++#define VP8LReadBits ThorvgPrivate_VP8LReadBits
++#define VP8LTransformColorInverse ThorvgPrivate_VP8LTransformColorInverse
++#define VP8LTransformColorInverse_C ThorvgPrivate_VP8LTransformColorInverse_C
++#define VP8LoadFinalBytes ThorvgPrivate_VP8LoadFinalBytes
++#define VP8New ThorvgPrivate_VP8New
++#define VP8ParseIntraModeRow ThorvgPrivate_VP8ParseIntraModeRow
++#define VP8ParseProba ThorvgPrivate_VP8ParseProba
++#define VP8ParseQuant ThorvgPrivate_VP8ParseQuant
++#define VP8PredChroma8 ThorvgPrivate_VP8PredChroma8
++#define VP8PredLuma16 ThorvgPrivate_VP8PredLuma16
++#define VP8PredLuma4 ThorvgPrivate_VP8PredLuma4
++#define VP8ProcessRow ThorvgPrivate_VP8ProcessRow
++#define VP8ResetProba ThorvgPrivate_VP8ResetProba
++#define VP8SetError ThorvgPrivate_VP8SetError
++#define VP8SimpleHFilter16 ThorvgPrivate_VP8SimpleHFilter16
++#define VP8SimpleHFilter16i ThorvgPrivate_VP8SimpleHFilter16i
++#define VP8SimpleVFilter16 ThorvgPrivate_VP8SimpleVFilter16
++#define VP8SimpleVFilter16i ThorvgPrivate_VP8SimpleVFilter16i
++#define VP8Transform ThorvgPrivate_VP8Transform
++#define VP8TransformAC3 ThorvgPrivate_VP8TransformAC3
++#define VP8TransformDC ThorvgPrivate_VP8TransformDC
++#define VP8TransformDCUV ThorvgPrivate_VP8TransformDCUV
++#define VP8TransformUV ThorvgPrivate_VP8TransformUV
++#define VP8VFilter16 ThorvgPrivate_VP8VFilter16
++#define VP8VFilter16i ThorvgPrivate_VP8VFilter16i
++#define VP8VFilter8 ThorvgPrivate_VP8VFilter8
++#define VP8VFilter8i ThorvgPrivate_VP8VFilter8i
++#define VP8YUVInit ThorvgPrivate_VP8YUVInit
++#define VP8kabs0 ThorvgPrivate_VP8kabs0
++#define VP8kclip1 ThorvgPrivate_VP8kclip1
++#define VP8ksclip1 ThorvgPrivate_VP8ksclip1
++#define VP8ksclip2 ThorvgPrivate_VP8ksclip2
++#define WebPAllocateDecBuffer ThorvgPrivate_WebPAllocateDecBuffer
++#define WebPApplyAlphaMultiply ThorvgPrivate_WebPApplyAlphaMultiply
++#define WebPDecodeBGRA ThorvgPrivate_WebPDecodeBGRA
++#define WebPDecodeRGBA ThorvgPrivate_WebPDecodeRGBA
++#define WebPDispatchAlpha ThorvgPrivate_WebPDispatchAlpha
++#define WebPFreeDecBuffer ThorvgPrivate_WebPFreeDecBuffer
++#define WebPGetFeatures ThorvgPrivate_WebPGetFeatures
++#define WebPGetInfo ThorvgPrivate_WebPGetInfo
++#define WebPInitAlphaProcessing ThorvgPrivate_WebPInitAlphaProcessing
++#define WebPInitCustomIo ThorvgPrivate_WebPInitCustomIo
++#define WebPInitDecBufferInternal ThorvgPrivate_WebPInitDecBufferInternal
++#define WebPInitSamplers ThorvgPrivate_WebPInitSamplers
++#define WebPIoInitFrame ThorvgPrivate_WebPIoInitFrame
++#define WebPSamplerProcessPlane ThorvgPrivate_WebPSamplerProcessPlane
++#define WebPSamplers ThorvgPrivate_WebPSamplers
++#define WebPUnfilters ThorvgPrivate_WebPUnfilters
++
+ 
+ #include <stddef.h>  // for size_t
+ 

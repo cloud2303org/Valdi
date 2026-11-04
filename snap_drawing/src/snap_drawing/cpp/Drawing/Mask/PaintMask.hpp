@@ -17,7 +17,7 @@ namespace snap::drawing {
 
 /**
  A PaintMask is an implementation of IMask that prepares the canvas
- using SkCanvas::saveBehind and draws a region from a given rect or path
+ using a backend save operation and draws a region from a given rect or path
  with a given paint.
  */
 class PaintMask : public IMask {
@@ -27,9 +27,9 @@ public:
 
     Rect getBounds() const override;
 
-    void prepare(SkCanvas* canvas) override;
+    void prepare(NativeCanvas* canvas) override;
 
-    void apply(SkCanvas* canvas) override;
+    void apply(NativeCanvas* canvas) override;
 
     String getDescription() override;
 

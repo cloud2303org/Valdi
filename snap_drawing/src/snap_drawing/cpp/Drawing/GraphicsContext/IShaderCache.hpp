@@ -2,7 +2,7 @@
 
 #include "valdi_core/cpp/Utils/Shared.hpp"
 
-#ifdef SK_GANESH
+#if defined(SK_GANESH) && !defined(SNAP_DRAWING_TGFX_EXPERIMENT)
 
 #include "include/gpu/ganesh/GrDirectContext.h"
 
@@ -14,14 +14,14 @@ class IShaderCache : public GrContextOptions::PersistentCache, public Valdi::Sha
 
 #else
 
-#include "include/core/SkData.h"
+#include "snap_drawing/cpp/Utils/DrawingBackend.hpp"
 
 namespace snap::drawing {
 
 class IShaderCache : public Valdi::SharedPtrRefCountable {
 public:
-    virtual sk_sp<SkData> load(const SkData& key) = 0;
-    virtual void store(const SkData& key, const SkData& data) = 0;
+    virtual NativeData load(const NativeDataObject& key) = 0;
+    virtual void store(const NativeDataObject& key, const NativeDataObject& data) = 0;
 };
 
 } // namespace snap::drawing

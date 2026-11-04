@@ -6,7 +6,10 @@
 //
 
 #include "snap_drawing/cpp/Drawing/RadialGradient.hpp"
+#include "snap_drawing/cpp/Drawing/Shader.hpp"
+#ifndef SNAP_DRAWING_TGFX_EXPERIMENT
 #include "include/effects/SkGradientShader.h"
+#endif
 #include <cmath>
 
 namespace snap::drawing {
@@ -45,15 +48,32 @@ void RadialGradient::updateShader(const Rect& bounds) {
         auto height = bounds.height();
         auto radius = std::min(width / 2, height / 2);
 
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+        std::vector<tgfx::Color> colors;
+        colors.reserve(_colors.size());
+        for (const auto& color : _colors) {
+            colors.emplace_back(color.getSkValue());
+        }
+        tgfx::Matrix localMatrix;
+#else
         const auto* colorsData = reinterpret_cast<const SkColor*>(_colors.data());
-
         SkMatrix localMatrix;
+#endif
         if (width != height) {
             localMatrix.postScale(width / height, 1);
         }
         localMatrix.postTranslate(bounds.x() + (width / 2), bounds.y() + (height / 2));
 
-        sk_sp<SkShader> shader;
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+        if (_colors.size() == _locations.size()) {
+            _shader = tgfx::Shader::MakeRadialGradient(tgfx::Point::Make(0, 0), radius, colors, _locations);
+        } else {
+            _shader = tgfx::Shader::MakeRadialGradient(tgfx::Point::Make(0, 0), radius, colors);
+        }
+        if (_shader) {
+            _shader = _shader->makeWithMatrix(localMatrix);
+        }
+#else
         if (_colors.size() == _locations.size()) {
             // User provided color distribution
 
@@ -76,11 +96,12 @@ void RadialGradient::updateShader(const Rect& bounds) {
                                                    0,
                                                    &localMatrix);
         }
+#endif
     }
 }
 
 void RadialGradient::applyToPaint(Paint& paint) const {
-    paint.getSkValue().setShader(_shader);
+    paint.setShader(Shader(_shader));
 }
 
 void RadialGradient::update(const Rect& bounds) {

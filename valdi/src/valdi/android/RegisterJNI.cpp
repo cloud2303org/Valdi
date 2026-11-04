@@ -10,6 +10,11 @@
 #include "valdi/android/ValueMarshallerRegistryCppJNI.hpp"
 #include "valdi/jni/JavaThread.hpp"
 
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+#include "tgfx/platform/android/JNIEnvironment.h"
+#include <cstdlib>
+#endif
+
 #if SNAP_DRAWING_ENABLED
 #include "valdi/android/AnimatedImageJNI.hpp"
 
@@ -18,6 +23,12 @@
 djinni::JniClassInitializer valdiJNIOnLoad([] { // NOLINT(fuchsia-statically-constructed-objects)
     JavaVM* vm = nullptr;
     djinni::jniGetThreadEnv()->GetJavaVM(&vm);
+
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+    if (!tgfx::JNIEnvironment::SetJavaVM(vm)) {
+        std::abort();
+    }
+#endif
 
     facebook::jni::initialize(vm, [] {
         ValdiAndroid::InternedStringCPP::registerNatives();

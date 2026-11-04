@@ -1,5 +1,7 @@
 #include "snap_drawing/cpp/Utils/AnimatedImage.hpp"
+#ifndef SNAP_DRAWING_TGFX_EXPERIMENT
 #include "include/codec/SkCodec.h"
+#endif
 #include "snap_drawing/cpp/Drawing/DrawingContext.hpp"
 #include "snap_drawing/cpp/Drawing/Surface/DrawableSurfaceCanvas.hpp"
 #include "snap_drawing/cpp/Utils/BytesUtils.hpp"
@@ -17,7 +19,7 @@ namespace snap::drawing {
 AnimatedImage::AnimatedImage() = default;
 AnimatedImage::~AnimatedImage() = default;
 
-void AnimatedImage::draw(SkCanvas* canvas,
+void AnimatedImage::draw(NativeCanvas* canvas,
                          const Rect& drawBounds,
                          const Duration& time,
                          FittingSizeMode fittingSizeMode) {
@@ -34,6 +36,11 @@ void AnimatedImage::drawInCanvas(const DrawableSurfaceCanvas& canvas,
 Valdi::Result<Ref<AnimatedImage>> AnimatedImage::make(const Ref<IFontManager>& fontManager,
                                                       const Valdi::Byte* data,
                                                       size_t length) {
+    const Valdi::BytesView bytesView(nullptr, data, length);
+    if (!data || length == 0) {
+        const auto message = describeUndecodablePayload(bytesView, "Unsupported image format");
+        return Valdi::Error(std::string_view(message));
+    }
     Image::initializeCodecs();
 
     if constexpr (kLottieEnabled) {
@@ -42,11 +49,22 @@ Valdi::Result<Ref<AnimatedImage>> AnimatedImage::make(const Ref<IFontManager>& f
         }
     }
 
-    const Valdi::BytesView bytesView(nullptr, data, length);
     if (Image::isSVG(bytesView)) {
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+        return SVGAnimatedImage::make(data, length, fontManager).map<Ref<AnimatedImage>>();
+#else
         return SVGAnimatedImage::make(data, length).map<Ref<AnimatedImage>>();
+#endif
     }
 
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+    auto decoded = SkCodecAnimatedImage::make(bytesView);
+    if (!decoded) {
+        const auto message = describeUndecodablePayload(bytesView, "Unsupported image format");
+        return decoded.error().rethrow(std::string_view(message));
+    }
+    return decoded.map<Ref<AnimatedImage>>();
+#else
     auto skData = skDataFromBytes(bytesView, DataConversionModeAlwaysCopy);
     auto codec = SkCodec::MakeFromData(skData);
     if (codec == nullptr) {
@@ -65,6 +83,7 @@ Valdi::Result<Ref<AnimatedImage>> AnimatedImage::make(const Ref<IFontManager>& f
         return Valdi::Error(std::string_view(message));
     }
     return SkCodecAnimatedImage::make(std::move(codec)).map<Ref<AnimatedImage>>();
+#endif
 }
 
 bool AnimatedImage::isJsonObject(const Valdi::Byte* data, size_t length) {

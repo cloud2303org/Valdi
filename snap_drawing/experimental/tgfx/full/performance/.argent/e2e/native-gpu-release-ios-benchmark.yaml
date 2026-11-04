@@ -1,0 +1,12 @@
+steps:
+  - launch: io.valdiroutes.renderperformance
+  - await: { visible: { id: render-performance-status } }
+  - await: { idle: true }
+  - tool: await-ui-element
+    args:
+      condition: text
+      selector:
+        identifier: render-performance-status
+      expectedText: PASS
+      textMatch: contains
+    delayMs: 30000

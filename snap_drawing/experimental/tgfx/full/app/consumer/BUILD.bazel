@@ -1,0 +1,63 @@
+load("@build_bazel_rules_apple//apple:apple.bzl", "apple_xcframework")
+load("@valdi//bzl/valdi:valdi_exported_library.bzl", "valdi_exported_library")
+
+# Only real builtin modules, supported by the existing Node runtime adapter.
+# No application native_deps and no app-main artifacts.
+valdi_exported_library(
+    name = "valdi_runtime",
+    ios_bundle_id = "io.valdiroutes.tgfxapp.runtime",
+    ios_bundle_name = "ValdiRuntime",
+    # Preserve Valdi Kotlin metadata for makeScoped and other top-level APIs.
+    android_excluded_class_path_patterns = [
+        "org/intellij/.*",
+        "org/jetbrains/.*",
+        "kotlin/.*",
+        "com/snap/valdi/support/R\\.class",
+        "com/snap/valdi/support/R\\$.*\\.class",
+        "android/support/.*",
+        "androidx/.*",
+        "META-INF/[^/]+/",
+        "META-INF/([^vs][^/]*|v[^a][^/]*|s[^r][^/]*|[vs])$",
+    ],
+    deps = [
+        "@valdi//src/valdi_modules/src/valdi/valdi_core",
+        "@valdi//src/valdi_modules/src/valdi/valdi_tsx",
+        "@valdi//src/valdi_modules/src/valdi/drawing",
+    ],
+)
+
+# Reuse the official export's header rewriting and native closure. Its default
+# XCFramework target also requests x86_64; these explicit targets request only
+# the TGFX profiles actually supported. Build these, not :valdi_runtime_ios.
+_IOS_DEPS = [
+    "@valdi//valdi",
+    "@valdi//src/valdi_modules/src/valdi/valdi_core:valdi_core_objc",
+    "@valdi//src/valdi_modules/src/valdi/valdi_tsx:valdi_tsx_objc",
+    "@valdi//src/valdi_modules/src/valdi/drawing:drawing_objc",
+]
+
+apple_xcframework(
+    name = "valdi_runtime_ios_sim",
+    bundle_name = "ValdiRuntime",
+    bundle_id = "io.valdiroutes.tgfxapp.runtime",
+    deps = _IOS_DEPS,
+    data = ["@valdi//bzl/valdi:api_version_file"],
+    public_hdrs = [":valdi_runtime_ios_hdrs"],
+    infoplists = ["@valdi//bzl/valdi:Info.plist"],
+    minimum_os_versions = {"ios": "15.0"},
+    families_required = {"ios": ["iphone", "ipad"]},
+    ios = {"simulator": ["arm64"]},
+)
+
+apple_xcframework(
+    name = "valdi_runtime_ios_device",
+    bundle_name = "ValdiRuntime",
+    bundle_id = "io.valdiroutes.tgfxapp.runtime",
+    deps = _IOS_DEPS,
+    data = ["@valdi//bzl/valdi:api_version_file"],
+    public_hdrs = [":valdi_runtime_ios_hdrs"],
+    infoplists = ["@valdi//bzl/valdi:Info.plist"],
+    minimum_os_versions = {"ios": "15.0"},
+    families_required = {"ios": ["iphone", "ipad"]},
+    ios = {"device": ["arm64"]},
+)

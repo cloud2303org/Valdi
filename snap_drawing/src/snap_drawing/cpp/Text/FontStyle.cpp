@@ -13,6 +13,7 @@
 
 namespace snap::drawing {
 
+#ifndef SNAP_DRAWING_TGFX_EXPERIMENT
 static inline FontWeight fromSkiaWeight(int weight) {
     switch (weight) {
         case SkFontStyle::kInvisible_Weight:
@@ -137,13 +138,23 @@ static inline SkFontStyle::Slant toSkiaSlant(FontSlant slant) {
     }
 }
 
+#endif
+
 FontStyle::FontStyle(FontWidth width, FontWeight weight, FontSlant slant)
     : _width(width), _weight(weight), _slant(slant) {}
 
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+FontStyle::FontStyle(NativeFontStyle nativeStyle)
+    : _width(static_cast<FontWidth>(nativeStyle.width())),
+      _weight(static_cast<FontWeight>(nativeStyle.weight())),
+      _slant(static_cast<FontSlant>(nativeStyle.slant())) {}
+#else
 FontStyle::FontStyle(SkFontStyle skFontStyle)
     : _width(fromSkiaWidth(skFontStyle.width())),
       _weight(fromSkiaWeight(skFontStyle.weight())),
       _slant(fromSkiaSlant(skFontStyle.slant())) {}
+
+#endif
 
 FontWidth FontStyle::getWidth() const {
     return _width;
@@ -268,8 +279,13 @@ bool FontStyle::operator!=(const FontStyle& other) const {
     return !(*this == other);
 }
 
-SkFontStyle FontStyle::getSkValue() const {
+NativeFontStyle FontStyle::getSkValue() const {
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+    return tgfx::FontStyle(static_cast<tgfx::FontWeight>(_weight), static_cast<tgfx::FontWidth>(_width),
+                           static_cast<tgfx::FontSlant>(_slant));
+#else
     return SkFontStyle(toSkiaWeight(_weight), toSkiaWidth(_width), toSkiaSlant(_slant));
+#endif
 }
 
 } // namespace snap::drawing

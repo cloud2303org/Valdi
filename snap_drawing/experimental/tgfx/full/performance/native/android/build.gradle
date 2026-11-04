@@ -1,0 +1,92 @@
+plugins {
+    id 'com.android.application' version '9.4.1'
+}
+
+def backend = providers.gradleProperty('nativeBackend').orElse('skia').get()
+if (!(backend in ['skia', 'tgfx'])) {
+    throw new GradleException('nativeBackend must be skia or tgfx')
+}
+layout.buildDirectory.set(layout.projectDirectory.dir(".local/build/${backend}"))
+
+def repo = file('../../../../../../..')
+def media = new File(repo, 'snap_drawing/experimental/tgfx/full/tests/media-data')
+def djinni = new File(repo, 'third-party/djinni-support-lib/src/djinni/java')
+def tgfxJava = providers.gradleProperty('tgfxAndroidJavaDir').orNull
+def generatedAssets = layout.projectDirectory.dir('.local/generated-assets')
+def localDebugSigning = providers.gradleProperty('localDebugSigning').orElse('false').get() == 'true'
+def fixtureNames = [
+    'NotoSans-Regular.ttf', 'NotoSans-LICENSE.txt', 'pattern.png',
+    'pattern.svg', 'moving-solid.json', 'manifest.json', 'PROVENANCE.md',
+]
+
+android {
+    namespace = 'io.valdiroutes.renderperformance'
+    compileSdk = 36
+    buildToolsVersion = '36.0.0'
+    defaultConfig {
+        applicationId = 'io.valdiroutes.renderperformance'
+        minSdk = 24
+        targetSdk = 36
+        versionCode = 1
+        versionName = '1.0'
+        ndk { abiFilters 'arm64-v8a' }
+        buildConfigField 'String', 'EXPECTED_BACKEND', "\"${backend == 'tgfx' ? 'full_tgfx' : 'skia'}\""
+    }
+    sourceSets {
+        main {
+            jniLibs.srcDirs = [".local/${backend}/jniLibs"]
+            assets.srcDirs = [generatedAssets.asFile]
+            java.srcDir(djinni)
+            java.exclude 'com/dropbox/djinni/**'
+            if (tgfxJava != null) { java.srcDir(file(tgfxJava)) }
+        }
+    }
+    buildFeatures { buildConfig = true }
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+    buildTypes {
+        release {
+            debuggable = false
+            minifyEnabled = false // Real Djinni/TGFX JNI looks up Java names.
+            // An explicit parent opt-in can sign this non-debuggable Release
+            // shell with the local Android debug key for device installation.
+            if (localDebugSigning) { signingConfig = signingConfigs.debug }
+        }
+    }
+}
+
+dependencies {
+    implementation 'androidx.exifinterface:exifinterface:1.3.3'
+    implementation 'javax.inject:javax.inject:1'
+}
+
+def prepareFixtures = tasks.register('prepareNativeRenderFixtures', Sync) {
+    from(media) { include fixtureNames; into 'fixtures' }
+    into generatedAssets
+    doFirst {
+        fixtureNames.each { name ->
+            if (!new File(media, name).isFile()) {
+                throw new GradleException("Missing actual benchmark fixture: ${name}")
+            }
+        }
+    }
+}
+
+tasks.named('preBuild').configure {
+    dependsOn prepareFixtures
+    doFirst {
+        ['librender_performance.so', 'libc++_shared.so'].each { name ->
+            if (!file(".local/${backend}/jniLibs/arm64-v8a/${name}").isFile()) {
+                throw new GradleException("Missing parent-built ${backend} native input: ${name}")
+            }
+        }
+        if (!new File(djinni, 'com/snapchat/djinni/NativeObjectManager.java').isFile()) {
+            throw new GradleException('Missing actual Djinni Java source closure')
+        }
+        if (tgfxJava != null && !file(tgfxJava).isDirectory()) {
+            throw new GradleException('tgfxAndroidJavaDir must be the real TGFX Java source root')
+        }
+    }
+}

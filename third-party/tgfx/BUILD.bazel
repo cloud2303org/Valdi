@@ -1,0 +1,87 @@
+package(default_visibility = ["//visibility:public"])
+
+exports_files([
+    "prepared.BUILD.bazel",
+    "pins.json",
+])
+
+# Exact profiles: particularly, never treat an iOS device archive as a
+# simulator archive just because both contain arm64 objects.
+config_setting(
+    name = "macos_arm64",
+    constraint_values = ["@platforms//os:macos", "@platforms//cpu:aarch64"],
+)
+
+config_setting(
+    name = "ios_sim_arm64",
+    constraint_values = [
+        "@platforms//os:ios",
+        "@platforms//cpu:aarch64",
+        "@build_bazel_apple_support//constraints:simulator",
+    ],
+)
+
+config_setting(
+    name = "ios_device_arm64",
+    constraint_values = [
+        "@platforms//os:ios",
+        "@platforms//cpu:aarch64",
+        "@build_bazel_apple_support//constraints:device",
+    ],
+)
+
+config_setting(
+    name = "android_arm64",
+    constraint_values = ["@platforms//os:android", "@platforms//cpu:aarch64"],
+)
+
+config_setting(
+    name = "android_x86_64",
+    constraint_values = ["@platforms//os:android", "@platforms//cpu:x86_64"],
+)
+
+cc_library(
+    name = "backend",
+    deps = [
+        ":giflib",
+        ":tgfx",
+        ":thorvg",
+        ":webp",
+        ":zlib",
+    ],
+)
+
+alias(
+    name = "tgfx",
+    actual = "@valdi_tgfx_deps//:tgfx",
+)
+
+alias(
+    name = "thorvg",
+    actual = "@valdi_tgfx_deps//:thorvg",
+)
+
+# The TGFX vendor archive already merges webp + webpdemux + sharpyuv +
+# libwebpmux. Export their matching real headers without linking a second copy.
+alias(
+    name = "webp",
+    actual = "@valdi_tgfx_deps//:webp",
+)
+
+alias(
+    name = "zlib",
+    actual = "@valdi_tgfx_deps//:zlib",
+)
+
+alias(
+    name = "giflib",
+    actual = "@valdi_tgfx_deps//:giflib",
+)
+
+# Internal headers and native preprocessor layout belong only to fixtures.
+# Production backend/Valdi targets must never acquire this dependency.
+alias(
+    name = "test_support",
+    testonly = True,
+    actual = "@valdi_tgfx_deps//:test_support",
+)

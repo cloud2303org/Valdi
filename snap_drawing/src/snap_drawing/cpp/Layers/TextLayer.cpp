@@ -9,21 +9,120 @@
 
 #include "valdi_core/cpp/Attributes/TextAttributeValue.hpp"
 #include "valdi_core/cpp/Utils/Trace.hpp"
+#include "snap_drawing/cpp/Drawing/MaskFilter.hpp"
 
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+#include "tgfx/core/Image.h"
+#include "tgfx/core/MaskFilter.h"
+#include "tgfx/core/PictureRecorder.h"
+#else
 #include "include/core/SkBlurTypes.h"
 #include "include/core/SkMaskFilter.h"
 #include "include/effects/SkGradientShader.h"
+#endif
 #include "snap_drawing/cpp/Text/FontManager.hpp"
 #include "snap_drawing/cpp/Text/TextLayoutBuilder.hpp"
 #include "snap_drawing/cpp/Touches/AttributedTextOnTapGestureRecognizer.hpp"
 #include "snap_drawing/cpp/Utils/GradientWrapper.hpp"
 #include "snap_drawing/cpp/Utils/Path.hpp"
 
+#include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace snap::drawing {
 
 constexpr double kMaxAdjustsFontSizeToFitWidthAttempt = 8;
+
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+static void drawResolvedTextShadowCoverage(NativeCanvas* canvas,
+                                           const NativeTextBlob& blob,
+                                           const Paint& paint,
+                                           const MaskFilter& blur,
+                                           Scalar sigma,
+                                           Scalar x,
+                                           Scalar y) {
+    // Resolve the actual rendered glyph alpha, including bitmap/COLR emoji.
+    // A color glyph's bounding rectangle or outline is not its coverage.
+    // This is the text equivalent of MaskFilter's geometry coverage resolver:
+    // blur in device coordinates, then color the resulting alpha mask.
+    const auto matrix = canvas->getMatrix();
+    tgfx::PictureRecorder recorder;
+    auto* coverage = recorder.beginRecording();
+    if (auto clip = canvas->getTotalClipBounds()) {
+        // Do not clip source coverage at the destination edge before blur:
+        // glyphs just outside that edge still contribute to its interior.
+        const auto halo = blur.getSkValue() ? std::ceil(3 * sigma) + 2 : 1;
+        clip->outset(halo, halo);
+        coverage->clipRect(*clip, false);
+    }
+    coverage->setMatrix(matrix);
+    tgfx::Paint coveragePaint;
+    coveragePaint.setColor(tgfx::Color::White());
+    coveragePaint.setAntiAlias(paint.getSkValue().isAntiAlias());
+    coveragePaint.setStyle(paint.getSkValue().getStyle());
+    if (auto* stroke = paint.getSkValue().getStroke()) coveragePaint.setStroke(*stroke);
+    coverage->drawTextBlob(blob, x, y, coveragePaint);
+    auto picture = recorder.finishRecordingAsPicture();
+    if (!picture) return;
+    auto bounds = picture->getBounds();
+    // Match the geometry resolver's extra halo beyond TGFX's 2-sigma outset.
+    auto padding = blur.getSkValue() ? std::ceil(sigma) + 1 : 1;
+    bounds.outset(padding, padding);
+    bounds.roundOut();
+    if (bounds.isEmpty() || !std::isfinite(bounds.left) || !std::isfinite(bounds.top) ||
+        !std::isfinite(bounds.right) || !std::isfinite(bounds.bottom) ||
+        static_cast<double>(bounds.width()) > std::numeric_limits<int>::max() ||
+        static_cast<double>(bounds.height()) > std::numeric_limits<int>::max()) return;
+    auto origin = tgfx::Matrix::MakeTrans(-bounds.left, -bounds.top);
+    auto image = tgfx::Image::MakeFrom(
+        std::move(picture), static_cast<int>(bounds.width()), static_cast<int>(bounds.height()), &origin);
+    if (!image) return;
+    tgfx::Point offset = {};
+    if (blur.getSkValue()) image = image->makeWithFilter(blur.getSkValue(), &offset);
+    if (!image) return;
+    const tgfx::SamplingOptions sampling(tgfx::FilterMode::Nearest, tgfx::MipmapMode::None);
+    auto mask = tgfx::Shader::MakeImageShader(image, tgfx::TileMode::Decal, tgfx::TileMode::Decal, sampling);
+    if (!mask) return;
+    mask = mask->makeWithMatrix(tgfx::Matrix::MakeTrans(bounds.left + offset.x, bounds.top + offset.y));
+    auto output = paint.getSkValue();
+    if (auto shader = output.getShader()) output.setShader(shader->makeWithMatrix(matrix));
+    output.setImageFilter(nullptr);
+    output.setMaskFilter(tgfx::MaskFilter::MakeShader(std::move(mask)));
+    output.setStyle(tgfx::PaintStyle::Fill);
+    output.setAntiAlias(false);
+    auto saveCount = canvas->save();
+    canvas->resetMatrix();
+    canvas->drawRect(tgfx::Rect::MakeXYWH(bounds.left + offset.x, bounds.top + offset.y,
+        static_cast<float>(image->width()), static_cast<float>(image->height())), output);
+    canvas->restoreToCount(saveCount);
+}
+
+static void drawTextShadowCoverage(NativeCanvas* canvas,
+                                   const NativeTextBlob& blob,
+                                   const Paint& paint,
+                                   const MaskFilter& blur,
+                                   Scalar sigma,
+                                   Scalar x,
+                                   Scalar y) {
+    if (!blob) return;
+    auto bounds = blob->getBounds();
+    bounds.offset(x, y);
+    if (auto* stroke = paint.getSkValue().getStroke()) {
+        const auto outset = stroke->width * std::max(1.0f, stroke->miterLimit) * 0.5f;
+        bounds.outset(outset, outset);
+    }
+    const auto halo = blur.getSkValue() ? std::ceil(3 * sigma) + 2 : 1;
+    // A cached TextLayer picture can be replayed at any scale/display scale.
+    // Retain the real blob/font/paint/filter, not a raster mask resolved using
+    // the recorder's matrix. The final target supplies its actual matrix and
+    // clip. Clip-dependent bounds preserve fixed device halos on minification.
+    canvas->drawDeferred(bounds, halo,
+        [blob, paint, blur, sigma, x, y](NativeCanvas* target) {
+            drawResolvedTextShadowCoverage(target, blob, paint, blur, sigma, x, y);
+        }, true);
+}
+#endif
 
 static Path makeTextDecorationPath(const Rect& bounds) {
     Path path;
@@ -184,8 +283,7 @@ void TextLayer::drawTextVisualEntriesShadows(DrawingContext& drawingContext,
         }
 
         auto resolvedPaint = _textPaint;
-        resolvedPaint.getSkValue().setMaskFilter(
-            SkMaskFilter::MakeBlur(SkBlurStyle::kNormal_SkBlurStyle, _textShadow.radius, false));
+        resolvedPaint.setMaskFilter(MaskFilter::makeBlur(BlurStyleNormal, _textShadow.radius, false));
 
         resolvedPaint.setColor(_textShadow.color);
         resolvedPaint.setAlpha(_textShadow.opacity);
@@ -230,7 +328,7 @@ void TextLayer::drawTextVisualEntries(DrawingContext& drawingContext,
 }
 
 void TextLayer::drawText(DrawingContext& drawingContext,
-                         const sk_sp<SkTextBlob>& textBlob,
+                         const NativeTextBlob& textBlob,
                          std::optional<Color> textColor) {
     auto resolvedPaint = _textPaint;
     if (_gradientWrapper.hasGradient()) {
@@ -257,16 +355,21 @@ bool TextLayer::hasTextShadow() const {
     return isVisible && !hiddenBehindText;
 }
 
-void TextLayer::drawTextShadows(DrawingContext& drawingContext, const sk_sp<SkTextBlob>& textBlob) {
+void TextLayer::drawTextShadows(DrawingContext& drawingContext, const NativeTextBlob& textBlob) {
     auto resolvedPaint = _textPaint;
 
-    resolvedPaint.getSkValue().setMaskFilter(
-        SkMaskFilter::MakeBlur(SkBlurStyle::kNormal_SkBlurStyle, _textShadow.radius, false));
+    auto blur = MaskFilter::makeBlur(BlurStyleNormal, _textShadow.radius, false);
+    resolvedPaint.setMaskFilter(blur);
     resolvedPaint.setColor(_textShadow.color);
     resolvedPaint.setAlpha(_textShadow.opacity);
 
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+    drawTextShadowCoverage(drawingContext.canvas(), textBlob, resolvedPaint, blur, _textShadow.radius,
+                           _textShadow.offsetX, _textShadow.offsetY);
+#else
     drawingContext.canvas()->drawTextBlob(
         textBlob.get(), _textShadow.offsetX, _textShadow.offsetY, resolvedPaint.getSkValue());
+#endif
 }
 
 void TextLayer::setText(const Valdi::StringBox& text) {

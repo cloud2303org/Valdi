@@ -16,6 +16,7 @@
 #include "valdi_core/cpp/Utils/SmallVector.hpp"
 #include "valdi_core/cpp/Utils/Trace.hpp"
 
+#include <algorithm>
 #include <iostream>
 
 namespace snap::drawing {
@@ -1388,7 +1389,14 @@ Ref<TextLayout> TextLayoutBuilder::build() {
         layoutEntry.bounds = Rect::makeEmpty();
         layoutEntry.color = _colors[colorIndex];
 
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+        tgfx::TextBlobBuilder textBlobBuilder;
+#if defined(__APPLE__)
+        std::vector<Ref<Font>> textBlobFonts;
+#endif
+#else
         SkTextBlobBuilder textBlobBuilder;
+#endif
 
         for (const auto& segment : _segments) {
             if (segment.colorIndex != colorIndex) {
@@ -1424,7 +1432,7 @@ Ref<TextLayout> TextLayoutBuilder::build() {
                 outputSegmentToEntry(layoutEntry, glyphsIt, glyphsEnd, resolvedBounds, segment.font);
             }
 
-            if (_includeTextBlob && !segment.isReplacement) {
+            if (_includeTextBlob && !segment.isReplacement && segment.glyphsCount != 0) {
                 ptrdiff_t itIncrement;
 
                 if (segment.isRightToLeft) {
@@ -1436,10 +1444,19 @@ Ref<TextLayout> TextLayoutBuilder::build() {
                     itIncrement = 1;
                 }
 
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+#if defined(__APPLE__)
+                if (std::find(textBlobFonts.begin(), textBlobFonts.end(), segment.font) == textBlobFonts.end()) {
+                    textBlobFonts.push_back(segment.font);
+                }
+#endif
+                const auto& run = textBlobBuilder.allocRunPos(segment.font->getSkValue(), segment.glyphsCount);
+                auto* outPositions = run.positions;
+#else
                 const auto& run = textBlobBuilder.allocRunPos(
                     segment.font->getSkValue(), static_cast<int>(segment.glyphsCount), &resolvedBounds.getSkValue());
-
                 auto* outPoints = run.points();
+#endif
                 auto* outGlyphs = run.glyphs;
 
                 Scalar drawX = resolvedSegmentX;
@@ -1451,13 +1468,20 @@ Ref<TextLayout> TextLayoutBuilder::build() {
                 while (glyphsIt != glyphsEnd) {
                     *outGlyphs = glyphsIt->glyphID;
 
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+                    *outPositions++ = drawX + glyphsIt->offsetX;
+                    *outPositions++ = drawY + glyphsIt->offsetY;
+#else
                     outPoints->fX = drawX + glyphsIt->offsetX;
                     outPoints->fY = drawY + glyphsIt->offsetY;
+#endif
 
                     drawX += glyphsIt->advanceX;
 
                     glyphsIt += itIncrement;
+#ifndef SNAP_DRAWING_TGFX_EXPERIMENT
                     outPoints++;
+#endif
                     outGlyphs++;
                 }
             }
@@ -1466,7 +1490,33 @@ Ref<TextLayout> TextLayoutBuilder::build() {
         entryBounds.bottom = std::max(entryBounds.bottom, _position.y + _currentLineMetrics.height());
 
         if (_includeTextBlob) {
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+            // Let TGFX compute ink bounds; line/selection bounds above intentionally
+            // include whitespace and are not conservative bounds for glyph overhang.
+            layoutEntry.textBlob = textBlobBuilder.build();
+#if defined(__APPLE__)
+            if (layoutEntry.textBlob != nullptr) {
+                // TGFX Font copies retain a scaler's rendering CTTypeface, not
+                // SnapDrawing's separate original custom-data owner. Keep the
+                // actual run Fonts with the blob so a recorded picture remains
+                // drawable after its layout/builder/source Fonts are released.
+                // Typeface aliasing alone is insufficient: CGTypeface creates
+                // scalers from its own weakThis, losing that alias's owners.
+                struct FontOwners {
+                    std::vector<Ref<Font>> fonts;
+                    NativeTextBlob blob;
+                };
+                auto owners = std::make_shared<FontOwners>();
+                owners->fonts = std::move(textBlobFonts);
+                owners->blob = std::move(layoutEntry.textBlob);
+                // Still points to the real TGFX TextBlob. Destroy the blob
+                // before the backing Font owners (reverse member order).
+                layoutEntry.textBlob = NativeTextBlob(owners, owners->blob.get());
+            }
+#endif
+#else
             layoutEntry.textBlob = textBlobBuilder.make();
+#endif
         }
         layoutEntry.bounds = entryBounds;
     }

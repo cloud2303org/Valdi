@@ -1,5 +1,6 @@
 #include "snap_drawing/cpp/Text/SkFontMgrSingleton.hpp"
 
+#if !defined(SNAP_DRAWING_TGFX_EXPERIMENT)
 #if defined(SK_FONTMGR_CORETEXT_AVAILABLE)
 
 #pragma clang diagnostic push
@@ -17,11 +18,17 @@
 #include "include/ports/SkFontMgr_empty.h"
 #endif
 
+#endif
+
 namespace snap::snap_drawing {
 
-static sk_sp<SkFontMgr> makeSkFontMgr() {
+using snap::drawing::NativeFontManagerHandle;
+
+static NativeFontManagerHandle makeSkFontMgr() {
     // If necessary, clients should use a font manager that would load fonts from the system.
-#if defined(SK_FONTMGR_CORETEXT_AVAILABLE)
+#if defined(SNAP_DRAWING_TGFX_EXPERIMENT)
+    return std::make_shared<snap::drawing::TgfxFontManager>();
+#elif defined(SK_FONTMGR_CORETEXT_AVAILABLE)
     return SkFontMgr_New_CoreText(nullptr);
 #elif defined(SK_FONTMGR_ANDROID_AVAILABLE)
     return SkFontMgr_New_Android(nullptr, SkFontScanner_Make_FreeType());
@@ -32,7 +39,7 @@ static sk_sp<SkFontMgr> makeSkFontMgr() {
 #endif
 }
 
-sk_sp<SkFontMgr> getSkFontMgrSingleton() {
+NativeFontManagerHandle getSkFontMgrSingleton() {
     static auto kFontMgr = makeSkFontMgr();
     return kFontMgr;
 }

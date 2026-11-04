@@ -1,0 +1,15 @@
+{
+  "source_only": true,
+  "tgfx_vendor_changed": false,
+  "thorvg_vendor_changed": false,
+  "native_archive_rebuild_required": false,
+  "consumer_rebuild_required": true,
+  "files": {
+    "snap_drawing/src/snap_drawing/cpp/Utils/SVGUtils.cpp": "e09619cf38c53b421a3d0bf0dbde1f9cfa868a1bf06ba832412242a94de67283",
+    "snap_drawing/src/snap_drawing/cpp/Utils/TgfxMedia.cpp": "d78482633f3bc6f962d837f668b60f8ae97da5088c2825f3dace487a57bd6da6",
+    "snap_drawing/src/snap_drawing/cpp/Utils/TgfxMedia.hpp": "053be2d69cd159a5dfb18d0c3bde8ba272ca49c5e52d1293c37dc1a31155f2ea",
+    "snap_drawing/src/snap_drawing/cpp/Utils/Image.cpp": "fac4873cde8f7ea68951760a88d787e346aa437c0462bc86afc5f992627aac9e",
+    "snap_drawing/src/snap_drawing/cpp/Utils/Image.hpp": "fe05b805e8411dd33ce73ea9c554b13efc43e11c3b01b53254ed9ab441109c7f",
+    "snap_drawing/src/snap_drawing/cpp/Utils/ThorvgMedia.cpp": "3b1ae8ff34fd90fd191ca53406a64b574be30a30e570e61a0729a7dc6233f172"
+  }
+}

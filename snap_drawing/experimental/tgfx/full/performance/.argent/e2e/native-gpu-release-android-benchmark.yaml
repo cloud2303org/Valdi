@@ -1,0 +1,19 @@
+steps:
+  - launch: io.valdiroutes.renderperformance
+  - tool: await-ui-element
+    args:
+      condition: visible
+      selector:
+        identifier: render_performance_status
+      timeoutMs: 5000
+  - echo: Keep 30 seconds quiet to exclude UI polling from all native GPU timings,
+      then verify exactly PASS and retrieve the freshly written report.
+  - tool: await-ui-element
+    args:
+      condition: text
+      selector:
+        identifier: render_performance_status
+      expectedText: PASS
+      textMatch: equals
+      timeoutMs: 2000
+    delayMs: 30000

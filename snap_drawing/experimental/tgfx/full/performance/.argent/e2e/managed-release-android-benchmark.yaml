@@ -1,0 +1,19 @@
+steps:
+  - echo: Restart the installed signed Release benchmark host; verify its identity
+      before the eight-second settle finishes.
+  - launch: io.valdiroutes.renderbenchmark
+  - await:
+      visible: { id: render_benchmark_status }
+      timeout: 5000
+  - await: { idle: true }
+  - echo: Allow 30 seconds without accessibility or screenshot polling, then require
+      a newly completed PASS report. This quiet interval is measurement
+      isolation, not a performance sample.
+  - tool: await-ui-element
+    args:
+      condition: text
+      selector:
+        identifier: render_benchmark_status
+      expectedText: PASS
+      timeoutMs: 2000
+    delayMs: 30000

@@ -7,7 +7,7 @@
 
 #pragma once
 
-#include "include/core/SkData.h"
+#include "snap_drawing/cpp/Utils/DrawingBackend.hpp"
 #include "valdi_core/cpp/Utils/Bytes.hpp"
 
 #include <string>
@@ -21,8 +21,8 @@ enum DataConversionMode {
     DataConversionModeNeverCopy,
 };
 
-Valdi::BytesView bytesFromSkData(const sk_sp<SkData>& data);
-sk_sp<SkData> skDataFromBytes(const Valdi::BytesView& bytes, DataConversionMode conversionMode);
+Valdi::BytesView bytesFromSkData(const NativeData& data);
+NativeData skDataFromBytes(const Valdi::BytesView& bytes, DataConversionMode conversionMode);
 
 /// Formats a payload's length and leading bytes as `bytes=<n> magic=<hex>`.
 ///

@@ -10,8 +10,8 @@
 #include "snap_drawing/cpp/Utils/BorderRadius.hpp"
 #include "snap_drawing/cpp/Utils/Matrix.hpp"
 #include "snap_drawing/cpp/Utils/Scalar.hpp"
+#include "snap_drawing/cpp/Utils/DrawingBackend.hpp"
 
-class SkPicture;
 
 namespace snap::drawing {
 
@@ -40,7 +40,11 @@ struct PopContext : public Operation {
 struct DrawPicture : public Operation {
     constexpr static size_t kId = 3;
 
-    SkPicture* picture;
+    NativePictureObject* picture;
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+    NativePicture* owner;
+    Rect bounds;
+#endif
     Scalar opacity;
 };
 

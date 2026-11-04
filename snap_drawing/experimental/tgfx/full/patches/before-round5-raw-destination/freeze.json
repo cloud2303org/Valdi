@@ -1,0 +1,13 @@
+{
+  "registered_cases": 96,
+  "fixture_manifest_entries": 52,
+  "files": {
+    "snap_drawing/src/snap_drawing/cpp/Utils/Image.cpp": "fac4873cde8f7ea68951760a88d787e346aa437c0462bc86afc5f992627aac9e",
+    "snap_drawing/experimental/tgfx/full/tests/media_checks.cpp": "e2e2393e40f60f478e821e97dff34eb1734f4fc20e676b44644d22ae4513d5db",
+    "snap_drawing/experimental/tgfx/full/tests/media-data/manifest.json": "83312a8fd70d753d4aeea26de32f077f80cca1479f4cedcf1e3e014577a9e2f6",
+    "snap_drawing/experimental/tgfx/full/tests/media-data/PROVENANCE.md": "6cdd5b43f229ea471da996e2172f0b22d2364a9856e1d2bb90f5c827ca2c256d",
+    "snap_drawing/experimental/tgfx/README.md": "78baed55b7e3c633df254339548efc60a57ef228ff1e59a3f03169871c4ef8e1",
+    "snap_drawing/experimental/tgfx/full/patches/media-font-corpus-freeze.json": "bf3b9b80829a3181025c136e0243b23a5f2c67b23ae27927eb5ad2cc2b844aec",
+    "snap_drawing/experimental/tgfx/full/patches/media-round4-production-freeze.json": "405274b4c57518aea8f6b7d322ba906cda0ad2463d5b67663722930795a185aa"
+  }
+}

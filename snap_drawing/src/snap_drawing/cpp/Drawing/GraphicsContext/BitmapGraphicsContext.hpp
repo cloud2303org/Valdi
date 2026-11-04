@@ -12,11 +12,24 @@
 
 #include "valdi_core/cpp/Interfaces/IBitmap.hpp"
 
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+#include <mutex>
+#include <optional>
+#endif
+
 namespace snap::drawing {
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+class GrGraphicsContext;
+#endif
 
 class BitmapGraphicsContext : public GraphicsContext {
 public:
     BitmapGraphicsContext();
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+    ~BitmapGraphicsContext() override;
+    // Optional injection lets raster/composition reuse its already-owned GPU device.
+    explicit BitmapGraphicsContext(const Ref<GrGraphicsContext>& context);
+#endif
 
     void setResourceCacheLimit(size_t resourceCacheLimitBytes) override;
 
@@ -44,6 +57,13 @@ public:
     static Valdi::Result<Valdi::BytesView> bitmapToPNG(const Valdi::Ref<Valdi::IBitmap>& bitmap);
 
 private:
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+    std::mutex _mutex;
+    Ref<GrGraphicsContext> _context;
+    std::optional<size_t> _cacheLimit;
+    Ref<GrGraphicsContext> getGPUContext();
+    void applyCacheLimit(const Ref<GrGraphicsContext>& context);
+#endif
 };
 
 } // namespace snap::drawing

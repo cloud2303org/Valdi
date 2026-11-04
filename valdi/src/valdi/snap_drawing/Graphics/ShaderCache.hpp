@@ -10,6 +10,7 @@
 #include "valdi_core/cpp/Interfaces/ILogger.hpp"
 
 #include "snap_drawing/cpp/Drawing/GraphicsContext/IShaderCache.hpp"
+#include "snap_drawing/cpp/Utils/DrawingBackend.hpp"
 #include "valdi/runtime/Interfaces/IDiskCache.hpp"
 #include "valdi_core/cpp/Threading/DispatchQueue.hpp"
 #include "valdi_core/cpp/Utils/ByteBuffer.hpp"
@@ -26,8 +27,8 @@ public:
                 Valdi::ILogger& logger);
     ~ShaderCache() override = default;
 
-    sk_sp<SkData> load(const SkData& key) override;
-    void store(const SkData& key, const SkData& data) override;
+    NativeData load(const NativeDataObject& key) override;
+    void store(const NativeDataObject& key, const NativeDataObject& data) override;
 
 private:
     Valdi::Result<Valdi::BytesView> loadShaderFromDisk(const Valdi::BytesView& keyData) const;

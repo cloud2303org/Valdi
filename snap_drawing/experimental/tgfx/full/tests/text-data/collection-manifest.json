@@ -1,0 +1,46 @@
+{
+  "format": "TrueType Collection version 1, two complete non-deduplicated faces",
+  "sources": [
+    {
+      "file": "RobotoFlex.ttf",
+      "bytes": 1775480,
+      "sha256": "94a7ea95ccee28c54885a507e3cc0a534ce41ec61d413935df0e07261a7ffe63",
+      "glyphs": {
+        "U+0048": 43,
+        "U+0067": 74,
+        "U+0051": 52,
+        "U+0061": 68,
+        "U+005A": 61,
+        "U+0030": 19,
+        "U+0100": 191,
+        "U+03A9": 659
+      }
+    },
+    {
+      "file": "NotoSans-Regular.ttf",
+      "bytes": 569208,
+      "sha256": "b85c38ecea8a7cfb39c24e395a4007474fa5a4fc864f6ee33309eb4948d232d5",
+      "glyphs": {
+        "U+0048": 43,
+        "U+0067": 74,
+        "U+0051": 52,
+        "U+0061": 68,
+        "U+005A": 61,
+        "U+0030": 19,
+        "U+0100": 194,
+        "U+03A9": 373
+      }
+    }
+  ],
+  "collection": {
+    "file": "selected-face.ttc",
+    "bytes": 2344708,
+    "sha256": "30af1141f412f2490e3f724856223b5a6e0040ca9e6d28f8f667dc216e51c725",
+    "faceOffsets": [
+      20,
+      336
+    ]
+  },
+  "selectedFace": 1,
+  "packing": "Preserve all source tables; relocate directory offsets and zero head.checkSumAdjustment per TTC convention"
+}

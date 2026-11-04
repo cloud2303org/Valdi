@@ -6,7 +6,8 @@
 #include "snap_drawing/cpp/Drawing/DisplayList/DisplayList.hpp"
 #include "snap_drawing/cpp/Drawing/DrawingContext.hpp"
 #include "snap_drawing/cpp/Drawing/Surface/ExternalSurface.hpp"
-#include "src/base/SkFloatBits.h"
+#include <bit>
+#include <cstdint>
 #include "valdi_core/cpp/Utils/ConsoleLogger.hpp"
 #include "valdi_core/cpp/Utils/Function.hpp"
 
@@ -188,15 +189,15 @@ TEST(Compositor, resolvesComplexClipOfExternalSurface) {
     ASSERT_TRUE(plane.getExternalSurface() != nullptr);
 
     Path expectedClip;
-    expectedClip.moveTo(SkBits2Float(0x42ba9a40), 75); // 93.3013f, 75
+    expectedClip.moveTo(std::bit_cast<float>(uint32_t{0x42ba9a40}), 75); // 93.3013f, 75
     expectedClip.lineTo(50, 75);
     expectedClip.lineTo(50, 50);
     expectedClip.lineTo(100, 50);
     expectedClip.conicTo(100,
-                         SkBits2Float(0x427d9700),
-                         SkBits2Float(0x42ba9a40),
+                         std::bit_cast<float>(uint32_t{0x427d9700}),
+                         std::bit_cast<float>(uint32_t{0x42ba9a40}),
                          75,
-                         SkBits2Float(0x3f7746ea)); // 100, 63.3975f, 93.3013f, 75, 0.965926f
+                         std::bit_cast<float>(uint32_t{0x3f7746ea})); // 100, 63.3975f, 93.3013f, 75, 0.965926f
     expectedClip.close();
 
     ASSERT_EQ(expectedClip, plane.getExternalSurfacePresenterState()->clipPath);

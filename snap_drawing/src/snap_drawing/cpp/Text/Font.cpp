@@ -8,7 +8,7 @@
 #include "snap_drawing/cpp/Text/Font.hpp"
 #include "snap_drawing/cpp/Text/Typeface.hpp"
 
-#include "include/core/SkFontMetrics.h"
+#include <cstring>
 #include <fmt/format.h>
 
 namespace snap::drawing {
@@ -21,7 +21,9 @@ Font::Font(
       _size(size),
       _scale(scale),
       _respectDynamicType(respectDynamicType) {
+#ifndef SNAP_DRAWING_TGFX_EXPERIMENT
     _font.setEdging(SkFont::Edging::kAntiAlias);
+#endif
 }
 
 Font::~Font() = default;
@@ -29,13 +31,15 @@ Font::~Font() = default;
 FontId Font::getFontId() const {
     auto size = _font.getSize();
 
-    auto sizeId = *reinterpret_cast<uint32_t*>(&size);
+    uint32_t sizeId;
+    static_assert(sizeof(sizeId) == sizeof(size));
+    std::memcpy(&sizeId, &size, sizeof(sizeId));
     auto typefaceId = _typeface->getId();
 
     return (static_cast<FontId>(sizeId) << 32) | static_cast<FontId>(typefaceId);
 }
 
-const SkFont& Font::getSkValue() const {
+const NativeFont& Font::getSkValue() const {
     return _font;
 }
 

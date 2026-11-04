@@ -1,0 +1,33 @@
+{
+  "source_only": true,
+  "registered_cases": 96,
+  "prior_case_bodies_preserved": 92,
+  "new_cases": 4,
+  "fixture_manifest_entries": 52,
+  "previous_fixture_entries": 51,
+  "prior_fixture_entries_unchanged": 50,
+  "changed_previous_fixtures": [
+    "svg-embedded-font.svg"
+  ],
+  "new_fixture": "capacity-static-source.png",
+  "parent_preceding_run": "backend-checks-run5.log: media 81/92; no new runtime results",
+  "unresolved_runtime_findings": [
+    "two provider-font glyph coverage; counts added without threshold changes",
+    "final-matrix density/empty-clip integration owned by GPU agent"
+  ],
+  "files": {
+    "snap_drawing/src/snap_drawing/cpp/Utils/SVGUtils.cpp": "e09619cf38c53b421a3d0bf0dbde1f9cfa868a1bf06ba832412242a94de67283",
+    "snap_drawing/src/snap_drawing/cpp/Utils/TgfxMedia.cpp": "d78482633f3bc6f962d837f668b60f8ae97da5088c2825f3dace487a57bd6da6",
+    "snap_drawing/src/snap_drawing/cpp/Utils/TgfxMedia.hpp": "053be2d69cd159a5dfb18d0c3bde8ba272ca49c5e52d1293c37dc1a31155f2ea",
+    "snap_drawing/src/snap_drawing/cpp/Utils/Image.cpp": "fac4873cde8f7ea68951760a88d787e346aa437c0462bc86afc5f992627aac9e",
+    "snap_drawing/src/snap_drawing/cpp/Utils/Image.hpp": "fe05b805e8411dd33ce73ea9c554b13efc43e11c3b01b53254ed9ab441109c7f",
+    "snap_drawing/src/snap_drawing/cpp/Utils/ThorvgMedia.cpp": "3b1ae8ff34fd90fd191ca53406a64b574be30a30e570e61a0729a7dc6233f172",
+    "snap_drawing/experimental/tgfx/full/tests/media_checks.cpp": "89d07659a753590e073eabd81e89c74c199e0d90c20050407c03815fa1daf10a",
+    "snap_drawing/experimental/tgfx/full/tests/media-data/generate_fixtures.py": "3f3411b69d21d6622e42bacdb349221e7452cf78ae27d603688b3600ce0addf8",
+    "snap_drawing/experimental/tgfx/full/tests/media-data/PROVENANCE.md": "e4ba986aa03fbe00ef416310a924dd3215848fe425e1790d85847ab2fe9e8523",
+    "snap_drawing/experimental/tgfx/full/tests/media-data/manifest.json": "88bb8e405c063ce6adc846af184a7d27dd924286daadad27e831dec1e9427f40",
+    "snap_drawing/experimental/tgfx/full/tests/media-data/svg-embedded-font.svg": "f722de1c59f0f75aa3206fdc8322b981090dc743dc492f6ac2dd454368360c3e",
+    "snap_drawing/experimental/tgfx/full/tests/media-data/capacity-static-source.png": "7e2c384242e0b8c608f5615669dbec368f9737035a057e4313db9de09196d8a3",
+    "snap_drawing/experimental/tgfx/README.md": "01bf101b8599a9530bd81ea72214d79f78e848a4dc3222d368a19270ba9ef0d6"
+  }
+}

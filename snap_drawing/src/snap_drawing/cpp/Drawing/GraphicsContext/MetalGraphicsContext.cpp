@@ -1,3 +1,6 @@
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+#include "snap_drawing/cpp/Drawing/GraphicsContext/TGFXMetalGraphicsContextImpl.hpp"
+#else
 //
 //  MetalGraphicsContext.cpp
 //  snap_drawing
@@ -121,3 +124,5 @@ CFTypeRef MetalGraphicsContext::getMTLCommandQueue() const {
 } // namespace snap::drawing
 
 #endif
+
+#endif // SNAP_DRAWING_TGFX_EXPERIMENT

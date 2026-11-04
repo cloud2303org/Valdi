@@ -24,7 +24,7 @@ public:
     void clipRect(Scalar width, Scalar height);
     void clipRound(const BorderRadius& borderRadius, Scalar width, Scalar height);
 
-    SkScalar getAbsoluteOpacity() const;
+    Scalar getAbsoluteOpacity() const;
     const Matrix& getAbsoluteMatrix() const;
     const Path& getAbsoluteClipPath() const;
 

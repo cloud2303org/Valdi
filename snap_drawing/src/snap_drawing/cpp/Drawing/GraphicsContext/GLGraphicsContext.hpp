@@ -1,3 +1,8 @@
+#pragma once
+
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+#include "snap_drawing/cpp/Drawing/GraphicsContext/TGFXGLGraphicsContext.hpp"
+#else
 //
 //  GLGraphicsContext.hpp
 //  snap_drawing
@@ -69,3 +74,5 @@ public:
 };
 
 } // namespace snap::drawing
+
+#endif // SNAP_DRAWING_TGFX_EXPERIMENT

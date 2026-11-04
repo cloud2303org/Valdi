@@ -11,9 +11,13 @@
 #include "snap_drawing/cpp/Utils/Aliases.hpp"
 #include "snap_drawing/cpp/Utils/Color.hpp"
 #include "snap_drawing/cpp/Utils/Matrix.hpp"
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+#include "snap_drawing/cpp/Utils/TgfxBridge.hpp"
+#include "tgfx/core/Shader.h"
+#else
 #include "snap_drawing/cpp/Utils/SkiaBridge.hpp"
-
 #include "include/core/SkShader.h"
+#endif
 
 namespace snap::drawing {
 
@@ -26,7 +30,11 @@ enum FilterQuality {
     FilterQualityHigh,   //!< slowest but highest quality, typically bicubic or better
 };
 
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+class Shader : public WrappedTgfxValue<std::shared_ptr<tgfx::Shader>> {
+#else
 class Shader : public WrappedSkValue<sk_sp<SkShader>> {
+#endif
 public:
     Shader();
     ~Shader();
@@ -39,7 +47,15 @@ public:
     static Shader makeImage(const Ref<Image>& image, const Matrix* localMatrix, FilterQuality filterQuality);
 
 private:
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+    explicit Shader(std::shared_ptr<tgfx::Shader> shader, bool empty = false);
+    bool _empty = false;
+    friend class Paint;
+#else
     explicit Shader(sk_sp<SkShader> skValue);
+#endif
+    friend class LinearGradient;
+    friend class RadialGradient;
 };
 
 } // namespace snap::drawing

@@ -7,12 +7,22 @@
 
 #pragma once
 
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+#include "tgfx/core/FontStyle.h"
+#else
 #include "include/core/SkFontStyle.h"
+#endif
 #include "valdi_core/cpp/Utils/Result.hpp"
 #include "valdi_core/cpp/Utils/StringBox.hpp"
 #include <functional>
 
 namespace snap::drawing {
+
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+using NativeFontStyle = tgfx::FontStyle;
+#else
+using NativeFontStyle = SkFontStyle;
+#endif
 
 enum FontWidth : uint8_t {
     FontWidthUltraCondensed,
@@ -49,7 +59,7 @@ enum FontSlant : uint8_t {
 class FontStyle {
 public:
     FontStyle(FontWidth width, FontWeight weight, FontSlant slant);
-    explicit FontStyle(SkFontStyle skFontStyle);
+    explicit FontStyle(NativeFontStyle nativeStyle);
 
     FontWidth getWidth() const;
     void setWidth(FontWidth width);
@@ -65,7 +75,7 @@ public:
     FontSlant getSlant() const;
     void setSlant(FontSlant slant);
 
-    SkFontStyle getSkValue() const;
+    NativeFontStyle getSkValue() const;
 
     size_t hash() const;
 

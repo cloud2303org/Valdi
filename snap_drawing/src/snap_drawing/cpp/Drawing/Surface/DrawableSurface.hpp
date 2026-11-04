@@ -22,6 +22,15 @@ public:
 
     virtual Valdi::Result<DrawableSurfaceCanvas> prepareCanvas() = 0;
     virtual void flush() = 0;
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+    // Internal completion channel for production draw/raster callers. Real TGFX
+    // drawables reject native/deferred errors before caller pixel publication or
+    // presenter success, release frame locks, and retain failure until prepareCanvas.
+    virtual Valdi::Result<Valdi::Void> flushWithResult() {
+        flush();
+        return Valdi::Void();
+    }
+#endif
 };
 
 } // namespace snap::drawing

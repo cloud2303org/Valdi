@@ -1,0 +1,22 @@
+steps:
+  - tool: restart-app
+    args:
+      bundleId: io.valdiroutes.tgfxapp
+      activity: io.valdiroutes.tgfxapp.SnapDrawingAcceptanceActivity
+  - tool: await-ui-element
+    args:
+      condition: visible
+      selector:
+        identifier: tgfx_app_status
+      timeoutMs: 15000
+  - tool: await-ui-element
+    args:
+      condition: text
+      selector:
+        identifier: tgfx_app_status
+      expectedText: tgfx-app-status PASS 9/9 root=snapdrawing
+      textMatch: equals
+      timeoutMs: 30000
+executionPrerequisite: The reviewed ARM64 TGFX Valdi acceptance APK is installed
+  on the selected Android emulator; this test restarts its explicit SnapDrawing
+  Activity.

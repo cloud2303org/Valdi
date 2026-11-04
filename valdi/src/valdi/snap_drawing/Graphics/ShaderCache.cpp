@@ -19,7 +19,11 @@
 // TODO(rjaber): The cached shaders are only ever valid if SnapDrawing and Skia don't change. The moment there's any
 //               change, we need to invalidate the cache. There isn't a suitable mechanism for this; this value is
 //               currently used as a stand-in until we have a more reliable mechanism.
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+static constexpr auto kShaderCacheVersion = "tgfx-4cf8991d-metal-gles-v1";
+#else
 static const int kShaderCacheVersion = 1;
+#endif
 
 using namespace Valdi;
 
@@ -34,8 +38,8 @@ static Result<Valdi::Path> keyToFileName(const BytesView& key) {
     return Valdi::Path(strHash);
 }
 
-static Result<Valdi::BytesView> skDataToByteView(const SkData& data) {
-    if (data.data() == nullptr || data.isEmpty()) {
+static Result<Valdi::BytesView> skDataToByteView(const NativeDataObject& data) {
+    if (data.data() == nullptr || data.size() == 0) {
         return Error("Provided shader data is empty");
     }
 
@@ -100,7 +104,7 @@ ShaderCache::ShaderCache(const Ref<IDiskCache>& diskCache, const Ref<DispatchQue
     });
 }
 
-void ShaderCache::store(const SkData& key, const SkData& data) {
+void ShaderCache::store(const NativeDataObject& key, const NativeDataObject& data) {
     auto dataResult = skDataToByteView(data);
     auto ownedKeyResult = skDataToByteView(key);
 
@@ -120,7 +124,7 @@ void ShaderCache::store(const SkData& key, const SkData& data) {
     });
 }
 
-sk_sp<SkData> ShaderCache::load(const SkData& key) {
+NativeData ShaderCache::load(const NativeDataObject& key) {
     auto keyByteViewUnowned = Valdi::BytesView(nullptr, static_cast<const Byte*>(key.data()), key.size());
     auto loadResult = loadShaderFromDisk(keyByteViewUnowned);
     if (loadResult.failure()) {

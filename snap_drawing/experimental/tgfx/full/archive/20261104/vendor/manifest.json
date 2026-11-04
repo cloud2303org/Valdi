@@ -1,0 +1,98 @@
+{
+  "schema": 1,
+  "date": "2026-11-04",
+  "branch": "experiment/tgfx-prototype-20261104",
+  "dependencies": {
+    "tgfx": {
+      "pin": "4cf8991d5a3a010c9314538dd2fea937593b206b",
+      "patchFile": "tgfx-current.patch",
+      "patchSha256": "7c83628e88ef61216a4daa74400cf07e6ef9cebc9fc71a1f1deca564ff517f7b",
+      "files": {
+        "CMakeLists.txt": "11773246c13af17cce566bbca8993281f26fbfe839184485547cc5559ffbcd1c",
+        "include/tgfx/core/Canvas.h": "9dcb8655a8329c514fd39d91b251ccb6c7cf21a3b30558c14479b5f2cab59917",
+        "include/tgfx/core/Picture.h": "33b03e898413aa5bdb3bc24a4542aa659604591ee0b82a7661139ef137c640ff",
+        "include/tgfx/core/Shader.h": "fe363a6104b87b6ec5118e3f317af1e3ee507ece30c7f410a39947315c26733e",
+        "include/tgfx/core/Task.h": "e2f95d34ebe5776fc437cad42d15e56b34a6489a212faaaa30b9fc8246603e50",
+        "include/tgfx/core/Typeface.h": "864efabe5d0cff50fc3f5e4fccaca777b5b6e2d8abea75fcb1d2726a58e224c3",
+        "include/tgfx/gpu/Context.h": "a4d8ce353f6123e67e85d17f4585dd9df5967017398eec6bde3bc66e3d14db50",
+        "include/tgfx/gpu/Recording.h": "93961c52f1ab1892eb58c38521a297209986cbdac89373b8af56ee255b21b6a6",
+        "src/core/Canvas.cpp": "41bc83fbc59ebfd6b33281b26df83c25b878be7a72c44686266497ff8b30dfab",
+        "src/core/CanvasState.cpp": "59a4c2563941897cb40461898716c980e0056b0bddcb7aee8877a3d15ee50fcc",
+        "src/core/CanvasState.h": "cbeca814197042d5e4cf873a552e9c7280625445be8f9b14c5f69c066766d31d",
+        "src/core/DrawContext.h": "1a073ee7074004fac77ed3a7e7346aa0cbe8289373f48cdc9aa32dcfc4c6753d",
+        "src/core/LayerUnrollContext.cpp": "b146f7a7a371175b9c7ca4699f535a2cfe1c60418504c4b6d1420be48a6a8146",
+        "src/core/LayerUnrollContext.h": "c718bde524276bae700b715d3e77d5b23faed98c40949ba484334cb30535a6bd",
+        "src/core/MeasureContext.cpp": "7d423752726d3866f06c0de9e42a12b059766d59c08f70f904f1def9355b8a91",
+        "src/core/MeasureContext.h": "982175569ac7eb6cb870e9e3cbba8098b21aaa4cfac4c145aaf0db1e25383821",
+        "src/core/Picture.cpp": "f985ed240cbce22b52362f7a3e66dead9f88f7ec660a2e3f11c3aa267efa8213",
+        "src/core/PictureContext.cpp": "b949cbe0b805ee6e6d4f67ff1069d2f75f62ce5c328a16a5ea5aa89372915b37",
+        "src/core/PictureContext.h": "c312153f9145e0b7433898577a55d43e8cad2ce79bf69b5fda9b3bd6c0752c5b",
+        "src/core/PictureRecorder.cpp": "a57466f761e36a88fd2437d5e37e08f4a7aaacc98588b2142b011286882001f5",
+        "src/core/PictureRecords.h": "1d205d8e026ffa7e48a780ab687cfef38ced97ec2b7a72ba719a9bfac324f517",
+        "src/core/RenderErrorState.h": "dd9f1502aadda20cb62e4578090a09ae7a096b617c2aa8b4c97c2e54329b61b0",
+        "src/core/Typeface.cpp": "41c452b22d932aef05c3cbda9a9fb08162df8b68ead76bc7fe1b27f0d1537d7a",
+        "src/core/codecs/jpeg/JpegCodec.cpp": "c54de2ab83015f3616d276f60fef098c8e906d7b1cd0f176797f8c7cdc999650",
+        "src/core/images/PictureImage.cpp": "02d71fdfced28d22accba25afdea352aa4465e05e499775c7dcd24509c5787af",
+        "src/core/shaders/ImageShader.cpp": "2e2c107d1e3c1903b6149170dec07ac149c39a47269432036a99a3dec03d0b4c",
+        "src/core/shaders/ImageShader.h": "00adcd84ba88a787ea693285fcafa7522b6830b3be0c646889ca605f1eb13265",
+        "src/core/utils/Task.cpp": "01aeb3e946118f149d3e9b23a88b156cd508acf735d3c54a738ee13799c61028",
+        "src/core/vectors/freetype/FTTypeface.cpp": "aaef038343b8b7b6a1a1a382769c3b9c5f5833ac7acab2a943774ebeeedace00",
+        "src/core/vectors/freetype/FTTypeface.h": "a6924a8513186533854feeac1f6577cbf3287dea8c1b2c980648503adf35fb0a",
+        "src/gpu/Context.cpp": "3f8473e9a89063e806bbf0824aee9482d9fd0a7af8eb97428db60f9c6b7138f5",
+        "src/gpu/DrawingBuffer.cpp": "51d94eafd721f027335537295cdc5af888a17efb82d5743b4e84bed021999c6a",
+        "src/gpu/DrawingBuffer.h": "894d87082ede6001677238342f033d4441e3e8958b1c01aa065bdeb58c3cf511",
+        "src/gpu/GlobalCache.cpp": "a62a7b459325cc3ecacf0318a77a23a38c2ae6904923eac988554d0887d075e2",
+        "src/gpu/GlobalCache.h": "14fa9cd9e824606d3e470f10fe7e6f5ab5e1036bc9cfd0b4653a6714a2db4626",
+        "src/gpu/OpsCompositor.cpp": "999cf062df895fe0b899845e857748199a1a3a00f77f9dd50a4114bed64446ce",
+        "src/gpu/OpsCompositor.h": "54f2b369add65446ff759d54a92418c92c1afe5504452816e55a405eb0ce78f0",
+        "src/gpu/RectsVertexProvider.cpp": "a9bca7c3c2d2e382f23cc53cd5adae29743fba2c0a47b774b4bea4e449a6944e",
+        "src/gpu/RenderContext.cpp": "3cca224ec6b10fd2a9c3b43e9d233df1cebe2e4d2622bdfd4b85e85f98a04992",
+        "src/gpu/RenderContext.h": "c58a462810992bc645982daa6641f1d9c18fe5daddae848a8e54f65c4ae2f228",
+        "src/gpu/ShaderCaps.cpp": "494ef7ce6453eb48357cffefa1aadc234ca3fb72fa08e3951cd0bf294707da23",
+        "src/gpu/VertexProvider.cpp": "006b975e3352655f8e125443cece3dd0c27fa6646e779eb3c3c1f1b2ff0fda2c",
+        "src/gpu/proxies/ResourceProxy.h": "284615735df534102ed2e7397d1be229704b392e4acb3b6b5755e0be6883ea73",
+        "src/gpu/tasks/AtlasUploadTask.cpp": "ff1592789bbb469540c2347dad2d39f6336d86fc020948d25b856367ffd6c616",
+        "src/gpu/tasks/AtlasUploadTask.h": "42283e6dfe5cd95eefe2d9032c4044067b930c943db3cd5c70a579a5a08cda2e",
+        "src/gpu/tasks/ResourceTask.h": "c5a6a7fe758bdeeefff3c8c054be3a2153782dfff3c661be8b7ed3d1d674ac53"
+      },
+      "patchRoundTrip": "Applied to the exact pinned commit using a temporary index; every resulting changed file matches the live source bytes."
+    },
+    "thorvg": {
+      "pin": "f0fd698d56b3b8ae797a242cf06aab6b70aed840",
+      "patchFile": "thorvg-current.patch",
+      "patchSha256": "243520849f9bccf3338c829e2061d6efd87fc1b22785b8a85f6f8cd7ba16dac7",
+      "files": {
+        "inc/thorvg.h": "6c4d2f833ae070e22b0c5ae6fcee11c038f208ffb6352aacb3803eac408f95d1",
+        "src/loaders/svg/tvgSvgBuilder.cpp": "e9f6e838562b6cc444fae6f1ac12ff394b8b22f0e39a7d8df60781984ece5754",
+        "src/loaders/svg/tvgSvgCommon.h": "d5df4d4ceebf2fc8791991b142f9649078f53f68e4d11297cd07752f11ff3b29",
+        "src/loaders/svg/tvgSvgLoader.cpp": "d90a39a1ad31c73076050344075941afa878421ec643b8310e285245290ac1a5",
+        "src/loaders/webp/webp/types.h": "29a8c516bdfde4c04b5d63e3ada868d837bc353538766dcdf620a705f261dbc1",
+        "src/renderer/tvgLoader.h": "f0130f186a7d56093d58202a42e2e8a7cf07b21f19d48a1a99d8b24a36fc2b17",
+        "src/renderer/tvgLoaderMgr.cpp": "b55e7bcb5370fe2b6b2729dcdd26d1b33771eab5bebe2defe7e7ed675906b5a3",
+        "src/renderer/tvgLoaderMgr.h": "a1edbd4184fa693b73f94d80bdbe18904b3072e221497bc5105813b0167d286e",
+        "src/renderer/tvgPicture.cpp": "d3df4ab5d4cf2e6b36e00dabc243ea3c0a3452462a30ecdd2410df136b7c78f4",
+        "src/renderer/tvgPicture.h": "e2cb050acc9a088b363ed273b5af8bb44e4c3a1d1a29ccd0700548d082a28cac",
+        "src/renderer/tvgText.cpp": "3df161abb964d377872ee9c8f3f437c9a01443bfe6e2c6d6c58a325a8d8fe1d9",
+        "src/renderer/tvgText.h": "6eec2f1941e546922c3c162adb3e24ebe036900e14e86541ba739b14b7a04ecd"
+      },
+      "patchRoundTrip": "Applied to the exact pinned commit using a temporary index; every resulting changed file matches the live source bytes."
+    }
+  },
+  "preparedProfiles": {
+    "macos_arm64": {
+      "manifestFile": "macos_arm64-prepared-manifest.json",
+      "sha256": "9b4d3213e10470c54588b9b4a76096bd153d08450ffa7f7845de1d6fb75d5c11",
+      "scope": "Historical local prepared input receipt; artifacts and source trees are not included."
+    },
+    "ios_sim_arm64": {
+      "manifestFile": "ios_sim_arm64-prepared-manifest.json",
+      "sha256": "7f696e0ad3084ff2b95e3c43245c3a2815ba1cf84130003637043a3752cd6612",
+      "scope": "Historical local prepared input receipt; artifacts and source trees are not included."
+    },
+    "android_arm64": {
+      "manifestFile": "android_arm64-prepared-manifest.json",
+      "sha256": "eb4ce22fc8fd1f9935f42dc1158c3cfc856aa5464b99cb881d76cb34b4af1695",
+      "scope": "Historical local prepared input receipt; artifacts and source trees are not included."
+    }
+  }
+}

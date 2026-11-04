@@ -93,9 +93,9 @@ public:
 
         skCanvas->concat(transform.getSkValue());
         skCanvas->scale(rasterScaleX, rasterScaleY);
-        SkPaint paint;
-        paint.setColor(_color.getSkValue());
-        skCanvas->drawRect(frame.getSkValue(), paint);
+        Paint paint;
+        paint.setColor(_color);
+        skCanvas->drawRect(frame.getSkValue(), paint.getSkValue());
 
         surface->flush();
 

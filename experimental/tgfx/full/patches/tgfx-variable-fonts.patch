@@ -1,0 +1,421 @@
+diff --git a/include/tgfx/core/Typeface.h b/include/tgfx/core/Typeface.h
+index 47909f7..900bbda 100644
+--- a/include/tgfx/core/Typeface.h
++++ b/include/tgfx/core/Typeface.h
+@@ -40,6 +40,14 @@ typedef int32_t Unichar;
+ 
+ typedef uint32_t FontTableTag;
+ 
++/**
++ * An OpenType variation axis tag and its design-space coordinate.
++ */
++struct FontVariation {
++  FontTableTag axis;
++  float value;
++};
++
+ class ScalerContext;
+ class AdvancedTypefaceInfo;
+ 
+@@ -199,5 +207,23 @@ class Typeface {
+   friend class RenderContext;
+   friend class PDFExportContext;
+   friend class PDFFont;
++
++ public:
++  /**
++   * Returns an independent instance with the specified variation coordinates.
++   * Unspecified axes retain this instance's coordinates. Finite values are
++   * clamped to the axis range. Unknown axes, non-finite values, and backend
++   * failures return nullptr. An empty request returns this typeface.
++   * Currently implemented by the FreeType backend.
++   */
++  virtual std::shared_ptr<Typeface> makeWithVariations(
++      const std::vector<FontVariation>& coordinates) const;
++
++  /**
++   * Returns the actual design coordinates of this instance in font axis order,
++   * including unspecified/default axes. Non-variable or unsupported backends
++   * return an empty vector.
++   */
++  virtual std::vector<FontVariation> getVariationDesignPosition() const;
+ };
+ }  // namespace tgfx
+diff --git a/src/core/Typeface.cpp b/src/core/Typeface.cpp
+index c8d1c44..5234127 100644
+--- a/src/core/Typeface.cpp
++++ b/src/core/Typeface.cpp
+@@ -86,6 +86,15 @@ std::shared_ptr<Typeface> Typeface::MakeEmpty() {
+   return emptyTypeface;
+ }
+ 
++std::shared_ptr<Typeface> Typeface::makeWithVariations(
++    const std::vector<FontVariation>& coordinates) const {
++  return coordinates.empty() ? weakThis.lock() : nullptr;
++}
++
++std::vector<FontVariation> Typeface::getVariationDesignPosition() const {
++  return {};
++}
++
+ GlyphID Typeface::getGlyphID(const std::string& name) const {
+   if (name.empty()) {
+     return 0;
+diff --git a/src/core/vectors/freetype/FTTypeface.cpp b/src/core/vectors/freetype/FTTypeface.cpp
+index a6cf0f1..517f33c 100644
+--- a/src/core/vectors/freetype/FTTypeface.cpp
++++ b/src/core/vectors/freetype/FTTypeface.cpp
+@@ -18,6 +18,7 @@
+ 
+ #if defined(__ANDROID__) || defined(ANDROID)
+ #include "platform/android/GlyphRenderer.h"
++#include "platform/android/JNIUtil.h"
+ #include "tgfx/platform/android/JNIEnvironment.h"
+ #endif
+ #include "FTLibrary.h"
+@@ -29,10 +30,16 @@
+ #include FT_TRUETYPE_TABLES_H
+ #include FT_FONT_FORMATS_H
+ #include FT_TYPE1_TABLES_H
++#include FT_MULTIPLE_MASTERS_H
++#include <algorithm>
+ #include <array>
++#include <cmath>
++#include <cstring>
++#include <limits>
+ #include "FTScalerContext.h"
+ #include "SystemFont.h"
+ #include "core/utils/UniqueID.h"
++#include "core/utils/Log.h"
+ #include "tgfx/core/UTF.h"
+ 
+ namespace tgfx {
+@@ -86,7 +93,11 @@ static FT_Face CreateFTFace(const FTFontData& data) {
+   FT_Face face = nullptr;
+   auto ftLibrary = FTLibrary::Get();
+   auto err = FT_Open_Face(ftLibrary, &args, data.ttcIndex, &face);
+-  if (err || !face->family_name) {
++  if (err) {
++    return nullptr;
++  }
++  if (!face->family_name) {
++    FT_Done_Face(face);
+     return nullptr;
+   }
+   if (!face->charmap) {
+@@ -96,33 +107,274 @@ static FT_Face CreateFTFace(const FTFontData& data) {
+ }
+ 
+ std::shared_ptr<FTTypeface> FTTypeface::Make(FTFontData data) {
++  return Make(std::move(data), {});
++}
++
++static void DeleteFTFace(FT_Face face) {
++  if (face) {
++    std::lock_guard<std::mutex> autoLock(FTMutex());
++    FT_Done_Face(face);
++  }
++}
++
++static bool SetVariations(FT_Face face, const std::vector<FontVariation>& requested,
++                          std::vector<FontVariation>* applied) {
++  if (!FT_HAS_MULTIPLE_MASTERS(face) || !FT_IS_SFNT(face)) {
++    return requested.empty();
++  }
++  FT_MM_Var* axes = nullptr;
++  if (FT_Get_MM_Var(face, &axes) != FT_Err_Ok || axes == nullptr) {
++    return false;
++  }
++  auto releaseAxes = [](FT_MM_Var* value) { FT_Done_MM_Var(FTLibrary::Get(), value); };
++  std::unique_ptr<FT_MM_Var, decltype(releaseAxes)> axesOwner(axes, releaseAxes);
++  std::vector<FT_Fixed> values(axes->num_axis);
++  // Preserve a named TTC instance as well as every unrequested axis.
++  if (FT_Get_Var_Design_Coordinates(face, axes->num_axis, values.data()) != FT_Err_Ok) {
++    return false;
++  }
++  for (const auto& coordinate : requested) {
++    if (!std::isfinite(coordinate.value)) {
++      return false;
++    }
++    FT_UInt index = 0;
++    for (; index < axes->num_axis; ++index) {
++      if (axes->axis[index].tag == coordinate.axis) {
++        break;
++      }
++    }
++    if (index == axes->num_axis) {
++      return false;
++    }
++    auto value = std::clamp(static_cast<double>(coordinate.value) * 65536.0,
++                            static_cast<double>(axes->axis[index].minimum),
++                            static_cast<double>(axes->axis[index].maximum));
++    values[index] = static_cast<FT_Fixed>(std::round(value));
++  }
++  if (!requested.empty() &&
++      FT_Set_Var_Design_Coordinates(face, axes->num_axis, values.data()) != FT_Err_Ok) {
++    return false;
++  }
++  // Read back the actual instance rather than echoing an unclamped request.
++  if (FT_Get_Var_Design_Coordinates(face, axes->num_axis, values.data()) != FT_Err_Ok) {
++    return false;
++  }
++  applied->reserve(axes->num_axis);
++  for (FT_UInt i = 0; i < axes->num_axis; ++i) {
++    applied->push_back({static_cast<FontTableTag>(axes->axis[i].tag),
++                        static_cast<float>(values[i] / 65536.0)});
++  }
++  return true;
++}
++
++std::shared_ptr<FTTypeface> FTTypeface::Make(
++    FTFontData data, const std::vector<FontVariation>& coordinates) {
+   auto face = CreateFTFace(data);
+   if (face == nullptr) {
+     return nullptr;
+   }
+-  auto typeface = std::shared_ptr<FTTypeface>(new FTTypeface(std::move(data), face));
++  std::unique_ptr<FT_FaceRec, decltype(&DeleteFTFace)> faceOwner(face, DeleteFTFace);
++  std::vector<FontVariation> applied;
++  if (!SetVariations(face, coordinates, &applied)) {
++    LOGE("FTTypeface: unable to create the requested variable font instance.");
++    return nullptr;
++  }
++  auto* rawTypeface = new FTTypeface(std::move(data), face, std::move(applied));
++  faceOwner.release();
++  auto typeface = std::shared_ptr<FTTypeface>(rawTypeface);
++#if defined(__ANDROID__) || defined(ANDROID)
++  // The Java color-vector renderer must never substitute the default Typeface
++  // for a variation instance that FreeType has already selected.
++  if (typeface->hasColor() && typeface->hasOutlines() &&
++      !typeface->variationCoordinates.empty() && typeface->typeface.isEmpty()) {
++    LOGE("FTTypeface: unable to create the matching Android variable color font.");
++    return nullptr;
++  }
++#endif
+   typeface->weakThis = typeface;
+   return typeface;
+ }
+ 
+-FTTypeface::FTTypeface(FTFontData data, FT_Face face)
+-    : _uniqueID(UniqueID::Next()), data(std::move(data)), face(std::move(face)) {
++#if defined(__ANDROID__) || defined(ANDROID)
++static jobject MakeAndroidVariableTypeface(JNIEnv* env, const FTFontData& data,
++                                           const std::vector<FontVariation>& coordinates) {
++  if (!env) {
++    return nullptr;
++  }
++  if (env->PushLocalFrame(32) < 0) {
++    env->ExceptionClear();
++    return nullptr;
++  }
++  auto result = [&]() -> jobject {
++    auto axisClass = env->FindClass("android/graphics/fonts/FontVariationAxis");
++    if (!axisClass) return nullptr;
++    auto axisConstructor = env->GetMethodID(axisClass, "<init>", "(Ljava/lang/String;F)V");
++    if (!axisConstructor) return nullptr;
++    auto axes = env->NewObjectArray(static_cast<jsize>(coordinates.size()), axisClass, nullptr);
++    if (!axes) return nullptr;
++    for (size_t i = 0; i < coordinates.size(); ++i) {
++      auto tag = coordinates[i].axis;
++      jchar chars[] = {static_cast<jchar>((tag >> 24) & 0xff),
++                       static_cast<jchar>((tag >> 16) & 0xff),
++                       static_cast<jchar>((tag >> 8) & 0xff),
++                       static_cast<jchar>(tag & 0xff)};
++      auto name = env->NewString(chars, 4);
++      if (!name) return nullptr;
++      auto axis = env->NewObject(axisClass, axisConstructor, name, coordinates[i].value);
++      env->DeleteLocalRef(name);
++      if (!axis || env->ExceptionCheck()) return nullptr;
++      env->SetObjectArrayElement(axes, static_cast<jsize>(i), axis);
++      env->DeleteLocalRef(axis);
++      if (env->ExceptionCheck()) return nullptr;
++    }
++    // FT_Open_Face can encode a named instance in the upper 16 bits. Java
++    // expects only the collection index; its axes above carry that instance.
++    auto ttcIndex = static_cast<jint>(data.ttcIndex & 0xffff);
++    if (!data.path.empty()) {
++      auto builderClass = env->FindClass("android/graphics/Typeface$Builder");
++      if (!builderClass) return nullptr;
++      auto constructor = env->GetMethodID(builderClass, "<init>", "(Ljava/lang/String;)V");
++      if (!constructor) return nullptr;
++      auto setIndex = env->GetMethodID(builderClass, "setTtcIndex", "(I)Landroid/graphics/Typeface$Builder;");
++      if (!setIndex) return nullptr;
++      auto setAxes = env->GetMethodID(builderClass, "setFontVariationSettings",
++          "([Landroid/graphics/fonts/FontVariationAxis;)Landroid/graphics/Typeface$Builder;");
++      if (!setAxes) return nullptr;
++      auto build = env->GetMethodID(builderClass, "build", "()Landroid/graphics/Typeface;");
++      if (!build) return nullptr;
++      auto path = SafeToJString(env, data.path);
++      if (!path) return nullptr;
++      auto builder = env->NewObject(builderClass, constructor, path);
++      if (!builder || env->ExceptionCheck()) return nullptr;
++      env->CallObjectMethod(builder, setIndex, ttcIndex);
++      if (env->ExceptionCheck()) return nullptr;
++      env->CallObjectMethod(builder, setAxes, axes);
++      if (env->ExceptionCheck()) return nullptr;
++      return env->CallObjectMethod(builder, build);
++    }
++    if (!data.data || data.data->size() > static_cast<size_t>(std::numeric_limits<jint>::max())) {
++      return nullptr;
++    }
++    // Public memory-font construction is available from API 29. Use a
++    // Java-owned buffer, never a direct view into a native temporary allocation.
++    auto bufferClass = env->FindClass("java/nio/ByteBuffer");
++    if (!bufferClass) return nullptr;
++    auto allocate = env->GetStaticMethodID(bufferClass, "allocateDirect", "(I)Ljava/nio/ByteBuffer;");
++    if (!allocate) return nullptr;
++    auto buffer = env->CallStaticObjectMethod(bufferClass, allocate, static_cast<jint>(data.data->size()));
++    if (!buffer || env->ExceptionCheck()) return nullptr;
++    auto bytes = env->GetDirectBufferAddress(buffer);
++    if (!bytes) return nullptr;
++    std::memcpy(bytes, data.data->data(), data.data->size());
++    auto fontBuilderClass = env->FindClass("android/graphics/fonts/Font$Builder");
++    if (!fontBuilderClass) return nullptr;
++    auto fontConstructor = env->GetMethodID(fontBuilderClass, "<init>", "(Ljava/nio/ByteBuffer;)V");
++    if (!fontConstructor) return nullptr;
++    auto setIndex = env->GetMethodID(fontBuilderClass, "setTtcIndex", "(I)Landroid/graphics/fonts/Font$Builder;");
++    if (!setIndex) return nullptr;
++    auto setAxes = env->GetMethodID(fontBuilderClass, "setFontVariationSettings",
++        "([Landroid/graphics/fonts/FontVariationAxis;)Landroid/graphics/fonts/Font$Builder;");
++    if (!setAxes) return nullptr;
++    auto buildFont = env->GetMethodID(fontBuilderClass, "build", "()Landroid/graphics/fonts/Font;");
++    if (!buildFont) return nullptr;
++    auto fontBuilder = env->NewObject(fontBuilderClass, fontConstructor, buffer);
++    if (!fontBuilder || env->ExceptionCheck()) return nullptr;
++    env->CallObjectMethod(fontBuilder, setIndex, ttcIndex);
++    if (env->ExceptionCheck()) return nullptr;
++    env->CallObjectMethod(fontBuilder, setAxes, axes);
++    if (env->ExceptionCheck()) return nullptr;
++    auto font = env->CallObjectMethod(fontBuilder, buildFont);
++    if (!font || env->ExceptionCheck()) return nullptr;
++    auto familyBuilderClass = env->FindClass("android/graphics/fonts/FontFamily$Builder");
++    if (!familyBuilderClass) return nullptr;
++    auto familyConstructor = env->GetMethodID(familyBuilderClass, "<init>", "(Landroid/graphics/fonts/Font;)V");
++    if (!familyConstructor) return nullptr;
++    auto buildFamily = env->GetMethodID(familyBuilderClass, "build", "()Landroid/graphics/fonts/FontFamily;");
++    if (!buildFamily) return nullptr;
++    auto familyBuilder = env->NewObject(familyBuilderClass, familyConstructor, font);
++    if (!familyBuilder || env->ExceptionCheck()) return nullptr;
++    auto family = env->CallObjectMethod(familyBuilder, buildFamily);
++    if (!family || env->ExceptionCheck()) return nullptr;
++    auto builderClass = env->FindClass("android/graphics/Typeface$CustomFallbackBuilder");
++    if (!builderClass) return nullptr;
++    auto constructor = env->GetMethodID(builderClass, "<init>", "(Landroid/graphics/fonts/FontFamily;)V");
++    if (!constructor) return nullptr;
++    auto setStyle = env->GetMethodID(builderClass, "setStyle",
++        "(Landroid/graphics/fonts/FontStyle;)Landroid/graphics/Typeface$CustomFallbackBuilder;");
++    if (!setStyle) return nullptr;
++    auto build = env->GetMethodID(builderClass, "build", "()Landroid/graphics/Typeface;");
++    if (!build) return nullptr;
++    auto builder = env->NewObject(builderClass, constructor, family);
++    if (!builder || env->ExceptionCheck()) return nullptr;
++    auto fontClass = env->GetObjectClass(font);
++    if (!fontClass) return nullptr;
++    auto getStyle = env->GetMethodID(fontClass, "getStyle", "()Landroid/graphics/fonts/FontStyle;");
++    if (!getStyle) return nullptr;
++    auto style = env->CallObjectMethod(font, getStyle);
++    if (!style || env->ExceptionCheck()) return nullptr;
++    env->CallObjectMethod(builder, setStyle, style);
++    if (env->ExceptionCheck()) return nullptr;
++    return env->CallObjectMethod(builder, build);
++  }();
++  if (env->ExceptionCheck()) {
++    env->ExceptionClear();
++    result = nullptr;
++  }
++  return env->PopLocalFrame(result);
++}
++#endif
++
++FTTypeface::FTTypeface(FTFontData data, FT_Face face, std::vector<FontVariation> coordinates)
++    : _uniqueID(UniqueID::Next()),
++      data(std::move(data)),
++      face(face),
++      variationCoordinates(std::move(coordinates)) {
+   _hasColor = FT_HAS_COLOR(this->face);
+   _hasOutlines = FT_IS_SCALABLE(this->face);
+ #if defined(__ANDROID__) || defined(ANDROID)
+-  if (hasColor() && hasOutlines() && GlyphRenderer::IsAvailable()) {
++  if (hasColor() && hasOutlines() &&
++      (!variationCoordinates.empty() || GlyphRenderer::IsAvailable())) {
+     JNIEnvironment environment;
+     auto env = environment.current();
+     if (env != nullptr) {
+-      typeface = GlyphRenderer::CreateTypeface(env, this->data.path);
++      auto javaTypeface = variationCoordinates.empty() ?
++          GlyphRenderer::CreateTypeface(env, this->data.path) :
++          MakeAndroidVariableTypeface(env, this->data, variationCoordinates);
++      typeface = javaTypeface;
++      if (javaTypeface) env->DeleteLocalRef(javaTypeface);
++      if (env->ExceptionCheck()) env->ExceptionClear();
+     }
+   }
+ #endif
+ }
+ 
+ FTTypeface::~FTTypeface() {
+-  std::lock_guard<std::mutex> autoLock(FTMutex());
+-  FT_Done_Face(face);
++  DeleteFTFace(face);
++}
++
++std::shared_ptr<Typeface> FTTypeface::makeWithVariations(
++    const std::vector<FontVariation>& coordinates) const {
++  if (coordinates.empty()) {
++    return weakThis.lock();
++  }
++  auto merged = variationCoordinates;
++  for (const auto& coordinate : coordinates) {
++    if (!std::isfinite(coordinate.value)) return nullptr;
++    auto found = std::find_if(merged.begin(), merged.end(), [&](const FontVariation& previous) {
++      return previous.axis == coordinate.axis;
++    });
++    if (found == merged.end()) {
++      merged.push_back(coordinate);
++    } else {
++      found->value = coordinate.value;
++    }
++  }
++  // A new face, uniqueID, and scaler/bounds caches keep existing fonts immutable.
++  return Make(data, merged);
++}
++
++std::vector<FontVariation> FTTypeface::getVariationDesignPosition() const {
++  return variationCoordinates;
+ }
+ 
+ std::string FTTypeface::fontFamily() const {
+diff --git a/src/core/vectors/freetype/FTTypeface.h b/src/core/vectors/freetype/FTTypeface.h
+index b312b51..8bd323e 100644
+--- a/src/core/vectors/freetype/FTTypeface.h
++++ b/src/core/vectors/freetype/FTTypeface.h
+@@ -62,6 +62,11 @@ class FTTypeface : public Typeface {
+ 
+   std::shared_ptr<Data> copyTableData(FontTableTag tag) const override;
+ 
++  std::shared_ptr<Typeface> makeWithVariations(
++      const std::vector<FontVariation>& coordinates) const override;
++
++  std::vector<FontVariation> getVariationDesignPosition() const override;
++
+  protected:
+ #ifdef TGFX_USE_ADVANCED_TYPEFACE_PROPERTY
+   AdvancedTypefaceInfo getAdvancedInfo() const override;
+@@ -75,12 +80,16 @@ class FTTypeface : public Typeface {
+   FT_Face face = nullptr;
+   bool _hasColor = false;
+   bool _hasOutlines = true;
++  std::vector<FontVariation> variationCoordinates;
+ 
+ #if defined(__ANDROID__) || defined(ANDROID)
+   Global<jobject> typeface;
+ #endif
+ 
+-  FTTypeface(FTFontData data, FT_Face face);
++  FTTypeface(FTFontData data, FT_Face face, std::vector<FontVariation> coordinates);
++
++  static std::shared_ptr<FTTypeface> Make(FTFontData data,
++                                        const std::vector<FontVariation>& coordinates);
+ 
+   int unitsPerEmInternal() const;
+ 

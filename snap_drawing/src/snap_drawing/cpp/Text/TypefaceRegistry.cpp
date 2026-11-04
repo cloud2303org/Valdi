@@ -49,7 +49,7 @@ TypefaceRegistry::TypefaceRegistry(Valdi::ILogger& logger, ITypefaceRegistryList
     : _logger(logger), _listener(listener) {}
 TypefaceRegistry::~TypefaceRegistry() = default;
 
-Valdi::Result<Valdi::Ref<Typeface>> TypefaceRegistry::getTypefaceWithName(SkFontMgr& fontMgr,
+Valdi::Result<Valdi::Ref<Typeface>> TypefaceRegistry::getTypefaceWithName(NativeFontManager& fontMgr,
                                                                           const String& fontName,
                                                                           FontStyle* outResolvedFontStyle) {
     auto fontKeyAndStyleResult = resolveFontKeyAndStyle(fontName);
@@ -75,7 +75,7 @@ Valdi::Result<Valdi::Ref<Typeface>> TypefaceRegistry::getTypefaceWithName(SkFont
 }
 
 // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
-Valdi::Result<Valdi::Ref<Typeface>> TypefaceRegistry::getTypefaceFromFamily(SkFontMgr& fontMgr,
+Valdi::Result<Valdi::Ref<Typeface>> TypefaceRegistry::getTypefaceFromFamily(NativeFontManager& fontMgr,
                                                                             const Ref<FontFamily>& fontFamily,
                                                                             FontStyle fontStyle) {
     if (fontFamily == nullptr) {
@@ -90,7 +90,7 @@ Valdi::Result<Valdi::Ref<Typeface>> TypefaceRegistry::getTypefaceFromFamily(SkFo
     return typeface;
 }
 
-Valdi::Result<Valdi::Ref<Typeface>> TypefaceRegistry::getTypefaceWithFamilyNameAndStyle(SkFontMgr& fontMgr,
+Valdi::Result<Valdi::Ref<Typeface>> TypefaceRegistry::getTypefaceWithFamilyNameAndStyle(NativeFontManager& fontMgr,
                                                                                         const String& familyName,
                                                                                         FontStyle fontStyle) {
     return getTypefaceFromFamily(fontMgr, getFontFamilyByFamilyName(familyName), fontStyle);
@@ -123,7 +123,7 @@ void TypefaceRegistry::registerFamilyName(const String& familyName) {
     _familyNameByFontKey[fontKey] = familyName;
 }
 
-Valdi::Ref<FontFamily> TypefaceRegistry::getFontFamilyForCharacterAndStyle(SkFontMgr& fontMgr,
+Valdi::Ref<FontFamily> TypefaceRegistry::getFontFamilyForCharacterAndStyle(NativeFontManager& fontMgr,
                                                                            Character character,
                                                                            FontStyle fontStyle) {
     for (const auto& fontFamily : _registeredFallbackFontFamilies) {
@@ -199,6 +199,14 @@ std::vector<String> TypefaceRegistry::getAllAvailableTypefaceNames() const {
         availableFonts.emplace_back(it.first);
     }
 
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+    for (const auto& it : _familyNameByFontKey) availableFonts.emplace_back(it.second);
+    for (const auto& it : _fontFamilyByFontKey) {
+        if (it.second != nullptr) availableFonts.emplace_back(it.second->getFamilyName());
+    }
+    std::sort(availableFonts.begin(), availableFonts.end());
+    availableFonts.erase(std::unique(availableFonts.begin(), availableFonts.end()), availableFonts.end());
+#endif
     return availableFonts;
 }
 

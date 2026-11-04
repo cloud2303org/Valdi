@@ -68,12 +68,12 @@ def valdi_exported_library(
         module_name = ios_bundle_name,
         preserved_module_names = _PRESERVED_MODULE_NAMES,
         flatten_paths = True,
-        srcs = [
-            "@valdi//valdi:valdi_ios_public_hdrs",
-            "@valdi//valdi_core:valdi_core_ios_public_hdrs",
+        srcs = depset([
+            Label("@valdi//valdi:valdi_ios_public_hdrs"),
+            Label("@valdi//valdi_core:valdi_core_ios_public_hdrs"),
             # SCValdiDrawingModuleFactory.h (in valdi_ios_public_hdrs) imports SCCDrawingTypes.h from this module.
-            "@valdi//src/valdi_modules/src/valdi/drawing:drawing_api_objc_hdrs",
-        ] + get_suffixed_deps(deps, "_api_objc_hdrs") + get_suffixed_deps(deps, "_objc_hdrs"),
+            Label("@valdi//src/valdi_modules/src/valdi/drawing:drawing_api_objc_hdrs"),
+        ] + get_suffixed_deps(deps, "_api_objc_hdrs") + get_suffixed_deps(deps, "_objc_hdrs")).to_list(),
     )
 
     xcframework_deps = ["@valdi//valdi"] + get_suffixed_deps(deps, "_objc") + native_deps

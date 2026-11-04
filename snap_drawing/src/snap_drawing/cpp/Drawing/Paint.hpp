@@ -9,8 +9,10 @@
 
 #include "snap_drawing/cpp/Utils/Color.hpp"
 #ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+#include "snap_drawing/cpp/Drawing/MaskFilter.hpp"
 #include "snap_drawing/cpp/Utils/TgfxBridge.hpp"
 #include "tgfx/core/Paint.h"
+#include "tgfx/core/PathEffect.h"
 #else
 #include "snap_drawing/cpp/Utils/SkiaBridge.hpp"
 
@@ -43,10 +45,8 @@ enum PaintStrokeJoin {
 #endif
 };
 
-#ifndef SNAP_DRAWING_TGFX_EXPERIMENT
 class Shader;
 class MaskFilter;
-#endif
 
 #ifdef SNAP_DRAWING_TGFX_EXPERIMENT
 class Paint : public WrappedTgfxValue<tgfx::Paint> {
@@ -79,11 +79,28 @@ public:
 #endif
     void setAntiAlias(bool antialias);
 
-#ifndef SNAP_DRAWING_TGFX_EXPERIMENT
     void setShader(const Shader& shader);
     void setMaskFilter(const MaskFilter& maskFilter);
     void setStrokeDashPattern(Scalar onLength, Scalar offLength);
     void setStrokeDotPattern(Scalar radius, Scalar advance);
+
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+    // TGFX Paint has no path effect. All path/rect call sites must use these
+    // helpers to apply stored dash/dot geometry, blur coverage and local shaders.
+    // Dot geometry is preflighted before materialization: at most 100000 stamp
+    // attempts per contour and per draw, and at most 100000 measured contours.
+    // Over-budget input reports a sticky, replayable native rendering failure;
+    // it produces neither truncated dots nor an unmodified fill/stroke fallback.
+    void drawPath(tgfx::Canvas* canvas, const tgfx::Path& path) const;
+    void drawRect(tgfx::Canvas* canvas, const tgfx::Rect& rect) const;
+
+private:
+    std::shared_ptr<tgfx::PathEffect> _dashPathEffect;
+    bool _emptyShader = false;
+    bool _hasDotPattern = false;
+    Scalar _dotRadius = 0;
+    Scalar _dotAdvance = 0;
+    MaskFilter _maskFilter;
 #endif
 };
 

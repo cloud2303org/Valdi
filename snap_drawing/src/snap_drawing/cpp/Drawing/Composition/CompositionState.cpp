@@ -38,7 +38,7 @@ void CompositionState::updateClip(Path& path) {
     }
 }
 
-SkScalar CompositionState::getAbsoluteOpacity() const {
+Scalar CompositionState::getAbsoluteOpacity() const {
     return _absoluteOpacity;
 }
 

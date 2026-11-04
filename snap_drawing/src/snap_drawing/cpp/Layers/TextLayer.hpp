@@ -214,11 +214,11 @@ private:
 
     void applyGradientToTextPaint(Paint& paint);
 
-    void drawText(DrawingContext& DrawingContext, const sk_sp<SkTextBlob>& textBlob, std::optional<Color> textColor);
+    void drawText(DrawingContext& DrawingContext, const NativeTextBlob& textBlob, std::optional<Color> textColor);
 
     bool hasTextShadow() const;
 
-    void drawTextShadows(DrawingContext& drawingContext, const sk_sp<SkTextBlob>& textBlob);
+    void drawTextShadows(DrawingContext& drawingContext, const NativeTextBlob& textBlob);
 };
 
 } // namespace snap::drawing

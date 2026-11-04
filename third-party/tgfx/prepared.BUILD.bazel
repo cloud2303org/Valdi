@@ -1,0 +1,208 @@
+load("@rules_cc//cc:cc_import.bzl", "cc_import")
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+load(":test_support_config.bzl", "TEST_SUPPORT_DEFINES")
+
+package(default_visibility = ["//visibility:public"])
+
+PROFILES = [
+    "macos_arm64",
+    "ios_sim_arm64",
+    "ios_device_arm64",
+    "android_arm64",
+    "android_x86_64",
+]
+
+UNSUPPORTED = (
+    "No TGFX archive profile matches this target. Supported: " +
+    ", ".join(PROFILES) +
+    ". iOS profiles require the apple_support device/simulator constraint."
+)
+
+# No //conditions:default: unsupported targets must fail analysis.
+cc_import(
+    name = "tgfx_native",
+    static_library = select({
+        "@valdi//third-party/tgfx:" + p: "prepared/" + p + "/lib/tgfx.a"
+        for p in PROFILES
+    }, no_match_error = UNSUPPORTED),
+)
+
+cc_import(
+    name = "thorvg_native",
+    static_library = select({
+        "@valdi//third-party/tgfx:" + p: "prepared/" + p + "/lib/libthorvg-1.a"
+        for p in PROFILES
+    }, no_match_error = UNSUPPORTED),
+)
+
+cc_import(
+    name = "giflib_native",
+    static_library = select({
+        "@valdi//third-party/tgfx:" + p: "prepared/" + p + "/lib/libgif.a"
+        for p in PROFILES
+    }, no_match_error = UNSUPPORTED),
+)
+
+# Profile-local headers are taken from the very same staged source snapshot
+# as the archives. No separate SDK headers or handwritten ABI declarations.
+cc_library(
+    name = "tgfx",
+    hdrs = select({
+        "@valdi//third-party/tgfx:" + p: glob(["prepared/" + p + "/include/tgfx/**/*.h"])
+        for p in PROFILES
+    }, no_match_error = UNSUPPORTED),
+    includes = select({
+        "@valdi//third-party/tgfx:" + p: ["prepared/" + p + "/include"]
+        for p in PROFILES
+    }, no_match_error = UNSUPPORTED),
+    linkopts = select({
+        "@valdi//third-party/tgfx:macos_arm64": [
+            "-framework Metal",
+            "-framework ApplicationServices",
+            "-framework QuartzCore",
+            "-framework Cocoa",
+            "-framework Foundation",
+            "-framework CoreMedia",
+            "-framework CoreGraphics",
+            "-framework CoreText",
+            "-framework CoreVideo",
+            "-framework ImageIO",
+            "-liconv",
+            "-lc++",
+        ],
+        "@valdi//third-party/tgfx:ios_sim_arm64": [
+            "-framework Metal",
+            "-framework UIKit",
+            "-framework Foundation",
+            "-framework QuartzCore",
+            "-framework CoreGraphics",
+            "-framework CoreText",
+            "-framework CoreMedia",
+            "-framework ImageIO",
+            "-framework CoreVideo",
+            "-liconv",
+            "-lc++",
+        ],
+        "@valdi//third-party/tgfx:ios_device_arm64": [
+            "-framework Metal",
+            "-framework UIKit",
+            "-framework Foundation",
+            "-framework QuartzCore",
+            "-framework CoreGraphics",
+            "-framework CoreText",
+            "-framework CoreMedia",
+            "-framework ImageIO",
+            "-framework CoreVideo",
+            "-liconv",
+            "-lc++",
+        ],
+        "@valdi//third-party/tgfx:android_arm64": [
+            "-landroid", "-ljnigraphics", "-llog", "-lEGL",
+            "-lGLESv2", "-lGLESv3", "-ldl", "-lm", "-lc++_shared",
+        ],
+        "@valdi//third-party/tgfx:android_x86_64": [
+            "-landroid", "-ljnigraphics", "-llog", "-lEGL",
+            "-lGLESv2", "-lGLESv3", "-ldl", "-lm", "-lc++_shared",
+        ],
+    }, no_match_error = UNSUPPORTED),
+    deps = [":tgfx_native"],
+)
+
+cc_library(
+    name = "thorvg",
+    hdrs = select({
+        "@valdi//third-party/tgfx:" + p: glob(["prepared/" + p + "/include/thorvg/*.h"])
+        for p in PROFILES
+    }, no_match_error = UNSUPPORTED),
+    defines = ["TVG_STATIC"],
+    includes = select({
+        "@valdi//third-party/tgfx:" + p: ["prepared/" + p + "/include/thorvg"]
+        for p in PROFILES
+    }, no_match_error = UNSUPPORTED),
+    linkopts = select({
+        "@valdi//third-party/tgfx:macos_arm64": ["-lpthread", "-lc++"],
+        "@valdi//third-party/tgfx:ios_sim_arm64": ["-lpthread", "-lc++"],
+        "@valdi//third-party/tgfx:ios_device_arm64": ["-lpthread", "-lc++"],
+        "@valdi//third-party/tgfx:android_arm64": ["-lm", "-lc++_shared"],
+        "@valdi//third-party/tgfx:android_x86_64": ["-lm", "-lc++_shared"],
+    }, no_match_error = UNSUPPORTED),
+    deps = [":thorvg_native"],
+)
+
+cc_library(
+    name = "webp",
+    hdrs = select({
+        "@valdi//third-party/tgfx:" + p: glob(["prepared/" + p + "/include/webp/*.h"])
+        for p in PROFILES
+    }, no_match_error = UNSUPPORTED),
+    includes = select({
+        "@valdi//third-party/tgfx:" + p: ["prepared/" + p + "/include"]
+        for p in PROFILES
+    }, no_match_error = UNSUPPORTED),
+    deps = [":tgfx"],
+)
+
+cc_library(
+    name = "zlib",
+    hdrs = select({
+        "@valdi//third-party/tgfx:" + p: glob([
+            "prepared/" + p + "/include/zlib.h",
+            "prepared/" + p + "/include/zconf.h",
+        ])
+        for p in PROFILES
+    }, no_match_error = UNSUPPORTED),
+    includes = select({
+        "@valdi//third-party/tgfx:" + p: ["prepared/" + p + "/include"]
+        for p in PROFILES
+    }, no_match_error = UNSUPPORTED),
+    deps = [":tgfx"],
+)
+
+cc_library(
+    name = "giflib",
+    hdrs = select({
+        "@valdi//third-party/tgfx:" + p: ["prepared/" + p + "/include/gif_lib.h"]
+        for p in PROFILES
+    }, no_match_error = UNSUPPORTED),
+    includes = select({
+        "@valdi//third-party/tgfx:" + p: ["prepared/" + p + "/include"]
+        for p in PROFILES
+    }, no_match_error = UNSUPPORTED),
+    deps = [":giflib_native"],
+)
+
+cc_library(
+    name = "test_support",
+    testonly = True,
+    hdrs = select({
+        "@valdi//third-party/tgfx:" + p: glob([
+            "prepared/" + p + "/test_include/tgfx_src/**/*.h",
+            "prepared/" + p + "/test_include/tgfx_src/**/*.hpp",
+            "prepared/" + p + "/test_include/tgfx_src/**/*.inl",
+            "prepared/" + p + "/test_include/tgfx_src/**/*.inc",
+            "prepared/" + p + "/test_include/concurrentqueue/**/*.h",
+            "prepared/" + p + "/test_include/concurrentqueue/**/*.hpp",
+            "prepared/" + p + "/test_include/concurrentqueue/**/*.inl",
+            "prepared/" + p + "/test_include/concurrentqueue/**/*.inc",
+        ]) + [
+            "prepared/" + p + "/test_include/tgfx_test_native_profile.h",
+            "prepared/" + p + "/test_include/skcms/skcms.h",
+            "prepared/" + p + "/test_include/skcms/src/skcms_public.h",
+        ]
+        for p in PROFILES
+    }, no_match_error = UNSUPPORTED),
+    defines = select({
+        "@valdi//third-party/tgfx:" + p: TEST_SUPPORT_DEFINES.get(p, [])
+        for p in PROFILES
+    }, no_match_error = UNSUPPORTED),
+    includes = select({
+        "@valdi//third-party/tgfx:" + p: [
+            "prepared/" + p + "/test_include",
+            "prepared/" + p + "/test_include/tgfx_src",
+            "prepared/" + p + "/test_include/concurrentqueue",
+            "prepared/" + p + "/test_include/skcms",
+        ]
+        for p in PROFILES
+    }, no_match_error = UNSUPPORTED),
+    deps = [":tgfx"],
+)

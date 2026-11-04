@@ -1,3 +1,38 @@
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+#include "snap_drawing/cpp/Utils/SVGAnimatedImage.hpp"
+
+namespace snap::drawing {
+SVGAnimatedImage::SVGAnimatedImage(std::shared_ptr<ThorvgMedia> media)
+    : _media(std::move(media)), _size(_media->size()) {}
+SVGAnimatedImage::~SVGAnimatedImage() = default;
+Duration SVGAnimatedImage::getCurrentTime() const {
+    std::lock_guard<Valdi::Mutex> lock(_mutex);
+    return _currentTime;
+}
+const Duration& SVGAnimatedImage::getDuration() const { return _duration; }
+const Size& SVGAnimatedImage::getSize() const { return _size; }
+double SVGAnimatedImage::getFrameRate() const { return 0; }
+Valdi::Value SVGAnimatedImage::getMetadata() const {
+    return Valdi::Value()
+        .setMapValue("type", Valdi::Value(Valdi::StringBox::fromCString("svg")))
+        .setMapValue("width", Valdi::Value(static_cast<int32_t>(_size.width)))
+        .setMapValue("height", Valdi::Value(static_cast<int32_t>(_size.height)));
+}
+void SVGAnimatedImage::doDraw(NativeCanvas* canvas, const Rect& bounds,
+                              const Duration& time, FittingSizeMode mode) {
+    std::lock_guard<Valdi::Mutex> lock(_mutex);
+    _currentTime = time;
+    _media->draw(canvas, bounds, time, mode);
+}
+Valdi::Result<Ref<SVGAnimatedImage>> SVGAnimatedImage::make(const Valdi::Byte* data, size_t length,
+                                                         const Ref<IFontManager>& fontManager) {
+    auto media = ThorvgMedia::make(data, length, false, fontManager);
+    if (!media) { return media.moveError(); }
+    return Valdi::makeShared<SVGAnimatedImage>(media.moveValue());
+}
+VALDI_CLASS_IMPL(SVGAnimatedImage)
+} // namespace snap::drawing
+#else
 #include "snap_drawing/cpp/Utils/SVGAnimatedImage.hpp"
 
 #include "snap_drawing/cpp/Utils/SVGUtils.hpp"
@@ -76,3 +111,5 @@ Valdi::Result<Ref<SVGAnimatedImage>> SVGAnimatedImage::make(const Valdi::Byte* d
 VALDI_CLASS_IMPL(SVGAnimatedImage)
 
 } // namespace snap::drawing
+
+#endif

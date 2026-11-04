@@ -6,7 +6,10 @@
 //
 
 #include "snap_drawing/cpp/Drawing/LinearGradient.hpp"
+#include "snap_drawing/cpp/Drawing/Shader.hpp"
+#ifndef SNAP_DRAWING_TGFX_EXPERIMENT
 #include "include/effects/SkGradientShader.h"
+#endif
 #include <cmath>
 
 namespace snap::drawing {
@@ -91,9 +94,25 @@ void LinearGradient::updateShader(const Rect& bounds) {
                 points[1] = Point::make(halfWidth, bounds.bottom);
         }
 
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+        std::vector<tgfx::Color> colors;
+        colors.reserve(_colors.size());
+        for (const auto& color : _colors) {
+            colors.emplace_back(color.getSkValue());
+        }
+        // Unlike the Skia clamp gradient, this TGFX pin chooses the first color
+        // for coincident endpoints. Preserve Skia's last-color limit explicitly.
+        if (Point::distance(points[0], points[1]) < 1.0f / (1 << 15)) {
+            _shader = tgfx::Shader::MakeColorShader(colors.back());
+        } else if (_colors.size() == _locations.size()) {
+            _shader = tgfx::Shader::MakeLinearGradient(
+                points[0].getSkValue(), points[1].getSkValue(), colors, _locations);
+        } else {
+            _shader =
+                tgfx::Shader::MakeLinearGradient(points[0].getSkValue(), points[1].getSkValue(), colors);
+        }
+#else
         const auto* colorsData = reinterpret_cast<const SkColor*>(_colors.data());
-
-        sk_sp<SkShader> shader;
         if (_colors.size() == _locations.size()) {
             // User provided color distribution
 
@@ -107,11 +126,12 @@ void LinearGradient::updateShader(const Rect& bounds) {
             _shader = SkGradientShader::MakeLinear(
                 &points[0].getSkValue(), colorsData, nullptr, static_cast<int>(_colors.size()), SkTileMode::kClamp);
         }
+#endif
     }
 }
 
 void LinearGradient::applyToPaint(Paint& paint) const {
-    paint.getSkValue().setShader(_shader);
+    paint.setShader(Shader(_shader));
 }
 
 void LinearGradient::update(const Rect& bounds) {

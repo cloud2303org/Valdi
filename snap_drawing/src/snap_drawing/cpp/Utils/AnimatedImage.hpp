@@ -8,11 +8,11 @@
 
 #include "valdi_core/cpp/Utils/Result.hpp"
 
-class SkCanvas;
+#include "snap_drawing/cpp/Utils/DrawingBackend.hpp"
 
 namespace snap::drawing {
 
-#ifdef SNAP_DRAWING_LOTTIE_ENABLED
+#if defined(SNAP_DRAWING_LOTTIE_ENABLED) || defined(SNAP_DRAWING_TGFX_EXPERIMENT)
 constexpr bool kLottieEnabled = true;
 #else
 constexpr bool kLottieEnabled = false;
@@ -28,7 +28,7 @@ public:
     AnimatedImage();
     ~AnimatedImage() override;
 
-    void draw(SkCanvas* canvas,
+    void draw(NativeCanvas* canvas,
               const Rect& drawBounds,
               const Duration& time,
               FittingSizeMode fittingSizeMode = snap::drawing::FittingSizeModeCenterScaleFit);
@@ -47,7 +47,7 @@ public:
                                                   size_t length);
 
 protected:
-    virtual void doDraw(SkCanvas* canvas,
+    virtual void doDraw(NativeCanvas* canvas,
                         const Rect& drawBounds,
                         const Duration& time,
                         FittingSizeMode fittingSizeMode) = 0;

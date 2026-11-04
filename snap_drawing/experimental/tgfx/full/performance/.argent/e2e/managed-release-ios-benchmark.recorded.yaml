@@ -1,0 +1,15 @@
+steps:
+  - launch: io.valdiroutes.renderbenchmark
+  - tool: await-ui-element
+    args:
+      condition: visible
+      selector:
+        identifier: render-benchmark-status
+  - tool: await-ui-element
+    args:
+      condition: text
+      selector:
+        identifier: render-benchmark-status
+      expectedText: PASS
+      textMatch: contains
+    delayMs: 30000

@@ -1,9 +1,7 @@
 #pragma once
 
-#include "include/core/SkFontMgr.h"
+#include "snap_drawing/cpp/Text/NativeFontManager.hpp"
 
 namespace snap::snap_drawing {
-
-sk_sp<SkFontMgr> getSkFontMgrSingleton();
-
+snap::drawing::NativeFontManagerHandle getSkFontMgrSingleton();
 }

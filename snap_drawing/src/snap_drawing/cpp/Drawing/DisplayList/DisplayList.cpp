@@ -13,8 +13,7 @@
 #include "snap_drawing/cpp/Drawing/Paint.hpp"
 #include "snap_drawing/cpp/Drawing/Surface/DrawableSurfaceCanvas.hpp"
 
-#include "include/core/SkCanvas.h"
-#include "include/core/SkPicture.h"
+#include "snap_drawing/cpp/Utils/DrawingBackend.hpp"
 #include "valdi_core/cpp/Utils/LoggerUtils.hpp"
 #include <cstdint>
 
@@ -68,7 +67,11 @@ void DisplayList::popContext() {
 
 void DisplayList::appendLayerContent(const LayerContent& layerContent, Scalar opacity) {
     if (layerContent.picture != nullptr) {
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+        appendPicture(layerContent.picture, opacity, layerContent.bounds);
+#else
         appendPicture(layerContent.picture.get(), opacity);
+#endif
     }
 
     if (layerContent.externalSurface != nullptr) {
@@ -81,6 +84,17 @@ void DisplayList::appendLayerContent(const LayerContent& layerContent, Scalar op
     }
 }
 
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+void DisplayList::appendPicture(const NativePicture& picture, Scalar opacity, const Rect& bounds) {
+    auto* op = appendOperation<Operations::DrawPicture>();
+    // Operations live in a relocatable byte buffer: keep the nontrivial owner
+    // outside it and release that owner through CleanUpDisplayListVisitor.
+    op->owner = new NativePicture(picture);
+    op->picture = picture.get();
+    op->bounds = bounds;
+    op->opacity = opacity;
+}
+#else
 void DisplayList::appendPicture(SkPicture* picture, Scalar opacity) {
     auto* op = appendOperation<Operations::DrawPicture>();
     op->picture = picture;
@@ -88,6 +102,7 @@ void DisplayList::appendPicture(SkPicture* picture, Scalar opacity) {
 
     op->picture->ref();
 }
+#endif
 
 void DisplayList::appendClipRound(const BorderRadius& borderRadius, Scalar width, Scalar height) {
     if (borderRadius.isEmpty()) {
@@ -202,13 +217,17 @@ std::pair<Valdi::Byte*, Valdi::Byte*> DisplayList::getBeginEndPtrs(size_t planeI
     return std::make_pair(beginPtr, endPtr);
 }
 
-static void prepareCanvas(SkCanvas* canvas, Scalar scaleX, Scalar scaleY, bool shouldClearCanvas) {
+static void prepareCanvas(NativeCanvas* canvas, Scalar scaleX, Scalar scaleY, bool shouldClearCanvas) {
     canvas->scale(scaleX, scaleY);
 
     if (shouldClearCanvas) {
         Paint paint;
         paint.setColor(Color::transparent());
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+        paint.setBlendMode(tgfx::BlendMode::Src);
+#else
         paint.setBlendMode(SkBlendMode::kSrc);
+#endif
         canvas->drawPaint(paint.getSkValue());
     }
 }
@@ -253,7 +272,11 @@ void DisplayList::draw(
 
     if (_hasMask) {
         // We need a dedicated layer texture to implement masking
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+        skiaCanvas->saveLayer(nullptr);
+#else
         skiaCanvas->saveLayer(nullptr, nullptr);
+#endif
     }
 
     DrawDisplayListVisitor visitor(skiaCanvas, scaleX, scaleY);

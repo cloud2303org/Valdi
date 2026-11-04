@@ -17,13 +17,13 @@ Rect CompositeMask::getBounds() const {
     return _bounds;
 }
 
-void CompositeMask::prepare(SkCanvas* canvas) {
+void CompositeMask::prepare(NativeCanvas* canvas) {
     for (const auto& mask : _masks) {
         mask->prepare(canvas);
     }
 }
 
-void CompositeMask::apply(SkCanvas* canvas) {
+void CompositeMask::apply(NativeCanvas* canvas) {
     // Need to reverse the order of the `prepare` operations because the flow is stack based.
     for (size_t i = _masks.size(); i-- > 0;) {
         const auto& mask = _masks[i];

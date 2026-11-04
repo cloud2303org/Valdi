@@ -8,14 +8,13 @@
 #pragma once
 
 #include "snap_drawing/cpp/Utils/Aliases.hpp"
+#include "snap_drawing/cpp/Utils/DrawingBackend.hpp"
 #include "utils/base/NonCopyable.hpp"
 
 struct hb_blob_t;
 struct hb_face_t;
 struct hb_font_t;
 struct hb_buffer_t;
-class SkTypeface;
-class SkFont;
 
 namespace Valdi {
 class CharacterSet;
@@ -77,9 +76,9 @@ public:
 
 class Harfbuzz {
 public:
-    static HBFace createFace(SkTypeface* typeface);
-    static HBFont createMainFont(const SkTypeface& typeface, const HBFace& hbFace);
-    static HBFont createSubFont(const HBFont& mainFont, SkFont* font);
+    static HBFace createFace(const NativeTypeface& typeface);
+    static HBFont createMainFont(const NativeTypeface& typeface, const HBFace& hbFace);
+    static HBFont createSubFont(const HBFont& mainFont, NativeFont* font);
 };
 
 } // namespace snap::drawing

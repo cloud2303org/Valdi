@@ -1,0 +1,22 @@
+{
+  "base_pin": "f0fd698d56b3b8ae797a242cf06aab6b70aed840",
+  "previous_patch_sha256": "706a80e20f54fe3a9e5d5d97b4431a39c32b429e5ae81fefbb4d95bca0484a0d",
+  "new_public_api_changes": "None beyond ROUND2 four-argument Picture::resolver; internal LoaderMgr unregister helper and FontFace state require matching archive rebuild.",
+  "patches": {
+    "thorvg-memory-font-nested-svg.patch": "b2c48f7cfe04c9a2a3536875f362db559a3ca41507c977da1372b2321005d8d1",
+    "thorvg-media-round3.patch": "45e54c85c493418d4f434f24dbbf9cd9cfcc786f2d2c04a5ef0853dbdf183455"
+  },
+  "vendor_files": {
+    "inc/thorvg.h": "6c4d2f833ae070e22b0c5ae6fcee11c038f208ffb6352aacb3803eac408f95d1",
+    "src/renderer/tvgLoader.h": "f0130f186a7d56093d58202a42e2e8a7cf07b21f19d48a1a99d8b24a36fc2b17",
+    "src/renderer/tvgLoaderMgr.cpp": "b55e7bcb5370fe2b6b2729dcdd26d1b33771eab5bebe2defe7e7ed675906b5a3",
+    "src/renderer/tvgLoaderMgr.h": "a1edbd4184fa693b73f94d80bdbe18904b3072e221497bc5105813b0167d286e",
+    "src/renderer/tvgPicture.cpp": "d3df4ab5d4cf2e6b36e00dabc243ea3c0a3452462a30ecdd2410df136b7c78f4",
+    "src/renderer/tvgPicture.h": "e2cb050acc9a088b363ed273b5af8bb44e4c3a1d1a29ccd0700548d082a28cac",
+    "src/renderer/tvgText.cpp": "3df161abb964d377872ee9c8f3f437c9a01443bfe6e2c6d6c58a325a8d8fe1d9",
+    "src/renderer/tvgText.h": "6eec2f1941e546922c3c162adb3e24ebe036900e14e86541ba739b14b7a04ecd",
+    "src/loaders/svg/tvgSvgCommon.h": "d5df4d4ceebf2fc8791991b142f9649078f53f68e4d11297cd07752f11ff3b29",
+    "src/loaders/svg/tvgSvgLoader.cpp": "d90a39a1ad31c73076050344075941afa878421ec643b8310e285245290ac1a5",
+    "src/loaders/svg/tvgSvgBuilder.cpp": "e9f6e838562b6cc444fae6f1ac12ff394b8b22f0e39a7d8df60781984ece5754"
+  }
+}

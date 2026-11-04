@@ -1,0 +1,22 @@
+{
+  "source_only": true,
+  "registered_cases": 92,
+  "prior_cases_preserved": 78,
+  "new_cases": 14,
+  "fixture_manifest_entries": 51,
+  "prior_fixture_entries_unchanged": 47,
+  "native_freeze": "thorvg-round3-native-freeze.json",
+  "files": {
+    "snap_drawing/experimental/tgfx/full/tests/media_checks.cpp": "bd67b02d6c811c855ec29be56d2e5ac934b3ca0027a83140a932f797e7983706",
+    "snap_drawing/experimental/tgfx/full/tests/media_checks.hpp": "6e4522ab405b722b15ff1b27882150330c37c71e6647b4acd31aa25d32833c2d",
+    "snap_drawing/experimental/tgfx/full/tests/media-data/generate_fixtures.py": "4d5dd64551b482e347bd047216e0d2b0608e2aa62bd48310140d517da18496c3",
+    "snap_drawing/experimental/tgfx/full/tests/media-data/manifest.json": "8ec1c93b80a43b7da68e86b8dff857e957805d783701781db293d349f66dd68c",
+    "snap_drawing/experimental/tgfx/full/tests/media-data/PROVENANCE.md": "23e7266f645dae01bdb1753675c9f8782b88e96fd3b309a61e3511ddaca8538d",
+    "snap_drawing/experimental/tgfx/README.md": "603ab38e04cdab746e0c46a70b59b832da9612263065de806a7dc5dc8164b35a",
+    "snap_drawing/src/snap_drawing/cpp/Utils/ThorvgMedia.cpp": "0004a69930d1aba58a044f03c72797847a84e6378661bf533bc536a060ed9677",
+    "snap_drawing/experimental/tgfx/full/tests/media-data/svg-embedded-font.svg": "1f512aefe35ca80e1cbfb8fe0e215b28c5eec1d8ee3d7d979912c2e5ace72597",
+    "snap_drawing/experimental/tgfx/full/tests/media-data/svg-nested-arial.svg": "f25e0db3b2a8ee157f4b24b1aa6ddc8cecf12f0a0356cf4af916ac5a7f378ac2",
+    "snap_drawing/experimental/tgfx/full/tests/media-data/svg-nested-owned.svg": "90c1edf8c4818618a0fb3fd37f1622b99bf2953b8644030ad327af271b55d4f5",
+    "snap_drawing/experimental/tgfx/full/tests/media-data/svg-nested-twice-arial.svg": "02f421052bfddc46539fba5e1ae7e38e3277969f80f8d002f9531187cec5684c"
+  }
+}

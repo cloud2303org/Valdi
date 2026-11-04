@@ -1,0 +1,49 @@
+name: TGFXValdiApp
+options:
+  deploymentTarget:
+    iOS: "15.0"
+settings:
+  base:
+    DEVELOPMENT_TEAM: ""
+    CODE_SIGNING_ALLOWED: NO
+    CLANG_ENABLE_OBJC_ARC: YES
+    # The read-only receipt check hashes the explicit experimental source tree.
+    ENABLE_USER_SCRIPT_SANDBOXING: NO
+targets:
+  TGFXValdiApp:
+    type: application
+    platform: iOS
+    sources:
+      - path: main.m
+      - path: ../.local/ios_sim_arm64/generated/ios
+        excludes: ["**/*.swift"]
+      - path: ../.local/ios_sim_arm64/package
+        type: folder
+        buildPhase: resources
+      - path: ../.local/ios_sim_arm64/generated/resources/ios/tgfx_acceptance.bundle
+        type: folder
+        buildPhase: resources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.valdiroutes.tgfxapp
+        HEADER_SEARCH_PATHS:
+          - "$(SRCROOT)/../.local/ios_sim_arm64/generated/ios"
+        LD_RUNPATH_SEARCH_PATHS: ["$(inherited)", "@executable_path/Frameworks"]
+        OTHER_LDFLAGS: ["$(inherited)", "-ObjC"]
+    preBuildScripts:
+      - name: Verify reviewed runtime stage
+        basedOnDependencyAnalysis: false
+        script: |
+          set -eu
+          "${NODE_BINARY:-node}" "$SRCROOT/../bridge/check-stage.mjs" \
+            "$SRCROOT/../.local/ios_sim_arm64"
+    info:
+      path: ../.local/ios-Info.plist
+      properties:
+        CFBundleDisplayName: TGFX Valdi App
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+    dependencies:
+      - framework: ../.local/ios_sim_arm64/runtime/ValdiRuntime.xcframework
+        embed: true
+      - sdk: libc++.tbd

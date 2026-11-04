@@ -1,3 +1,113 @@
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+#import <Metal/Metal.h>
+#import <QuartzCore/CAMetalLayer.h>
+#include "snap_drawing/cpp/Drawing/GraphicsContext/MetalGraphicsContext.hpp"
+#include "snap_drawing/cpp/Drawing/GraphicsContext/TGFXSurfaceCompletion.hpp"
+#include "tgfx/gpu/metal/MetalDevice.h"
+#include "tgfx/gpu/metal/MetalWindow.h"
+#include <algorithm>
+
+namespace snap::drawing {
+std::shared_ptr<tgfx::Device> makeTGFXOffscreenMetalDevice() { return tgfx::MetalDevice::Make(); }
+std::shared_ptr<tgfx::Device> MetalGraphicsContext::makeDevice(CFTypeRef device) {
+    return device ? tgfx::MetalDevice::MakeFrom((__bridge id<MTLDevice>)device) : nullptr;
+}
+std::shared_ptr<tgfx::Window> MetalGraphicsContext::makeWindow(CFTypeRef layer,
+    const std::shared_ptr<tgfx::Device>& device) {
+    if (!device || !layer) { return nullptr; }
+    CAMetalLayer* metalLayer = (__bridge CAMetalLayer*)layer;
+    auto metalDevice = std::static_pointer_cast<tgfx::MetalDevice>(device);
+    if (metalLayer.device && metalLayer.device != metalDevice->metalDevice()) { return nullptr; }
+    return tgfx::MetalWindow::MakeFrom(metalLayer, std::move(metalDevice));
+}
+MetalLayerSize MetalGraphicsContext::getMetalLayerSize(CFTypeRef layer) {
+    CGSize size = ((__bridge CAMetalLayer*)layer).drawableSize;
+    return {size.width, size.height};
+}
+
+class MetalTextureDrawableSurface : public DrawableSurface {
+public:
+    MetalTextureDrawableSurface(const Ref<MetalGraphicsContext>& context, CFTypeRef texture, int samples)
+        : _context(context), _texture(CFRetain(texture)), _sampleCount(std::max(1, samples)) {}
+    ~MetalTextureDrawableSurface() override {
+        if (_frame) {
+            (void)_frame->get();
+            if (_surface) {
+                discardTGFXSurface(_surface.get());
+                logTGFXCompletionError(
+                    DrawableSurfaceCanvas(_surface.get(), _surface->width(), _surface->height()).validate(),
+                    "Discarding failed Metal texture frame during cleanup");
+            }
+            _surface.reset();
+            _frame.reset();
+        }
+        { auto lock = _context->lockContext(); _surface.reset(); }
+        CFRelease(_texture);
+    }
+    GraphicsContext* getGraphicsContext() override { return _context.get(); }
+    Valdi::Result<DrawableSurfaceCanvas> prepareCanvas() override {
+        if (!_frame) { _completionResult = Valdi::Void(); _frame = _context->lockContext(); }
+        if (!*_frame) {
+            _frame.reset();
+            return Valdi::Error("Failed to lock TGFX Metal texture device");
+        }
+        if (!_surface) {
+            id<MTLTexture> texture = (__bridge id<MTLTexture>)_texture;
+            tgfx::MetalTextureInfo info;
+            info.texture = (__bridge const void*)texture;
+            info.format = static_cast<unsigned>(texture.pixelFormat);
+            tgfx::BackendTexture backend(info, static_cast<int>(texture.width), static_cast<int>(texture.height));
+            _surface = tgfx::Surface::MakeFrom(_frame->get(), backend, tgfx::ImageOrigin::TopLeft, _sampleCount);
+            if (!_surface) {
+                _frame.reset();
+                return Valdi::Error("Failed to wrap native MTLTexture in TGFX surface");
+            }
+        }
+        DrawableSurfaceCanvas canvas(_surface.get(), _surface->width(), _surface->height());
+        auto status = canvas.validate();
+        if (!status) {
+            _completionResult = status;
+            _surface.reset();
+            _frame.reset();
+            return status.moveError();
+        }
+        return canvas;
+    }
+    void flush() override {
+        logTGFXCompletionError(flushWithResult(), "TGFX legacy Metal texture flush");
+    }
+    Valdi::Result<Valdi::Void> flushWithResult() override {
+        if (!_frame) { return _completionResult; }
+        // Complete external-queue consumers' GPU writes before returning success.
+        (void)_frame->get();
+        _completionResult = DrawableSurfaceCanvas(_surface.get(), _surface->width(), _surface->height()).flush(true);
+        if (!_completionResult) {
+            discardTGFXSurface(_surface.get());
+            _surface.reset();
+        }
+        _frame.reset();
+        return _completionResult;
+    }
+private:
+    Ref<MetalGraphicsContext> _context;
+    CFTypeRef _texture;
+    int _sampleCount;
+    std::shared_ptr<tgfx::Surface> _surface;
+    std::unique_ptr<TGFXContextLock> _frame;
+    Valdi::Result<Valdi::Void> _completionResult = Valdi::Void();
+};
+Ref<DrawableSurface> MetalGraphicsContext::createSurfaceWrappingTexture(CFTypeRef textureRef, int sampleCount) {
+    if (!textureRef || !getDevice()) { return nullptr; }
+    id<MTLTexture> texture = (__bridge id<MTLTexture>)textureRef;
+    auto requiredUsage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead;
+    if (texture.device != (__bridge id<MTLDevice>)_mtlDevice || texture.textureType != MTLTextureType2D ||
+        (texture.usage & requiredUsage) != requiredUsage || texture.width == 0 || texture.height == 0) {
+        return nullptr;
+    }
+    return Valdi::makeShared<MetalTextureDrawableSurface>(Valdi::strongSmallRef(this), textureRef, sampleCount);
+}
+} // namespace snap::drawing
+#else
 #import <Metal/Metal.h>
 #import <QuartzCore/CAMetalLayer.h>
 
@@ -60,3 +170,5 @@ sk_sp<SkSurface> MetalGraphicsContext::makeSurface(GrDirectContext *grContext, c
 }
 
 }
+
+#endif // SNAP_DRAWING_TGFX_EXPERIMENT

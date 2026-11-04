@@ -1,0 +1,92 @@
+plugins {
+    // AGP 9 includes Kotlin support. Both backends use this exact project.
+    id 'com.android.application' version '9.4.1'
+}
+
+def requiredPath = { name ->
+    def value = providers.gradleProperty(name).orNull
+    if (!value || !new File(value).isAbsolute())
+        throw new GradleException("Supply -P${name}=<absolute path>")
+    return new File(value).canonicalFile
+}
+def stage = requiredPath('stagePath')
+def build = requiredPath('buildPath')
+if (build.toPath().startsWith(stage.toPath()) || stage.toPath().startsWith(build.toPath()))
+    throw new GradleException('stagePath and buildPath must be separate directory trees')
+layout.buildDirectory.set(build)
+
+def hostAssets = layout.buildDirectory.dir('host-assets')
+def verifyStage = tasks.register('verifyBenchmarkStage', Exec) {
+    // Read the external stage; never create a receipt or mutate it.
+    def arguments = [providers.gradleProperty('pythonBinary').getOrElse('python3'),
+        file('check_stage.py').absolutePath, '--platform', 'android', '--stage', stage.absolutePath]
+    if (providers.gradleProperty('backend').isPresent())
+        arguments.addAll(['--backend', providers.gradleProperty('backend').get()])
+    commandLine arguments
+    outputs.dir(hostAssets)
+    outputs.upToDateWhen { false }
+    doLast {
+        delete(hostAssets)
+        copy {
+            from(new File(stage, 'package'))
+            into(hostAssets)
+        }
+        copy {
+            from(new File(stage, 'provenance.json'))
+            into(hostAssets)
+        }
+    }
+}
+
+android {
+    namespace = 'io.valdiroutes.renderbenchmark'
+    compileSdk = 36
+    buildToolsVersion = '36.0.0'
+    defaultConfig {
+        applicationId = 'io.valdiroutes.renderbenchmark'
+        minSdk = 24
+        targetSdk = 36
+        versionCode = 1
+        versionName = '1.0'
+        ndk { abiFilters 'arm64-v8a' }
+    }
+    sourceSets {
+        main {
+            // AGP's Kotlin roots must be absolute for externally staged code.
+            kotlin.directories.add(new File(stage, 'generated/android').absolutePath)
+            // AGP 9 rejects Provider/TaskProvider inputs in the SourceSet API.
+            // Task ordering is explicit below because this is a concrete path.
+            assets.srcDir(hostAssets.get().asFile.absolutePath)
+            res.srcDir(new File(stage, 'generated/resources/android'))
+            // Optional companion NDK dependencies (e.g. libc++_shared.so).
+            jniLibs.srcDir(new File(stage, 'jniLibs'))
+        }
+    }
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+    // Opt in explicitly for local device installation only. No signing by default.
+    def localDebugKey = providers.gradleProperty('localDebugKey').getOrElse('false') == 'true'
+    buildTypes {
+        release {
+            minifyEnabled = false
+            shrinkResources = false
+            debuggable = false
+            if (localDebugKey) signingConfig = signingConfigs.debug
+        }
+    }
+}
+
+dependencies {
+    implementation files(new File(stage, 'runtime/valdi_runtime.aar'))
+    implementation 'androidx.appcompat:appcompat:1.7.1'
+    implementation 'androidx.dynamicanimation:dynamicanimation:1.1.0'
+    implementation 'androidx.lifecycle:lifecycle-process:2.2.0'
+    implementation 'androidx.exifinterface:exifinterface:1.3.3'
+}
+
+tasks.named('preBuild').configure { dependsOn verifyStage }
+tasks.matching { it.name.startsWith('merge') && it.name.endsWith('Assets') }.configureEach {
+    dependsOn verifyStage
+}

@@ -23,7 +23,7 @@ namespace snap::drawing {
 
 class ScopedFontManager : public IFontManager {
 public:
-    ScopedFontManager(SkFontMgr& fontMgr, Valdi::ILogger& logger, const Ref<IFontManager>& parent)
+    ScopedFontManager(NativeFontManager& fontMgr, Valdi::ILogger& logger, const Ref<IFontManager>& parent)
         : _typefaceRegistry(logger, nullptr), _fontMgr(fontMgr), _parent(parent) {}
 
     ~ScopedFontManager() override = default;
@@ -77,7 +77,7 @@ public:
 
 private:
     TypefaceRegistry _typefaceRegistry;
-    SkFontMgr& _fontMgr;
+    NativeFontManager& _fontMgr;
     Ref<IFontManager> _parent;
     Valdi::Mutex _mutex;
 };
@@ -88,11 +88,14 @@ const char* kFallbackDefaultFontFamilyName = "helvetica";
 const char* kFallbackDefaultFontFamilyName = "Helvetica";
 #endif
 
-static Valdi::StringBox getFamilyNameAtIndex(SkFontMgr* mgr, size_t index) {
+static Valdi::StringBox getFamilyNameAtIndex(NativeFontManager* mgr, size_t index) {
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+    return Valdi::StringCache::makeStringFromCLiteral(mgr->familyName(index).c_str());
+#else
     SkString familyName;
     mgr->getFamilyName(static_cast<int>(index), &familyName);
-
     return Valdi::StringCache::makeStringFromCLiteral(familyName.c_str());
+#endif
 }
 
 FontManager::FontManager(Valdi::ILogger& logger, bool enableTextShaperCache)
@@ -119,15 +122,30 @@ bool FontManager::doLoad(std::unique_lock<Valdi::Mutex>& /*lock*/) {
     _fontManager = snap_drawing::getSkFontMgrSingleton();
 
     // Query the system for the default font
-    auto skTypeface = sk_sp<SkTypeface>(_fontManager->matchFamilyStyle(nullptr, _defaultFontStyle.getSkValue()));
+    auto skTypeface = NativeTypeface(_fontManager->matchFamilyStyle(nullptr, _defaultFontStyle.getSkValue()));
     if (skTypeface == nullptr) {
         // On Android (at least on some devices) the flow lands here, so use the fallback default
         _defaultFontFamilyName = Valdi::StringCache::makeStringFromCLiteral(kFallbackDefaultFontFamilyName);
     } else {
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+        // Android's configured family "sans-serif" can contain a face whose
+        // SFNT family is "Roboto". Resolve future styles through the config key.
+        _defaultFontFamilyName =
+            Valdi::StringCache::makeStringFromCLiteral(_fontManager->defaultFamilyName().c_str());
+#else
         SkString familyName;
         skTypeface->getFamilyName(&familyName);
         _defaultFontFamilyName = Valdi::StringCache::makeStringFromCLiteral(familyName.c_str());
+#endif
     }
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+    for (const auto& unsupported : _fontManager->unsupportedConfigurations()) {
+        // Invalid system font configurations must remain visible in builds
+        // where the ordinary diagnostic logging macros are compiled out.
+        if (_logger.isEnabledForType(Valdi::LogTypeError))
+            _logger.log(Valdi::LogTypeError, unsupported);
+    }
+#endif
     // This will create a FontFamily object for the default font and cache it
     _typefaceRegistry.getFontFamilyByFamilyName(_defaultFontFamilyName);
 
@@ -170,6 +188,39 @@ Valdi::Result<Valdi::Ref<Font>> FontManager::getDefaultFontWithStyle(std::unique
 Valdi::Result<Valdi::Ref<Font>> FontManager::getFont(
     const Valdi::Ref<Typeface>& typeface, FontStyle fontStyle, Scalar fontSize, double scale, bool respectDynamicType) {
     auto guard = lock();
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+    if (typeface->fontStyle() == fontStyle) {
+        return getFontWithTypefaceAndSize(guard, typeface, fontSize, scale, respectDynamicType);
+    }
+    if (typeface->isCustom()) {
+#if !defined(__APPLE__)
+        if (!typeface->getSkValue()->getVariationDesignPosition().empty()) {
+            auto native = makeTgfxTypefaceWithStyle(typeface->getSkValue(), fontStyle);
+            if (native) {
+                auto resolved = Valdi::makeShared<Typeface>(std::move(native), typeface->familyName(), true);
+                return getFontWithTypefaceAndSize(guard, resolved, fontSize, scale, respectDynamicType);
+            }
+            auto registered = _typefaceRegistry.getTypefaceWithFamilyNameAndStyle(
+                *_fontManager, typeface->familyName(), fontStyle);
+            if (registered && registered.value()->getId() != typeface->getId())
+                return getFontWithTypefaceAndSize(guard, registered.value(), fontSize, scale, respectDynamicType);
+            return Valdi::Error("Could not select the requested style for the variable custom font");
+        }
+#endif
+        return getFontWithTypefaceAndSize(guard, typeface, fontSize, scale, respectDynamicType);
+    }
+    auto registered = _typefaceRegistry.getTypefaceWithFamilyNameAndStyle(
+        *_fontManager, typeface->familyName(), fontStyle);
+    if (registered) {
+        return getFontWithTypefaceAndSize(guard, registered.value(), fontSize, scale, respectDynamicType);
+    }
+    // Anonymous Android fallback families still have a style set, even though
+    // their SFNT names are not Android family aliases.
+    auto native = _fontManager->matchTypefaceStyle(typeface->getSkValue(), fontStyle.getSkValue());
+    if (!native) return registered.moveError();
+    auto resolved = Valdi::makeShared<Typeface>(std::move(native), typeface->familyName(), false);
+    return getFontWithTypefaceAndSize(guard, resolved, fontSize, scale, respectDynamicType);
+#else
     if (typeface->isCustom()) {
         // TODO(simon): Is this still necessary now that we have the font family system?
         return getFontWithTypefaceAndSize(guard, typeface, fontSize, scale, respectDynamicType);
@@ -177,6 +228,7 @@ Valdi::Result<Valdi::Ref<Font>> FontManager::getFont(
         return getFontWithFamilyNameAndStyle(
             guard, typeface->familyName(), fontStyle, fontSize, scale, respectDynamicType);
     }
+#endif
 }
 
 Valdi::Result<Valdi::Ref<Font>> FontManager::getFontWithFamilyNameAndStyle(std::unique_lock<Valdi::Mutex>& lock,
@@ -270,7 +322,7 @@ Ref<FontFamily> FontManager::onFontFamilyMissing(const String& familyName) {
         }
     }
 
-    const sk_sp<SkFontStyleSet> styleSet(_fontManager->matchFamily(familyName.getCStr()));
+    const NativeFontStyleSetHandle styleSet(_fontManager->matchFamily(familyName.getCStr()));
     if (styleSet == nullptr || styleSet->count() == 0) {
         return nullptr;
     }
@@ -312,26 +364,56 @@ Ref<FontFamily> FontManager::resolveFallbackFontFamilyForCharacter(std::unique_l
 
     VALDI_TRACE("SnapDrawing.matchFamilyStyleCharacter");
     auto skTypeface =
-        sk_sp<SkTypeface>(_fontManager->matchFamilyStyleCharacter(nullptr, SkFontStyle(), nullptr, 0, character));
+        NativeTypeface(_fontManager->matchFamilyStyleCharacter(nullptr, NativeFontStyle(), nullptr, 0, character));
     if (skTypeface == nullptr) {
         return nullptr;
     }
 
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+    auto resolvedFamilyname = Valdi::StringCache::makeStringFromCLiteral(skTypeface->fontFamily().c_str());
+#else
     SkString skFamilyName;
     skTypeface->getFamilyName(&skFamilyName);
     auto resolvedFamilyname = Valdi::StringCache::getGlobal().makeStringFromLiteral(skFamilyName.c_str());
+#endif
 
     return _typefaceRegistry.getFontFamilyByFamilyName(resolvedFamilyname);
 }
 
-Valdi::Result<Valdi::Ref<Font>> FontManager::getCompatibleFont(const String& /*familyName*/,
+Valdi::Result<Valdi::Ref<Font>> FontManager::getCompatibleFont(const String& familyName,
                                                                FontStyle fontStyle,
                                                                Scalar fontSize,
                                                                double scale,
-                                                               const char** /*bcp47*/,
-                                                               size_t /*bcp47Count*/,
+                                                               const char** bcp47,
+                                                               size_t bcp47Count,
                                                                Character character) {
     auto guard = lock();
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+    // Registered custom fallback families take precedence over the system.
+    auto custom = _typefaceRegistry.getFontFamilyForCharacterAndStyle(*_fontManager, character, fontStyle);
+    if (custom != nullptr) return getFontFromFamily(guard, custom, fontStyle, fontSize, scale, true);
+    auto key = std::string(familyName.toStringView()) + ":" + std::to_string(fontStyle.hash()) + ":" + std::to_string(character);
+    for (size_t i = 0; bcp47 && i < bcp47Count; ++i) {
+        key += ":";
+        if (bcp47[i]) key += bcp47[i];
+    }
+    auto cached = _nativeFallbackTypefaces.find(key);
+    if (cached != _nativeFallbackTypefaces.end())
+        return getFontWithTypefaceAndSize(guard, cached->second, fontSize, scale, true);
+    auto native = _fontManager->matchFamilyStyleCharacter(
+        familyName.getCStr(), fontStyle.getSkValue(), bcp47, bcp47Count, character);
+    if (!native) return Valdi::Error("Could not resolve a system font covering the requested character");
+    auto resolvedFamily = Valdi::StringCache::makeStringFromCLiteral(native->fontFamily().c_str());
+    auto typeface = Valdi::makeShared<Typeface>(std::move(native), resolvedFamily, false);
+    // This key also includes family/style/locale. Bound the cache rather than
+    // retaining their cross product for the lifetime of the font manager.
+    if (_nativeFallbackTypefaces.size() >= 1024) _nativeFallbackTypefaces.clear();
+    _nativeFallbackTypefaces[key] = typeface;
+    return getFontWithTypefaceAndSize(guard, typeface, fontSize, scale, true);
+#else
+    (void)familyName;
+    (void)bcp47;
+    (void)bcp47Count;
     const auto& it = _fallbackFontFamilies.find(character);
     if (it != _fallbackFontFamilies.end()) {
         return getFontFromFamily(guard, it->second, fontStyle, fontSize, scale, true);
@@ -341,11 +423,30 @@ Valdi::Result<Valdi::Ref<Font>> FontManager::getCompatibleFont(const String& /*f
     _fallbackFontFamilies[character] = fontFamily;
 
     return getFontFromFamily(guard, fontFamily, fontStyle, fontSize, scale, true);
+#endif
 }
 
 Valdi::Result<Ref<Font>> FontManager::getEmojiFont(Scalar fontSize, double scale) {
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+    auto guard = lock();
+    if (_nativeEmojiTypeface == nullptr) {
+        auto custom = _typefaceRegistry.getFontFamilyForCharacterAndStyle(*_fontManager, 0x270c, _defaultFontStyle);
+        if (custom != nullptr) {
+            auto face = custom->matchStyle(*_fontManager, _defaultFontStyle);
+            if (face != nullptr && face->isEmoji()) _nativeEmojiTypeface = std::move(face);
+        }
+        if (_nativeEmojiTypeface == nullptr) {
+            auto native = _fontManager->matchEmoji(_defaultFontStyle.getSkValue(), 0x270c);
+            if (!native) return Valdi::Error("Could not resolve a color emoji font");
+            auto family = Valdi::StringCache::makeStringFromCLiteral(native->fontFamily().c_str());
+            _nativeEmojiTypeface = Valdi::makeShared<Typeface>(std::move(native), family, false);
+        }
+    }
+    return getFontWithTypefaceAndSize(guard, _nativeEmojiTypeface, fontSize, scale, true);
+#else
     Character emoji = 0x270C;
     return getCompatibleFont(String(), _defaultFontStyle, fontSize, scale, nullptr, 0, emoji);
+#endif
 }
 
 Ref<IFontManager> FontManager::makeScoped() {
@@ -422,6 +523,10 @@ void FontManager::registerTypeface(const String& fontFamilyName,
     _typefaceRegistry.registerTypeface(fontFamilyName, fontStyle, canUseAsFallback, loadableTypeface);
     // Clear fallback font family cache, so that we can pickup our new typeface
     _fallbackFontFamilies.clear();
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+    _nativeFallbackTypefaces.clear();
+    _nativeEmojiTypeface = nullptr;
+#endif
 }
 
 void FontManager::onFontResolveFailed(const String& fontName, const Valdi::Error& error) {
@@ -432,7 +537,7 @@ const Ref<TextShaper>& FontManager::getTextShaper() const {
     return _textShaper;
 }
 
-const sk_sp<SkFontMgr>& FontManager::getSkValue() {
+const NativeFontManagerHandle& FontManager::getSkValue() {
     auto guard = lock();
     return _fontManager;
 }

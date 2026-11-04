@@ -35,6 +35,7 @@ protected:
         auto bitmap = makeShared<TestBitmap>(1, 1);
         auto surface = context.createBitmapSurface(bitmap);
         _layerRoot->drawInCanvas(surface->prepareCanvas().value());
+        surface->flush();
 
         _currentTime += 1.0;
 

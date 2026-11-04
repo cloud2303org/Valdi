@@ -21,7 +21,7 @@
 #include "snap_drawing/cpp/Drawing/Mask/PaintMask.hpp"
 #include "snap_drawing/cpp/Utils/GradientWrapper.hpp"
 
-#include "include/core/SkBlendMode.h"
+#include "snap_drawing/cpp/Drawing/BlendMode.hpp"
 
 #include <iostream>
 
@@ -97,7 +97,7 @@ void Layer::draw(DisplayList& displayList, DrawMetrics& metrics) {
 
         Paint maskPaint;
         _maskImageGradient.applyToPaint(maskPaint);
-        maskPaint.setBlendMode(SkBlendMode::kDstIn);
+        maskPaint.setBlendMode(toSkBlendMode(BlendModeDstIn));
 
         maskImage = Valdi::makeShared<PaintMask>(maskPaint, Path(), viewRect);
     }

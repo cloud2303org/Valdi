@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "kind": "tgfx-native-safety",
+  "status": "blocked",
+  "scope": "async-writers-and-cancellation",
+  "sourceRoot": "/Users/cloud/.config/superpowers/worktrees/Valdi-node-only/tgfx-prototype-20261104",
+  "sourceRevision": "02a8f990819c11ce8df25bcc0344c042368dcc20",
+  "sourceStateSha256": null,
+  "profiles": ["ios_sim_arm64", "android_arm64"],
+  "blockers": [
+    "Parent reports TGFX6acf/full native result remains failed.",
+    "P1 async writers and cancellation remain under GPU-owner correction.",
+    "No native runtime or managed output acceptance has run."
+  ],
+  "evidence": [],
+  "note": "Recorded parent status at source handoff, not a live safety attestation. This blocked record must be rejected by runtime-receipt.mjs. Parent must supply a new source-matched cleared review after the actual correction."
+}

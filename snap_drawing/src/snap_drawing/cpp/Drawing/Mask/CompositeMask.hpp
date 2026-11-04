@@ -15,9 +15,9 @@ public:
 
     Rect getBounds() const override;
 
-    void prepare(SkCanvas* canvas) override;
+    void prepare(NativeCanvas* canvas) override;
 
-    void apply(SkCanvas* canvas) override;
+    void apply(NativeCanvas* canvas) override;
 
     String getDescription() override;
 

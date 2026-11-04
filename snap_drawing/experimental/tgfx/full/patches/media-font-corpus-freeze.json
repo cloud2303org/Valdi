@@ -1,0 +1,76 @@
+{
+  "source_only": true,
+  "registered_cases": 96,
+  "fixture_manifest_entries": 52,
+  "parent_run6_media": {
+    "passed": 87,
+    "failed": 9,
+    "total": 96
+  },
+  "old_corpus": "HgQ",
+  "new_corpus": "QQQQ",
+  "native_reference_string_changes": 4,
+  "previous_test_source_otherwise_identical": true,
+  "fonts_thresholds_tolerances_unchanged": true,
+  "changed_fixture_entries": [
+    "svg-nested-owned.svg",
+    "svg-owned-text.svg"
+  ],
+  "other_fixture_entries_unchanged": 50,
+  "production_sources_unchanged": true,
+  "vendor_sources_changed": false,
+  "native_archive_rebuild_required_for_corpus": false,
+  "source_font_metrics": {
+    "NotoSans-Regular.ttf": {
+      "glyph_id": 52,
+      "units_per_em": 1000,
+      "advance_units": 781,
+      "Q_bounds_units": [
+        61,
+        -170,
+        720,
+        725
+      ],
+      "font_size": 32,
+      "corpus": "QQQQ",
+      "advance_pixels": 99.968,
+      "ink_bounds_pixels": [
+        9.952,
+        20.8,
+        106.016,
+        49.44
+      ]
+    },
+    "Montserrat-Regular.ttf": {
+      "glyph_id": 167,
+      "units_per_em": 1000,
+      "advance_units": 839,
+      "Q_bounds_units": [
+        52,
+        -139,
+        819,
+        706
+      ],
+      "font_size": 32,
+      "corpus": "QQQQ",
+      "advance_pixels": 107.392,
+      "ink_bounds_pixels": [
+        9.664,
+        21.408,
+        114.752,
+        48.448
+      ]
+    }
+  },
+  "old_evidence": "round4-before-font-corpus/freeze.json",
+  "new_runtime_result": null,
+  "files": {
+    "snap_drawing/experimental/tgfx/full/tests/media_checks.cpp": "e2e2393e40f60f478e821e97dff34eb1734f4fc20e676b44644d22ae4513d5db",
+    "snap_drawing/experimental/tgfx/full/tests/media-data/generate_fixtures.py": "6d5a32e27dd3180f8728eeac56c16347b7d66857d963fb2c60e1c45c9f22c382",
+    "snap_drawing/experimental/tgfx/full/tests/media-data/svg-owned-text.svg": "f425f9400f940dde9f922bd30cde0d7166c790a513dc4c0872989c0ed842d804",
+    "snap_drawing/experimental/tgfx/full/tests/media-data/svg-nested-owned.svg": "68c7b3086ea61c11ad0caff83bf4861705b21253120fc683c050ed664647dc9e",
+    "snap_drawing/experimental/tgfx/full/tests/media-data/manifest.json": "83312a8fd70d753d4aeea26de32f077f80cca1479f4cedcf1e3e014577a9e2f6",
+    "snap_drawing/experimental/tgfx/full/tests/media-data/PROVENANCE.md": "6cdd5b43f229ea471da996e2172f0b22d2364a9856e1d2bb90f5c827ca2c256d",
+    "snap_drawing/experimental/tgfx/README.md": "78baed55b7e3c633df254339548efc60a57ef228ff1e59a3f03169871c4ef8e1"
+  }
+}

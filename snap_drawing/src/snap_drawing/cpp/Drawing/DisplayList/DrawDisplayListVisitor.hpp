@@ -9,7 +9,6 @@
 
 #include "snap_drawing/cpp/Drawing/DisplayList/DisplayListOperations.hpp"
 
-class SkCanvas;
 
 namespace snap::drawing {
 
@@ -18,7 +17,7 @@ namespace snap::drawing {
  */
 class DrawDisplayListVisitor {
 public:
-    DrawDisplayListVisitor(SkCanvas* canvas, Scalar scaleX, Scalar scaleY);
+    DrawDisplayListVisitor(NativeCanvas* canvas, Scalar scaleX, Scalar scaleY);
 
     void visit(const Operations::PushContext& pushContext);
 
@@ -37,7 +36,7 @@ public:
     void visit(const Operations::ApplyMask& applyMask);
 
 private:
-    SkCanvas* _canvas;
+    NativeCanvas* _canvas;
     Scalar _scaleX;
     Scalar _scaleY;
     Rect _tempRect;

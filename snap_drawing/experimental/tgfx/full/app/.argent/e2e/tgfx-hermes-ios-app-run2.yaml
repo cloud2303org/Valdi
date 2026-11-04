@@ -1,0 +1,12 @@
+steps:
+  - launch: io.valdiroutes.tgfxapp
+  - await:
+      visible: { id: tgfx-app-status }
+      timeout: 20000
+  - await:
+      idle: true
+      timeout: 15000
+  - assert:
+      text:
+        in: { id: tgfx-app-status }
+        equals: PASS 9/9 root=native

@@ -1,0 +1,103 @@
+plugins {
+    id 'com.android.application' version '9.4.1'
+}
+
+layout.buildDirectory.set(layout.projectDirectory.dir('.local/build'))
+
+// The pinned TGFX revision has no android/libtgfx sources. Other parent-supplied
+// revisions can explicitly supply their real helper Java source root here.
+def tgfxJavaDir = providers.gradleProperty('tgfxAndroidJavaDir').orNull
+def djinniJavaDir = file('../../../../../../third-party/djinni-support-lib/src/djinni/java')
+def mediaData = file('../../tests/media-data')
+def textData = file('../../tests/text-data')
+def fixturesAssets = layout.projectDirectory.dir('.local/generated-assets')
+
+android {
+    namespace = 'io.valdiroutes.tgfxfullprobe'
+    compileSdk = 36
+    buildToolsVersion = '36.0.0'
+
+    defaultConfig {
+        applicationId = 'io.valdiroutes.tgfxfullprobe'
+        minSdk = 24
+        targetSdk = 36
+        versionCode = 1
+        versionName = '1.0'
+        ndk {
+            abiFilters 'arm64-v8a'
+        }
+    }
+
+    sourceSets {
+        main {
+            jniLibs.srcDirs = ['.local/jniLibs']
+            assets.srcDirs = [fixturesAssets.asFile]
+            java.srcDir(djinniJavaDir)
+            java.exclude 'com/dropbox/djinni/**'
+            if (tgfxJavaDir != null) {
+                java.srcDir(file(tgfxJavaDir))
+            }
+        }
+    }
+
+    buildFeatures {
+        buildConfig = false
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    buildTypes {
+        release {
+            // JNI calls the real TGFX support classes and our typed result by name.
+            minifyEnabled = false
+        }
+    }
+}
+
+dependencies {
+    // Real tgfx/src/platform/android/NativeCodec.cpp uses this exact Java API.
+    implementation 'androidx.exifinterface:exifinterface:1.3.3'
+    implementation 'javax.inject:javax.inject:1'
+}
+
+def prepareFixtures = tasks.register('prepareFullFixtures', Sync) {
+    from(mediaData) {
+        into 'fixtures/media-data'
+        exclude '**/*.py'
+    }
+    from(textData) {
+        into 'fixtures/text-data'
+    }
+    into fixturesAssets
+    doFirst {
+        for (required in [new File(mediaData, 'manifest.json'),
+                          new File(mediaData, 'NotoSans-Regular.ttf'),
+                          new File(textData, 'RobotoFlex.ttf')]) {
+            if (!required.isFile()) {
+                throw new GradleException("Missing real bundled fixture: ${required}")
+            }
+        }
+    }
+}
+
+tasks.named('preBuild').configure {
+    dependsOn prepareFixtures
+    doFirst {
+        // Bazel owns the single native build. Gradle only packages its output.
+        for (name in ['libsnap_tgfx_full_probe.so', 'libc++_shared.so']) {
+            def library = file(".local/jniLibs/arm64-v8a/${name}")
+            if (!library.isFile()) {
+                throw new GradleException("Missing parent-built native input: ${library}. See ../README.md.")
+            }
+        }
+        if (tgfxJavaDir != null && !file(tgfxJavaDir).isDirectory()) {
+            throw new GradleException('tgfxAndroidJavaDir must be the real TGFX helper Java source root')
+        }
+        if (!new File(djinniJavaDir, 'com/snapchat/djinni/NativeObjectManager.java').isFile()) {
+            throw new GradleException('Missing real Djinni Java support required by the framework JNI_OnLoad')
+        }
+    }
+}

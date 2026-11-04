@@ -1,0 +1,49 @@
+{
+  "date": "2026-11-04",
+  "testCount": 26,
+  "originalTextCases": 20,
+  "newShadowCases": 6,
+  "validation": "source-only; parent owns all native compilation and execution",
+  "parentEvidence": {
+    "priorTextSuite": "root9/run4 17/20 before these corrections",
+    "coreTextProbe": "/tmp/valdi-tgfx-full-20261104/coretext-diagnostic1/receipt.json",
+    "probeSourceSHA256": "3009bd4824dda0def37ce65b568a19ff072b7e1646c55bc94eb75e654eb59061"
+  },
+  "files": [
+    {
+      "path": "snap_drawing/src/snap_drawing/cpp/Layers/TextLayer.cpp",
+      "bytes": 37528,
+      "sha256": "b3d3b8d480ae53a18372a838852e5bfa7c64b712468d7802935050ca759dcf14"
+    },
+    {
+      "path": "snap_drawing/src/snap_drawing/cpp/Layers/TextLayer.hpp",
+      "bytes": 9580,
+      "sha256": "ae8700af75ffa09ee04a082577b12fad8405af56cd9f05fd4ac266b26b036607"
+    },
+    {
+      "path": "snap_drawing/experimental/tgfx/full/tests/text_checks.cpp",
+      "bytes": 61884,
+      "sha256": "3d038e092d5e29552b4a4c55bbba06c5dfc51765cf6a45bcdecef8c7e2fbc511"
+    },
+    {
+      "path": "snap_drawing/experimental/tgfx/full/tests/text_checks.hpp",
+      "bytes": 1269,
+      "sha256": "828e977ef612249155e335665ffe2f142c63b7022cdadfa6b3ebc1f88a02e2a5"
+    },
+    {
+      "path": "snap_drawing/experimental/tgfx/full/tests/text-data/PROVENANCE.md",
+      "bytes": 14008,
+      "sha256": "5e524df389031023e1209953756f49f7e576732076fb2b3209f3680f2c9def92"
+    },
+    {
+      "path": "snap_drawing/experimental/tgfx/full/tests/text-data/CORETEXT_RUN4_DIAGNOSIS.md",
+      "bytes": 8868,
+      "sha256": "9d507142aede178147cf0e25e050508e3a6b489840d86375e393b21c14f96d30"
+    },
+    {
+      "path": "snap_drawing/experimental/tgfx/full/tests/text-data/selected-face.ttc",
+      "bytes": 2344708,
+      "sha256": "30af1141f412f2490e3f724856223b5a6e0040ca9e6d28f8f667dc216e51c725"
+    }
+  ]
+}

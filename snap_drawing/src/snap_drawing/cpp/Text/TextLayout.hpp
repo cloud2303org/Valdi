@@ -14,7 +14,7 @@
 
 #include "snap_drawing/cpp/Utils/Geometry.hpp"
 
-#include "include/core/SkTextBlob.h"
+#include "snap_drawing/cpp/Text/NativeTextBlob.hpp"
 
 #include "valdi_core/cpp/Utils/Value.hpp"
 
@@ -174,7 +174,7 @@ struct TextLayoutEntrySegment {
 };
 
 struct TextLayoutEntry {
-    sk_sp<SkTextBlob> textBlob;
+    NativeTextBlob textBlob;
     Rect bounds;
     std::optional<Color> color;
     std::vector<TextLayoutEntrySegment> segments;

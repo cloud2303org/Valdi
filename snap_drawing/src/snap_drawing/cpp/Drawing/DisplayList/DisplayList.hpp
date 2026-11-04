@@ -21,7 +21,7 @@
 
 #include "valdi_core/cpp/Utils/Value.hpp"
 
-#include "include/core/SkPicture.h"
+#include "snap_drawing/cpp/Utils/DrawingBackend.hpp"
 
 #include <optional>
 #include <vector>
@@ -68,7 +68,11 @@ public:
     void popContext();
 
     void appendLayerContent(const LayerContent& layerContent, Scalar opacity);
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+    void appendPicture(const NativePicture& picture, Scalar opacity, const Rect& bounds);
+#else
     void appendPicture(SkPicture* picture, Scalar opacity);
+#endif
     void appendClipRound(const BorderRadius& borderRadius, Scalar width, Scalar height);
     void appendClipRect(Scalar width, Scalar height);
 

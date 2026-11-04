@@ -1,0 +1,4 @@
+.local/
+android/.gradle/
+android/local.properties
+ios/*.xcodeproj/

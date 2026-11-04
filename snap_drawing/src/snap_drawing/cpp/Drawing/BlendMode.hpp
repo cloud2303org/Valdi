@@ -7,7 +7,11 @@
 
 #pragma once
 
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+#include "tgfx/core/BlendMode.h"
+#else
 #include "include/core/SkBlendMode.h"
+#endif
 
 namespace snap::drawing {
 
@@ -45,6 +49,10 @@ enum BlendMode {
     BlendModeLuminosity,        //!< luminosity of source with hue and saturation of destination
 };
 
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+tgfx::BlendMode toSkBlendMode(BlendMode blendMode);
+#else
 SkBlendMode toSkBlendMode(BlendMode blendMode);
+#endif
 
 } // namespace snap::drawing

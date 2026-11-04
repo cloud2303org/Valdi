@@ -1,3 +1,70 @@
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+#include "snap_drawing/cpp/Utils/BitmapUtils.hpp"
+#include "snap_drawing/cpp/Utils/TgfxMedia.hpp"
+
+namespace snap::drawing {
+tgfx::ColorType toSkiaColorType(Valdi::ColorType type) {
+    switch (type) {
+        case Valdi::ColorTypeRGBA8888: return tgfx::ColorType::RGBA_8888;
+        case Valdi::ColorTypeBGRA8888: return tgfx::ColorType::BGRA_8888;
+        case Valdi::ColorTypeAlpha8: return tgfx::ColorType::ALPHA_8;
+        case Valdi::ColorTypeGray8: return tgfx::ColorType::Gray_8;
+        case Valdi::ColorTypeRGBAF16: return tgfx::ColorType::RGBA_F16;
+        default: return tgfx::ColorType::Unknown;
+    }
+}
+
+tgfx::ImageInfo toSkiaImageInfo(const Valdi::BitmapInfo& info) {
+    auto alpha = info.alphaType == Valdi::AlphaTypeOpaque ? tgfx::AlphaType::Opaque
+                 : info.alphaType == Valdi::AlphaTypeUnpremul ? tgfx::AlphaType::Unpremultiplied
+                                                            : tgfx::AlphaType::Premultiplied;
+    return tgfx::ImageInfo::Make(info.width, info.height, toSkiaColorType(info.colorType), alpha, info.rowBytes);
+}
+
+Valdi::BitmapInfo toBitmapInfo(const tgfx::ImageInfo& info) {
+    Valdi::ColorType color = Valdi::ColorTypeUnknown;
+    switch (info.colorType()) {
+        case tgfx::ColorType::RGBA_8888: color = Valdi::ColorTypeRGBA8888; break;
+        case tgfx::ColorType::BGRA_8888: color = Valdi::ColorTypeBGRA8888; break;
+        case tgfx::ColorType::ALPHA_8: color = Valdi::ColorTypeAlpha8; break;
+        case tgfx::ColorType::Gray_8: color = Valdi::ColorTypeGray8; break;
+        case tgfx::ColorType::RGBA_F16: color = Valdi::ColorTypeRGBAF16; break;
+        default: break;
+    }
+    auto alpha = info.alphaType() == tgfx::AlphaType::Opaque ? Valdi::AlphaTypeOpaque
+                 : info.alphaType() == tgfx::AlphaType::Unpremultiplied ? Valdi::AlphaTypeUnpremul
+                                                                      : Valdi::AlphaTypePremul;
+    return {info.width(), info.height(), color, alpha, info.rowBytes()};
+}
+
+Valdi::Result<std::shared_ptr<tgfx::Data>> bitmapToData(const Valdi::Ref<Valdi::IBitmap>& bitmap,
+                                                     const Valdi::BitmapInfo& info,
+                                                     bool copy) {
+    if (bitmap == nullptr || !tgfxMediaValidBitmapInfo(info) || bitmap->getInfo() != info) {
+        return Valdi::Error("Invalid bitmap info");
+    }
+    auto* bytes = bitmap->lockBytes();
+    if (!bytes) {
+        return Valdi::Error("Failed to lock bytes");
+    }
+    if (copy) {
+        auto data = tgfx::Data::MakeWithCopy(bytes, info.rowBytes * info.height);
+        bitmap->unlockBytes();
+        if (!data) { return Valdi::Error("Failed to copy bitmap bytes"); }
+        return data;
+    }
+    // The final TGFX data release may run on a decode/render thread. Retain the
+    // real bitmap and balance its lock there, exactly as the Skia path does.
+    auto* pin = new Valdi::Ref<Valdi::IBitmap>(bitmap);
+    return tgfx::Data::MakeAdopted(bytes, info.rowBytes * info.height,
+        [](const void*, void* context) {
+            auto* owner = static_cast<Valdi::Ref<Valdi::IBitmap>*>(context);
+            (*owner)->unlockBytes();
+            delete owner;
+        }, pin);
+}
+} // namespace snap::drawing
+#else
 //
 //  BitmapUtils.cpp
 //  snap_drawing-pc
@@ -147,3 +214,5 @@ Valdi::Result<sk_sp<SkData>> bitmapToData(const Valdi::Ref<Valdi::IBitmap>& bitm
 }
 
 } // namespace snap::drawing
+
+#endif

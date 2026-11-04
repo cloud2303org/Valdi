@@ -12,7 +12,7 @@
 #include "valdi_core/cpp/Utils/Bytes.hpp"
 #include "valdi_core/cpp/Utils/Result.hpp"
 
-class SkFontMgr;
+#include "snap_drawing/cpp/Text/NativeFontManager.hpp"
 
 namespace Valdi {
 class Path;
@@ -25,7 +25,7 @@ public:
     explicit LoadableTypeface(const String& fontName);
     ~LoadableTypeface() override;
 
-    const Valdi::Result<Ref<Typeface>>& get(SkFontMgr& fontMgr);
+    const Valdi::Result<Ref<Typeface>>& get(NativeFontManager& fontMgr);
 
     const String& getName() const;
 
@@ -39,7 +39,7 @@ private:
     Valdi::Result<Ref<Typeface>> _loadedTypeface;
     String _fontName;
 
-    Valdi::Result<Ref<Typeface>> loadTypeface(SkFontMgr& fontMgr);
+    Valdi::Result<Ref<Typeface>> loadTypeface(NativeFontManager& fontMgr);
 };
 
 } // namespace snap::drawing

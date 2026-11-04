@@ -11,36 +11,42 @@
 #include <cstdint>
 
 namespace snap::drawing {
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+using DataFactory = tgfx::Data;
+#else
+using DataFactory = SkData;
+#endif
 
-class SkiaDataHolder : public Valdi::SimpleRefCountable {
+
+class DrawingDataHolder : public Valdi::SimpleRefCountable {
 public:
-    explicit SkiaDataHolder(const sk_sp<SkData>& data) : _data(data) {}
+    explicit DrawingDataHolder(const NativeData& data) : _data(data) {}
 
-    ~SkiaDataHolder() override = default;
+    ~DrawingDataHolder() override = default;
 
-    const sk_sp<SkData>& getData() const {
+    const NativeData& getData() const {
         return _data;
     }
 
 private:
-    sk_sp<SkData> _data;
+    NativeData _data;
 };
 
-Valdi::BytesView bytesFromSkData(const sk_sp<SkData>& data) {
+Valdi::BytesView bytesFromSkData(const NativeData& data) {
     if (data == nullptr) {
         return Valdi::BytesView();
     }
 
     return Valdi::BytesView(
-        Valdi::makeShared<SkiaDataHolder>(data), reinterpret_cast<const Valdi::Byte*>(data->data()), data->size());
+        Valdi::makeShared<DrawingDataHolder>(data), reinterpret_cast<const Valdi::Byte*>(data->data()), data->size());
 }
 
 static void releaseData(const void* /*ptr*/, void* context) {
     Valdi::unsafeBridgeRelease(context);
 }
 
-sk_sp<SkData> skDataFromBytes(const Valdi::BytesView& bytes, DataConversionMode conversionMode) {
-    auto dataHolder = Valdi::castOrNull<SkiaDataHolder>(bytes.getSource());
+NativeData skDataFromBytes(const Valdi::BytesView& bytes, DataConversionMode conversionMode) {
+    auto dataHolder = Valdi::castOrNull<DrawingDataHolder>(bytes.getSource());
 
     switch (conversionMode) {
         case DataConversionModeCopyIfUnsafe: {
@@ -49,18 +55,22 @@ sk_sp<SkData> skDataFromBytes(const Valdi::BytesView& bytes, DataConversionMode 
             }
 
             if (bytes.empty()) {
-                return SkData::MakeEmpty();
+                return DataFactory::MakeEmpty();
             }
 
             if (bytes.getSource() == nullptr) {
-                return SkData::MakeWithCopy(bytes.data(), bytes.size());
+                return DataFactory::MakeWithCopy(bytes.data(), bytes.size());
             } else {
                 auto* source = Valdi::unsafeBridgeRetain(bytes.getSource().get());
-                return SkData::MakeWithProc(bytes.data(), bytes.size(), &releaseData, source);
+                #ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+                return DataFactory::MakeAdopted(bytes.data(), bytes.size(), &releaseData, source);
+#else
+                return DataFactory::MakeWithProc(bytes.data(), bytes.size(), &releaseData, source);
+#endif
             }
         }
         case DataConversionModeAlwaysCopy: {
-            return SkData::MakeWithCopy(bytes.data(), bytes.size());
+            return DataFactory::MakeWithCopy(bytes.data(), bytes.size());
         }
         case DataConversionModeNeverCopy: {
             if (dataHolder != nullptr) {
@@ -68,10 +78,14 @@ sk_sp<SkData> skDataFromBytes(const Valdi::BytesView& bytes, DataConversionMode 
             }
 
             if (bytes.getSource() == nullptr) {
-                return SkData::MakeWithoutCopy(bytes.data(), bytes.size());
+                return DataFactory::MakeWithoutCopy(bytes.data(), bytes.size());
             } else {
                 auto* source = Valdi::unsafeBridgeRetain(bytes.getSource().get());
-                return SkData::MakeWithProc(bytes.data(), bytes.size(), &releaseData, source);
+                #ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+                return DataFactory::MakeAdopted(bytes.data(), bytes.size(), &releaseData, source);
+#else
+                return DataFactory::MakeWithProc(bytes.data(), bytes.size(), &releaseData, source);
+#endif
             }
         };
     }

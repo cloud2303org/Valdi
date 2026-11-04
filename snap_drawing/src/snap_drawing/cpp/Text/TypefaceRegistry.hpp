@@ -16,7 +16,7 @@
 
 #include <vector>
 
-class SkFontMgr;
+#include "snap_drawing/cpp/Text/NativeFontManager.hpp"
 
 namespace Valdi {
 class ILogger;
@@ -48,20 +48,20 @@ public:
 
     std::vector<String> getAllAvailableTypefaceNames() const;
 
-    Valdi::Result<Valdi::Ref<Typeface>> getTypefaceWithName(SkFontMgr& fontMgr,
+    Valdi::Result<Valdi::Ref<Typeface>> getTypefaceWithName(NativeFontManager& fontMgr,
                                                             const String& fontName,
                                                             FontStyle* outResolvedFontStyle);
-    Valdi::Result<Valdi::Ref<Typeface>> getTypefaceWithFamilyNameAndStyle(SkFontMgr& fontMgr,
+    Valdi::Result<Valdi::Ref<Typeface>> getTypefaceWithFamilyNameAndStyle(NativeFontManager& fontMgr,
                                                                           const String& familyName,
                                                                           FontStyle fontStyle);
 
     Valdi::Ref<FontFamily> getFontFamilyByFamilyName(const String& familyName);
 
-    Valdi::Ref<FontFamily> getFontFamilyForCharacterAndStyle(SkFontMgr& fontMgr,
+    Valdi::Ref<FontFamily> getFontFamilyForCharacterAndStyle(NativeFontManager& fontMgr,
                                                              Character character,
                                                              FontStyle fontStyle);
 
-    Valdi::Result<Valdi::Ref<Typeface>> getTypefaceFromFamily(SkFontMgr& fontMgr,
+    Valdi::Result<Valdi::Ref<Typeface>> getTypefaceFromFamily(NativeFontManager& fontMgr,
                                                               const Ref<FontFamily>& fontFamily,
                                                               FontStyle fontStyle);
 

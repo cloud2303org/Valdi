@@ -10,6 +10,7 @@
 #include "valdi_core/cpp/Utils/Format.hpp"
 #include "valdi_core/cpp/Utils/StringCache.hpp"
 
+#ifndef SNAP_DRAWING_TGFX_EXPERIMENT
 #include "include/core/SkCanvas.h"
 
 // This is a private header in Skia.
@@ -22,6 +23,7 @@ public:
         return canvas->only_axis_aligned_saveBehind(subset);
     }
 };
+#endif
 
 namespace snap::drawing {
 
@@ -35,17 +37,33 @@ Rect PaintMask::getBounds() const {
     return bounds ? bounds.value() : _rect;
 }
 
-void PaintMask::prepare(SkCanvas* canvas) {
+void PaintMask::prepare(NativeCanvas* canvas) {
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+    // The native record captures/clears only this mapped subset at playback.
+    // Destination-dependent drawing outside it continues to see prior content.
+    // Even a failed capture pushes a balanced save. The native context retains
+    // a sticky render error, observable at the void draw/readback boundary.
+    canvas->saveBehind(getBounds().getSkValue());
+#else
     auto bounds = getBounds();
     SkCanvasPriv::SaveBehind(canvas, &bounds.getSkValue());
+#endif
 }
 
-void PaintMask::apply(SkCanvas* canvas) {
+void PaintMask::apply(NativeCanvas* canvas) {
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+    if (_path.isEmpty()) {
+        _paint.drawRect(canvas, _rect.getSkValue());
+    } else {
+        _paint.drawPath(canvas, _path.getSkValue());
+    }
+#else
     if (_path.isEmpty()) {
         canvas->drawRect(_rect.getSkValue(), _paint.getSkValue());
     } else {
         canvas->drawPath(_path.getSkValue(), _paint.getSkValue());
     }
+#endif
 
     canvas->restore();
 }
@@ -54,7 +72,11 @@ String PaintMask::getDescription() {
     if (_path.isEmpty()) {
         return STRING_FORMAT("PaintMask with rect {}", _rect);
     } else {
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+        return STRING_FORMAT("PaintMask with path bounds {}", getBounds());
+#else
         return STRING_FORMAT("PaintMask with path {}", _path);
+#endif
     }
 }
 

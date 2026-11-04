@@ -9,9 +9,14 @@
 
 #ifdef SNAP_DRAWING_TGFX_EXPERIMENT
 #include "tgfx/core/Picture.h"
+#include "snap_drawing/cpp/Utils/Geometry.hpp"
 #include <memory>
 #else
 #include "include/core/SkPicture.h"
+#include "snap_drawing/cpp/Drawing/Surface/ExternalSurface.hpp"
+#include "snap_drawing/cpp/Utils/Aliases.hpp"
+#endif
+#ifdef SNAP_DRAWING_TGFX_COMPLETE
 #include "snap_drawing/cpp/Drawing/Surface/ExternalSurface.hpp"
 #include "snap_drawing/cpp/Utils/Aliases.hpp"
 #endif
@@ -27,8 +32,14 @@ namespace snap::drawing {
 struct LayerContent {
 #ifdef SNAP_DRAWING_TGFX_EXPERIMENT
     std::shared_ptr<tgfx::Picture> picture;
+    Rect bounds = Rect::makeEmpty();
 
     explicit LayerContent(const std::shared_ptr<tgfx::Picture>& picture);
+#ifdef SNAP_DRAWING_TGFX_COMPLETE
+    Ref<ExternalSurfaceSnapshot> externalSurface;
+    LayerContent(const std::shared_ptr<tgfx::Picture>& picture,
+                 const Ref<ExternalSurfaceSnapshot>& externalSurface);
+#endif
 #else
     sk_sp<SkPicture> picture;
     Ref<ExternalSurfaceSnapshot> externalSurface;

@@ -6,7 +6,9 @@
 //
 
 #include "snap_drawing/cpp/Resources.hpp"
+#ifndef SNAP_DRAWING_TGFX_EXPERIMENT
 #include "include/core/SkGraphics.h"
+#endif
 #include "snap_drawing/cpp/Utils/Image.hpp"
 #include "valdi_core/cpp/Interfaces/ILogger.hpp"
 
@@ -27,7 +29,9 @@ Resources::Resources(const Ref<FontManager>& fontManager,
       _logger(&logger) {
     // Make sure all Skia features are properly loaded.
     // This will be a no-op if this call was already done before.
+#ifndef SNAP_DRAWING_TGFX_EXPERIMENT
     SkGraphics::Init();
+#endif
     Image::initializeCodecs();
 }
 

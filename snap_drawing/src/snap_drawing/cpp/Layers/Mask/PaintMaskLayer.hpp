@@ -13,7 +13,7 @@
 #include "snap_drawing/cpp/Utils/Color.hpp"
 #include "snap_drawing/cpp/Utils/Geometry.hpp"
 
-#include "include/core/SkBlendMode.h"
+#include "snap_drawing/cpp/Drawing/BlendMode.hpp"
 
 namespace snap::drawing {
 
@@ -47,7 +47,11 @@ public:
     /**
      Set the blend mode that should be used to draw the region.
      */
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+    void setBlendMode(tgfx::BlendMode blendMode);
+#else
     void setBlendMode(SkBlendMode blendMode);
+#endif
 
     /**
      Returns the bounds that represents the entire region configured
@@ -65,7 +69,11 @@ private:
     Rect _rect;
     Path _path;
     Color _color = Color::black();
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+    tgfx::BlendMode _blendMode = tgfx::BlendMode::DstOut;
+#else
     SkBlendMode _blendMode = SkBlendMode::kDstOut;
+#endif
     MaskLayerPositioning _positioning = MaskLayerPositioning::BelowBackground;
 };
 

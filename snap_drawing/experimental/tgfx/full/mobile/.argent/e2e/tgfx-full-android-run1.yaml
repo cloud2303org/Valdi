@@ -1,0 +1,11 @@
+steps:
+  - launch: io.valdiroutes.tgfxfullprobe
+  - await:
+      visible: { id: tgfx_full_status }
+      timeout: 10000
+  - await: { idle: true }
+  - await:
+      text:
+        in: { id: tgfx_full_status }
+        equals: tgfx-full-status PASS 260/260
+      timeout: 10000

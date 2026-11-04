@@ -8,7 +8,7 @@
 #include "snap_drawing/cpp/Text/FontFamily.hpp"
 #include "valdi_core/cpp/Utils/FlatMap.hpp"
 
-class SkFontStyleSet;
+#include "snap_drawing/cpp/Text/NativeFontManager.hpp"
 
 namespace Valdi {
 class ILogger;
@@ -35,7 +35,7 @@ public:
      */
     void registerLoadableTypeface(FontStyle fontStyle, const Ref<LoadableTypeface>& loadableTypeface);
 
-    Ref<Typeface> matchStyle(SkFontMgr& fontMgr, FontStyle fontStyle) override;
+    Ref<Typeface> matchStyle(NativeFontManager& fontMgr, FontStyle fontStyle) override;
 
 private:
     [[maybe_unused]] Valdi::ILogger& _logger;

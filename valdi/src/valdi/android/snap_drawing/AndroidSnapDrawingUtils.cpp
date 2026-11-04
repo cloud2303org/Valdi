@@ -71,9 +71,10 @@ JavaObject createTransformJavaArray(JavaEnv env,
                                     const Valdi::CoordinateResolver& coordinateResolver) {
     static_assert(sizeof(snap::drawing::Scalar) == sizeof(float));
     snap::drawing::Scalar values[9];
-    matrix.getAll(values);
-    values[SkMatrix::kMTransX] = coordinateResolver.toPixelsF(values[SkMatrix::kMTransX]);
-    values[SkMatrix::kMTransY] = coordinateResolver.toPixelsF(values[SkMatrix::kMTransY]);
+    auto pixelMatrix = matrix;
+    pixelMatrix.setTranslateX(coordinateResolver.toPixelsF(matrix.getTranslateX()));
+    pixelMatrix.setTranslateY(coordinateResolver.toPixelsF(matrix.getTranslateY()));
+    pixelMatrix.getAll(values);
     return toJavaFloatArray(env, values, sizeof(values) / sizeof(snap::drawing::Scalar));
 }
 

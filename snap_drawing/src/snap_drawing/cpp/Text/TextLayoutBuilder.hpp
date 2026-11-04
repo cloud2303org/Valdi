@@ -15,7 +15,7 @@
 
 #include "snap_drawing/cpp/Utils/Geometry.hpp"
 
-#include "include/core/SkTextBlob.h"
+#include "snap_drawing/cpp/Text/NativeTextBlob.hpp"
 #include "valdi_core/cpp/Attributes/TextAttributeValue.hpp"
 
 #include <memory>

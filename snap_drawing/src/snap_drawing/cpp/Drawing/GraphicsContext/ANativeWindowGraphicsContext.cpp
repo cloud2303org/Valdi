@@ -1,3 +1,6 @@
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+#include "snap_drawing/cpp/Drawing/GraphicsContext/TGFXANativeWindowGraphicsContextImpl.hpp"
+#else
 //
 //  ANativeWindowGraphicsContext.cpp
 //  snap_drawing
@@ -378,3 +381,5 @@ ANativeWindowGraphicsContext::GLObjects::GLObjects() : eGLDisplay(EGL_NO_DISPLAY
 } // namespace snap::drawing
 
 #endif
+
+#endif // SNAP_DRAWING_TGFX_EXPERIMENT

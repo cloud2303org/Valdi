@@ -6,7 +6,7 @@
 //
 
 #include "snap_drawing/cpp/Drawing/DisplayList/CleanUpDisplayListVisitor.hpp"
-#include "include/core/SkPicture.h"
+#include "snap_drawing/cpp/Utils/DrawingBackend.hpp"
 
 #include "snap_drawing/cpp/Drawing/Mask/IMask.hpp"
 #include "snap_drawing/cpp/Drawing/Surface/ExternalSurface.hpp"
@@ -21,7 +21,11 @@ void CleanUpDisplayListVisitor::visit(const Operations::PopContext& /*popContext
 
 // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 void CleanUpDisplayListVisitor::visit(const Operations::DrawPicture& drawPicture) {
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+    delete drawPicture.owner;
+#else
     drawPicture.picture->unref();
+#endif
 }
 
 // NOLINTNEXTLINE(readability-convert-member-functions-to-static)

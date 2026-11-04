@@ -18,7 +18,12 @@ snap::utils::time::Duration<std::chrono::steady_clock> ImageCacheItem::getCurren
 size_t ImageCacheItem::imageSize(const Valdi::Ref<Image>& image) {
     auto width = image->width();
     auto height = image->height();
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+    // TGFX image textures are accounted as decoded RGBA, not encoded bytes.
+    constexpr size_t bytesPerPixel = 4;
+#else
     auto bytesPerPixel = image->getSkValue()->imageInfo().bytesPerPixel();
+#endif
     return width * height * bytesPerPixel;
 }
 

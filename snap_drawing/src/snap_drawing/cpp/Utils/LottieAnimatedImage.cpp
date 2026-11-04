@@ -1,3 +1,46 @@
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+#include "snap_drawing/cpp/Utils/LottieAnimatedImage.hpp"
+#include "snap_drawing/cpp/Resources.hpp"
+#include <algorithm>
+
+namespace snap::drawing {
+LottieAnimatedImage::LottieAnimatedImage(std::shared_ptr<ThorvgMedia> media)
+    : _media(std::move(media)), _duration(_media->duration()), _size(_media->size()),
+      _frameRate(_media->frameRate()) {}
+LottieAnimatedImage::~LottieAnimatedImage() = default;
+Duration LottieAnimatedImage::getCurrentTime() const {
+    std::lock_guard<Valdi::Mutex> lock(_mutex);
+    return _currentTime;
+}
+const Duration& LottieAnimatedImage::getDuration() const { return _duration; }
+const Size& LottieAnimatedImage::getSize() const { return _size; }
+double LottieAnimatedImage::getFrameRate() const { return _frameRate; }
+Valdi::Value LottieAnimatedImage::getMetadata() const {
+    return Valdi::Value()
+        .setMapValue("type", Valdi::Value(Valdi::StringBox::fromCString("lottie")))
+        .setMapValue("width", Valdi::Value(static_cast<int32_t>(_size.width)))
+        .setMapValue("height", Valdi::Value(static_cast<int32_t>(_size.height)))
+        .setMapValue("durationMs", Valdi::Value(static_cast<int32_t>(_duration.milliseconds())));
+}
+void LottieAnimatedImage::doDraw(NativeCanvas* canvas, const Rect& bounds,
+                                 const Duration& time, FittingSizeMode mode) {
+    std::lock_guard<Valdi::Mutex> lock(_mutex);
+    _currentTime = std::clamp(time, Duration(), _duration);
+    _media->draw(canvas, bounds, _currentTime, mode);
+}
+Valdi::Result<Ref<LottieAnimatedImage>> LottieAnimatedImage::make(const Ref<Resources>& resources,
+                                                               const Valdi::Byte* data, size_t length) {
+    return make(resources->getFontManager(), data, length);
+}
+Valdi::Result<Ref<LottieAnimatedImage>> LottieAnimatedImage::make(const Ref<IFontManager>& fonts,
+                                                               const Valdi::Byte* data, size_t length) {
+    auto media = ThorvgMedia::make(data, length, true, fonts);
+    if (!media) { return media.moveError(); }
+    return Valdi::makeShared<LottieAnimatedImage>(media.moveValue());
+}
+VALDI_CLASS_IMPL(LottieAnimatedImage)
+} // namespace snap::drawing
+#else
 //
 //  LottieAnimatedImage.cpp
 //  snap_drawing
@@ -147,3 +190,5 @@ Valdi::Result<Ref<LottieAnimatedImage>> LottieAnimatedImage::make(const Ref<IFon
 VALDI_CLASS_IMPL(LottieAnimatedImage)
 
 } // namespace snap::drawing
+
+#endif

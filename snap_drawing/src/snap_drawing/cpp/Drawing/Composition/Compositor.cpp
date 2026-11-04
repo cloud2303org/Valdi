@@ -104,8 +104,12 @@ public:
     }
 
     void visit(const Operations::DrawPicture& drawPicture) {
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+        auto absoluteClippedPictureRect = resolveAbsoluteClippedRect(drawPicture.bounds);
+#else
         auto absoluteClippedPictureRect =
             resolveAbsoluteClippedRect(fromSkValue<Rect>(drawPicture.picture->cullRect()));
+#endif
 
         auto& resolvedPlane = resolveRegularPlane(absoluteClippedPictureRect);
         appendDrawPictureToPlane(drawPicture, absoluteClippedPictureRect, resolvedPlane);
@@ -200,7 +204,11 @@ private:
         plane.bbox->insert(frame);
 
         syncDisplayListWithPlaneIfNeeded(plane);
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+        _displayList.appendPicture(*drawPicture.owner, drawPicture.opacity, drawPicture.bounds);
+#else
         _displayList.appendPicture(drawPicture.picture, drawPicture.opacity);
+#endif
     }
 
     void setCurrentPlaneIndex(uint64_t planeIndex) {

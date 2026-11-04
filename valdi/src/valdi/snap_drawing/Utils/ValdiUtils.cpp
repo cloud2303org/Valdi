@@ -128,7 +128,13 @@ struct GeometricPathToPathVisitor : public Valdi::GeometricPathVisitor {
                                    static_cast<Scalar>(centerY - radiusY),
                                    static_cast<Scalar>(centerX + radiusX),
                                    static_cast<Scalar>(centerY + radiusY));
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+        constexpr double radiansToDegrees = 57.2957795130823208768;
+        path.arcTo(oval, static_cast<Scalar>(startAngle * radiansToDegrees),
+                   static_cast<Scalar>(sweepAngle * radiansToDegrees));
+#else
         path.arcTo(oval, SkRadiansToDegrees(startAngle), SkRadiansToDegrees(sweepAngle));
+#endif
     }
 
     void close() override {

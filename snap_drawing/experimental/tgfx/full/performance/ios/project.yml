@@ -1,0 +1,75 @@
+name: RenderBenchmark
+options:
+  deploymentTarget:
+    iOS: "15.0"
+settings:
+  base:
+    DEVELOPMENT_TEAM: ""
+    CODE_SIGNING_ALLOWED: NO
+    CLANG_ENABLE_OBJC_ARC: YES
+    ENABLE_USER_SCRIPT_SANDBOXING: NO
+    GCC_OPTIMIZATION_LEVEL: s
+    DEBUG_INFORMATION_FORMAT: dwarf-with-dsym
+targets:
+  RenderBenchmark:
+    type: application
+    platform: iOS
+    sources:
+      - path: main.m
+      - path: ../.local/host-stage/generated/ios
+        excludes: ["**/*.swift"]
+      - path: ../.local/host-stage/package
+        type: folder
+        buildPhase: resources
+      - path: ../.local/host-stage/provenance.json
+        buildPhase: resources
+      - path: ../.local/host-stage/generated/resources/ios/render_benchmark.bundle
+        type: folder
+        buildPhase: resources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.valdiroutes.renderbenchmark
+        TARGETED_DEVICE_FAMILY: "1,2"
+        HEADER_SEARCH_PATHS:
+          - "$(inherited)"
+          - "$(SRCROOT)/../.local/host-stage/generated/ios"
+        LD_RUNPATH_SEARCH_PATHS: ["$(inherited)", "@executable_path/Frameworks"]
+        OTHER_LDFLAGS: ["$(inherited)", "-ObjC"]
+    preBuildScripts:
+      - name: Verify external benchmark stage
+        basedOnDependencyAnalysis: false
+        script: |
+          set -eu
+          stage="$SRCROOT/../.local/host-stage"
+          if [ -n "${BENCH_STAGE:-}" ]; then
+            actual="$(cd "$stage" && pwd -P)"
+            requested="$(cd "$BENCH_STAGE" && pwd -P)"
+            if [ "$actual" != "$requested" ]; then
+              echo "BENCH_STAGE must match performance/.local/host-stage" >&2
+              exit 1
+            fi
+          fi
+          "${PYTHON_BINARY:-python3}" "$SRCROOT/../android/check_stage.py" \
+            --platform ios --stage "$stage"
+    info:
+      path: Info.plist
+      properties:
+        CFBundleDisplayName: Render Benchmark
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        UIRequiresFullScreen: true
+    dependencies:
+      - framework: ../.local/host-stage/runtime/ValdiRuntime.xcframework
+        embed: true
+      - sdk: libc++.tbd
+schemes:
+  RenderBenchmark:
+    build:
+      targets:
+        RenderBenchmark: all
+    run:
+      config: Release
+    profile:
+      config: Release
+    archive:
+      config: Release

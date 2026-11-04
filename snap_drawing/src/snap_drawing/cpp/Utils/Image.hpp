@@ -16,7 +16,15 @@
 
 #include "snap_drawing/cpp/Utils/Aliases.hpp"
 
-#include "include/core/SkImage.h"
+#include "snap_drawing/cpp/Utils/DrawingBackend.hpp"
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+#include "tgfx/core/Data.h"
+#include "tgfx/core/ImageCodec.h"
+#include "tgfx/gpu/Device.h"
+#include <optional>
+#else
+#include "include/core/SkData.h"
+#endif
 
 namespace snap::drawing {
 
@@ -24,7 +32,12 @@ enum EncodedImageFormat { EncodedImageFormatJPG, EncodedImageFormatPNG, EncodedI
 
 class Image : public Valdi::LoadedAsset {
 public:
-    explicit Image(const sk_sp<SkImage>& skImage);
+    explicit Image(const NativeImage& skImage);
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+    // Capture the owning device for texture readback after the caller releases
+    // its canvas lock. Never retain a borrowed tgfx::Context across threads.
+    Image(const NativeImage& image, std::shared_ptr<tgfx::Device> readbackDevice);
+#endif
 
     ~Image() override;
 
@@ -59,7 +72,7 @@ public:
 
     Valdi::Result<Valdi::BytesView> encode(EncodedImageFormat format, double qualityRatio) const;
 
-    const sk_sp<SkImage>& getSkValue() const;
+    const NativeImage& getSkValue() const;
 
     Valdi::Ref<Valdi::IBitmap> getBitmap();
 
@@ -93,17 +106,44 @@ public:
      */
     static Valdi::Result<Ref<Image>> makeFromBitmap(const Valdi::Ref<Valdi::IBitmap>& bitmap, bool shouldCopy);
 
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+    // Texture-backed images must be read on their owning (already locked) context.
+    static std::shared_ptr<tgfx::Data> encodeSKImageToSKData(tgfx::Image& image,
+                                                          EncodedImageFormat format,
+                                                          int quality,
+                                                          tgfx::Context* context = nullptr);
+#else
     static sk_sp<SkData> encodeSKImageToSKData(SkImage& image, EncodedImageFormat format, int quality);
+#endif
 
     VALDI_CLASS_HEADER(Image)
 
 private:
-    sk_sp<SkImage> _skImage;
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+    // The image/proxies must be destroyed before their device.
+    std::shared_ptr<tgfx::Device> _readbackDevice;
+#endif
+    NativeImage _skImage;
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+    // Retain the real TGFX codec for CPU bitmap operations. Images supplied by
+    // a GPU surface instead use the context-based readback seam.
+    std::shared_ptr<tgfx::ImageCodec> _codec;
+    std::optional<Valdi::BitmapInfo> _bitmapInfo;
+    NativeData _rawPixelData;
+    std::optional<Valdi::BitmapInfo> _rawPixelInfo;
+    bool canReadPixels(const Valdi::BitmapInfo& info) const;
+    bool readPixels(const Valdi::BitmapInfo& info, void* pixels) const;
+#endif
     Ref<Image> _sourceImage;
     Ref<Valdi::ImageFilter> _filter;
 
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
     static Valdi::Result<Ref<Image>> makeFromPixelsData(const Valdi::BitmapInfo& bitmapInfo,
-                                                        const sk_sp<SkData>& pixelsData);
+                                                      const std::shared_ptr<tgfx::Data>& pixelsData);
+#else
+    static Valdi::Result<Ref<Image>> makeFromPixelsData(const Valdi::BitmapInfo& bitmapInfo,
+                                                      const sk_sp<SkData>& pixelsData);
+#endif
 };
 
 } // namespace snap::drawing

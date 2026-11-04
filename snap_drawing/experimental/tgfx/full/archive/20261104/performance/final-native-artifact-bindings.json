@@ -1,0 +1,34 @@
+{
+  "skia": {
+    "android": {
+      "library": "/tmp/valdi-tgfx-performance-20261104/native-android-skia-textfit/librender_performance.so",
+      "librarySha256": "15f2432599965e198c153ea765a43d5aab70f16f57d34a8a113216dbf7f8829f",
+      "packagedLibrarySha256": "15f2432599965e198c153ea765a43d5aab70f16f57d34a8a113216dbf7f8829f",
+      "apk": "/Users/cloud/.config/superpowers/worktrees/Valdi-node-only/tgfx-prototype-20261104/snap_drawing/experimental/tgfx/full/performance/native/android/.local/build/skia/outputs/apk/release/NativeRenderPerformance-release.apk",
+      "apkSha256": "a6425122a4685319d77adfc5ad519b01a18c493451bcea4f22cf1a5dbafde2ca"
+    },
+    "ios": {
+      "archive": "/tmp/valdi-tgfx-performance-20261104/native-ios-skia-textfit/render_performance_ios_lipo.a",
+      "archiveSha256": "12e001fa4b94e14309af7a78948d74af7e4cd3c2056ed77af98b075c9e779c21",
+      "cmakeCacheSha256": "982cbf0b90dfd8e4d10d0e2f76eee4e9693b9457c83b1ca48a8679f14ac7fa8f",
+      "executable": "/Users/cloud/.config/superpowers/worktrees/Valdi-node-only/tgfx-prototype-20261104/snap_drawing/experimental/tgfx/full/performance/native/.local/ios-skia/Release-iphonesimulator/NativeRenderPerformance.app/NativeRenderPerformance",
+      "executableSha256": "adb26221a7d7bfa7f3fc069e749ff5fd472e5c5d2d13ab58e81c545f430cf67d"
+    }
+  },
+  "tgfx": {
+    "android": {
+      "library": "/tmp/valdi-tgfx-performance-20261104/native-android-tgfx-textfit/librender_performance.so",
+      "librarySha256": "841ca7fb6b042c368020860e2e5443dc3e03d2b34707bbfd12da3e6da486b6ec",
+      "packagedLibrarySha256": "841ca7fb6b042c368020860e2e5443dc3e03d2b34707bbfd12da3e6da486b6ec",
+      "apk": "/Users/cloud/.config/superpowers/worktrees/Valdi-node-only/tgfx-prototype-20261104/snap_drawing/experimental/tgfx/full/performance/native/android/.local/build/tgfx/outputs/apk/release/NativeRenderPerformance-release.apk",
+      "apkSha256": "48c5fdd99200733d714bef85ba7f6ade70a188cc48c4fb62c1147aecfd9beba6"
+    },
+    "ios": {
+      "archive": "/tmp/valdi-tgfx-performance-20261104/native-ios-tgfx-textfit/render_performance_ios_lipo.a",
+      "archiveSha256": "bd66939025efc756f43cfce0ae0db7f370d637ee4980d5d6448081f0d6a8e9d2",
+      "cmakeCacheSha256": "185c53e0fd54471cac15148bbddb5e18c2096cce7376b4fdb7eec12e91165637",
+      "executable": "/Users/cloud/.config/superpowers/worktrees/Valdi-node-only/tgfx-prototype-20261104/snap_drawing/experimental/tgfx/full/performance/native/.local/ios-tgfx/Release-iphonesimulator/NativeRenderPerformance.app/NativeRenderPerformance",
+      "executableSha256": "ef8ee7ce81545b634a9b2cc58d4cfb36da679cc70a0e6794094c650b2d3a8b8e"
+    }
+  }
+}

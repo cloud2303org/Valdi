@@ -22,7 +22,11 @@ struct ShapedGlyph {
     Scalar offsetX;
     Scalar offsetY;
     Scalar advanceX;
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+    tgfx::GlyphID glyphID;
+#else
     SkGlyphID glyphID;
+#endif
 
 public:
     constexpr Character character() const {

@@ -9,3 +9,13 @@ scripts/valdi-swift-toolchain
 # Binaries
 .nlo-venv
 **deploy_manifest.txt
+
+# Local, source-bound TGFX/ThorVG experiment inputs and build receipts.
+/.tgfx-deps/
+
+# Generated TGFX experiment hosts, caches, and Python bytecode stay local.
+/snap_drawing/experimental/tgfx/full/**/.local/
+/snap_drawing/experimental/tgfx/full/**/.gradle/
+/snap_drawing/experimental/tgfx/full/**/local.properties
+/snap_drawing/experimental/tgfx/full/**/ios/*.xcodeproj/
+/third-party/tgfx/__pycache__/

@@ -1,0 +1,14 @@
+{
+  "registered_cases": 97,
+  "fixture_manifest_entries": 52,
+  "parent_run": "root14/run7: full251/257, media91/97 with six density failures",
+  "files": {
+    "snap_drawing/src/snap_drawing/cpp/Utils/ThorvgMedia.cpp": "3b1ae8ff34fd90fd191ca53406a64b574be30a30e570e61a0729a7dc6233f172",
+    "snap_drawing/src/snap_drawing/cpp/Utils/ThorvgMedia.hpp": "ee451ee3c29ff0fd26270fb4e69ef1911373c75450afcdb4dbf26e870261ddd3",
+    "snap_drawing/experimental/tgfx/full/tests/media_checks.cpp": "30bdcfc8ba4426ce5de231fbeaf559561d603f381531f89abc563be6afac0b9e",
+    "snap_drawing/experimental/tgfx/full/tests/media-data/manifest.json": "83312a8fd70d753d4aeea26de32f077f80cca1479f4cedcf1e3e014577a9e2f6",
+    "snap_drawing/experimental/tgfx/full/tests/media-data/PROVENANCE.md": "667341300e126a75f0fd39a468e59ec404548bfbe320610347c918a4f2a545ed",
+    "snap_drawing/experimental/tgfx/README.md": "cac0dad1af32a0f446568e6bbc188bb4766922b624dc2698ae9ff7c3fbcb195c",
+    "snap_drawing/experimental/tgfx/full/patches/media-round5-raw-destination-freeze.json": "6565c9ec5b8417fce59e5e02114b24f6868b9769791716b06c65b0270e6b1995"
+  }
+}

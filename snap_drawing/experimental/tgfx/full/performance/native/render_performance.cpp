@@ -1,0 +1,561 @@
+#include "render_performance.hpp"
+#include "gpu_target.hpp"
+
+#include "snap_drawing/cpp/Drawing/DisplayList/DisplayList.hpp"
+#include "snap_drawing/cpp/Drawing/DrawingContext.hpp"
+#include "snap_drawing/cpp/Text/FontManager.hpp"
+#include "snap_drawing/cpp/Text/TextLayoutBuilder.hpp"
+#include "snap_drawing/cpp/Utils/AnimatedImage.hpp"
+#include "valdi_core/cpp/Utils/ConsoleLogger.hpp"
+#include "valdi_core/cpp/Utils/Shared.hpp"
+#include "valdi_core/cpp/Utils/StringCache.hpp"
+
+#include <algorithm>
+#include <chrono>
+#include <cmath>
+#include <cstdint>
+#include <fstream>
+#include <iomanip>
+#include <locale>
+#include <numeric>
+#include <sstream>
+#include <string_view>
+#include <vector>
+
+#if defined(__APPLE__) || defined(__ANDROID__) || defined(__linux__)
+#include <sys/resource.h>
+#endif
+
+namespace snap::drawing::performance {
+namespace {
+
+using Clock = std::chrono::steady_clock;
+constexpr int kWarmup = 30;
+constexpr int kMeasured = 300;
+// Cover the same active 0.00 .. 1.19s interval without clamping the extra
+// measured frames at the pinned animation's 2s endpoint.
+constexpr double kTimelineStepSeconds = 1.19 / (kMeasured - 1);
+constexpr const char* kNames[] = {"vector", "text", "bitmap", "svg", "lottie"};
+constexpr const char* kInputs[] = {"", "NotoSans-Regular.ttf", "pattern.png", "pattern.svg", "moving-solid.json"};
+constexpr size_t kInputSizes[] = {0, 569208, 75, 180, 390};
+constexpr const char* kInputHashes[] = {"", "ae99b7ce843cff8d", "3b980986c0e91411",
+                                       "8f47efa4f4a52003", "cb40538e2981af8f"};
+
+std::string quote(std::string_view text) {
+    constexpr char hex[] = "0123456789abcdef";
+    std::string result = "\"";
+    // ASCII JSON preserves arbitrary diagnostic bytes and is safe for JNI's
+    // modified UTF-8 entry point. Non-ASCII diagnostic bytes are byte-escaped.
+    for (const unsigned char value : text) {
+        if (value == '"' || value == '\\') {
+            result += '\\';
+            result += static_cast<char>(value);
+        } else if (value < 0x20 || value >= 0x7f) {
+            result += "\\u00";
+            result += hex[value >> 4];
+            result += hex[value & 15];
+        } else {
+            result += static_cast<char>(value);
+        }
+    }
+    return result + "\"";
+}
+
+std::string number(double value) {
+    if (!std::isfinite(value)) { return "null"; }
+    std::ostringstream output;
+    output.imbue(std::locale::classic());
+    output << std::setprecision(12) << value;
+    return output.str();
+}
+
+uint64_t hashBytes(const void* data, size_t length) {
+    uint64_t hash = UINT64_C(14695981039346656037);
+    const auto* bytes = static_cast<const uint8_t*>(data);
+    for (size_t i = 0; i < length; ++i) {
+        hash ^= bytes[i];
+        hash *= UINT64_C(1099511628211);
+    }
+    return hash;
+}
+
+std::string hexHash(uint64_t hash) {
+    std::ostringstream output;
+    output.imbue(std::locale::classic());
+    output << std::hex << std::setw(16) << std::setfill('0') << hash;
+    return output.str();
+}
+
+Valdi::Result<Valdi::BytesView> load(const std::string& directory, const char* name) {
+    std::ifstream stream(directory + "/" + name, std::ios::binary | std::ios::ate);
+    if (!stream) { return Valdi::Error("Cannot open required performance fixture"); }
+    const auto length = stream.tellg();
+    if (length <= 0 || length > 8 * 1024 * 1024) {
+        return Valdi::Error("Required performance fixture is empty or exceeds 8 MiB");
+    }
+    auto bytes = Valdi::makeShared<Valdi::Bytes>();
+    bytes->resize(static_cast<size_t>(length));
+    stream.seekg(0);
+    stream.read(reinterpret_cast<char*>(bytes->data()), static_cast<std::streamsize>(length));
+    if (!stream) { return Valdi::Error("Cannot read the complete performance fixture"); }
+    return Valdi::BytesView(bytes);
+}
+
+Paint solid(Color color) {
+    Paint paint;
+    paint.setColor(color);
+    paint.setAntiAlias(true);
+    return paint;
+}
+
+struct Scene {
+    size_t kind;
+    Ref<FontManager> fonts;
+    Ref<Image> image;
+    Ref<AnimatedImage> animation;
+    Ref<DisplayList> recorded;
+    std::string inputHash;
+    size_t inputBytes = 0;
+
+    explicit Scene(size_t kind) : kind(kind) {}
+
+    Valdi::Result<Ref<DisplayList>> finish(DrawingContext& drawing) const {
+        auto content = drawing.finish();
+        if (!content.picture) { return Valdi::Error("Production DrawingContext recorded no picture"); }
+        auto result = Valdi::makeShared<DisplayList>(Size::make(kWidth, kHeight), TimePoint());
+        result->appendLayerContent(content, 1);
+        return result;
+    }
+
+    Valdi::Result<Valdi::Void> prepare(const std::string& directory) {
+        Valdi::BytesView bytes;
+        if (kind != 0) {
+            auto input = load(directory, kInputs[kind]);
+            if (!input) { return input.moveError(); }
+            bytes = input.moveValue();
+            inputBytes = bytes.size();
+            inputHash = hexHash(hashBytes(bytes.data(), bytes.size()));
+            if (inputBytes != kInputSizes[kind] || inputHash != kInputHashes[kind]) {
+                return Valdi::Error("Required fixture differs from the native-gpu-v1 source freeze");
+            }
+        }
+        DrawingContext drawing(kWidth, kHeight);
+        if (kind == 0) {
+            // Fixed geometry, opaque fills and antialiased cubic strokes.
+            for (int row = 0; row < 12; ++row) {
+                for (int column = 0; column < 6; ++column) {
+                    auto rect = Rect::makeXYWH(12 + column * 56, 12 + row * 50, 44, 34);
+                    Path path;
+                    path.addRoundRect(rect, 7, 7, true);
+                    drawing.drawPaint(solid(Color::makeARGB(255, 40 + column * 25, 30 + row * 15, 160)), path);
+                    Path curve;
+                    curve.moveTo(rect.left, rect.bottom + 6);
+                    curve.cubicTo(rect.left + 8, rect.top, rect.right - 8, rect.bottom + 16,
+                                  rect.right, rect.bottom + 6);
+                    auto paint = solid(Color::blue());
+                    paint.setStroke(true);
+                    paint.setStrokeWidth(2);
+                    drawing.drawPaint(paint, curve);
+                }
+            }
+        } else if (kind == 1) {
+            fonts = Valdi::makeShared<FontManager>(Valdi::ConsoleLogger::getLogger());
+            fonts->load();
+            const auto family = Valdi::StringCache::makeStringFromCLiteral("RenderPerfFixture");
+            const FontStyle style(FontWidthNormal, FontWeightNormal, FontSlantUpright);
+            fonts->registerTypeface(family, style, false, LoadableTypeface::fromBytes(family, bytes));
+            auto font = fonts->getFontWithFamilyNameAndStyle(family, style, 18, 1, false);
+            if (!font) { return font.moveError(); }
+            if (font.value() == nullptr || !font.value()->typeface()->isCustom()) {
+                return Valdi::Error("Text scene did not resolve the required bundled custom font");
+            }
+            TextLayoutBuilder builder(TextAlignLeft, TextOverflowClip, Size::make(328, 608), 24,
+                                      fonts, false, 1);
+            builder.setIncludeTextBlob(true);
+            builder.setIncludeSegments(true);
+            std::string text;
+            for (int line = 0; line < 20; ++line) {
+                if (line != 0) { text += '\n'; }
+                text += "SnapDrawing GPU 0123456789";
+            }
+            builder.append(text, font.value(), TextLayoutLineHeight::multiple(1.2f), 0, TextDecorationNone);
+            auto layout = builder.build();
+            if (layout == nullptr || !layout->fitsInMaxSize() || layout->getBounds().width() <= 0) {
+                const auto& fontMetrics = font.value()->metrics();
+                const auto lineMetrics = TextLayoutLineHeight::multiple(1.2f).getLineMetrics(fontMetrics);
+                auto details = std::string("Production text layout is empty or does not fit") +
+                    "; requested_lines=20; newline_count=" + std::to_string(std::count(text.begin(), text.end(), '\n')) +
+                    "; font_size=" + number(font.value()->size()) + "; resolved_font_size=" +
+                    number(font.value()->resolvedSize()) + "; font_scale=" + number(font.value()->scale()) +
+                    "; font_ascent=" + number(fontMetrics.ascent) + "; font_descent=" + number(fontMetrics.descent) +
+                    "; font_line_spacing=" + number(fontMetrics.lineSpacing) +
+                    "; layout_line_height=" + number(lineMetrics.height()) +
+                    "; has_layout=" + (layout != nullptr ? "true" : "false");
+                if (layout != nullptr) {
+                    const auto& bounds = layout->getBounds();
+                    const auto& maxSize = layout->getMaxSize();
+                    size_t segments = 0;
+                    for (const auto& entry : layout->getEntries()) { segments += entry.segments.size(); }
+                    details += std::string("; fits_in_max_size=") + (layout->fitsInMaxSize() ? "true" : "false") +
+                        "; max_width=" + number(maxSize.width) + "; max_height=" + number(maxSize.height) +
+                        "; bounds_left=" + number(bounds.left) + "; bounds_top=" + number(bounds.top) +
+                        "; bounds_width=" + number(bounds.width()) + "; bounds_height=" + number(bounds.height()) +
+                        "; entries=" + std::to_string(layout->getEntries().size()) +
+                        "; segments=" + std::to_string(segments);
+                }
+                return Valdi::Error(std::string_view(details));
+            }
+            auto paint = solid(Color::black());
+            size_t blobs = 0;
+            for (const auto& entry : layout->getEntries()) {
+                if (entry.textBlob) {
+                    drawing.canvas()->drawTextBlob(entry.textBlob, 16, 16, paint.getSkValue());
+                    ++blobs;
+                }
+            }
+            if (blobs == 0) { return Valdi::Error("Production text layout emitted no drawable text blobs"); }
+        } else if (kind == 2) {
+            auto decoded = Image::make(bytes);
+            if (!decoded) { return decoded.moveError(); }
+            image = decoded.moveValue();
+            if (image == nullptr || image->width() != 2 || image->height() != 2) {
+                return Valdi::Error("Bitmap scene requires the unchanged 2x2 pattern.png");
+            }
+            const auto source = Rect::makeXYWH(0, 0, image->width(), image->height());
+            for (int row = 0; row < 8; ++row) {
+                for (int column = 0; column < 4; ++column) {
+                    drawing.drawImage(*image, source, Rect::makeXYWH(12 + column * 86, 12 + row * 76, 72, 64),
+                                      nullptr);
+                }
+            }
+        } else {
+            fonts = Valdi::makeShared<FontManager>(Valdi::ConsoleLogger::getLogger());
+            fonts->load();
+            auto decoded = AnimatedImage::make(fonts, bytes.data(), bytes.size());
+            if (!decoded) { return decoded.moveError(); }
+            animation = decoded.moveValue();
+            if (animation == nullptr) { return Valdi::Error("Production AnimatedImage::make returned null"); }
+            if (kind == 4) {
+                // A failed/disabled Lottie decoder cannot turn into a successful
+                // empty timing sample. The existing fixture has a 2s, 10Hz timeline.
+                if (!kLottieEnabled || std::abs(animation->getDuration().seconds() - 2.0) > 0.001 ||
+                    std::abs(animation->getFrameRate() - 10.0) > 0.001) {
+                    return Valdi::Error("Lottie fixture duration/frame rate or build capability is invalid");
+                }
+                return Valdi::Void(); // Recorded per frame at an explicit timeline time.
+            }
+            if (animation->getSize().width != 16 || animation->getSize().height != 8) {
+                return Valdi::Error("SVG scene requires the unchanged 16x8 pattern.svg");
+            }
+            for (int row = 0; row < 6; ++row) {
+                animation->draw(drawing.canvas(), Rect::makeXYWH(16, 16 + row * 100, 328, 82),
+                                Duration(), FittingSizeModeCenterScaleFit);
+            }
+        }
+        auto result = finish(drawing);
+        if (!result) { return result.moveError(); }
+        recorded = result.moveValue();
+        return Valdi::Void();
+    }
+
+    Valdi::Result<Valdi::Void> draw(DrawableSurfaceCanvas& canvas, int frame) const {
+        auto list = recorded;
+        if (kind == 4) {
+            DrawingContext drawing(kWidth, kHeight);
+            animation->draw(drawing.canvas(), Rect::makeXYWH(16, 16, 328, 164),
+                            Duration::fromSeconds(frame * kTimelineStepSeconds), FittingSizeModeCenterScaleFit);
+            auto result = finish(drawing);
+            if (!result) { return result.moveError(); }
+            list = result.moveValue();
+        }
+        if (list == nullptr) { return Valdi::Error("No production DisplayList for scene replay"); }
+        list->draw(canvas, kDisplayListAllPlaneIndexes, true);
+        return Valdi::Void();
+    }
+};
+
+struct Usage {
+    bool valid = false;
+    double userMs = 0;
+    double systemMs = 0;
+    uint64_t peakRSSBytes = 0;
+};
+
+Usage usage() {
+    Usage result;
+#if defined(__APPLE__) || defined(__ANDROID__) || defined(__linux__)
+    rusage value{};
+    if (getrusage(RUSAGE_SELF, &value) == 0) {
+        result.valid = true;
+        result.userMs = value.ru_utime.tv_sec * 1000.0 + value.ru_utime.tv_usec / 1000.0;
+        result.systemMs = value.ru_stime.tv_sec * 1000.0 + value.ru_stime.tv_usec / 1000.0;
+#if defined(__APPLE__)
+        result.peakRSSBytes = static_cast<uint64_t>(value.ru_maxrss);
+#else
+        result.peakRSSBytes = static_cast<uint64_t>(value.ru_maxrss) * 1024;
+#endif
+    }
+#endif
+    return result;
+}
+
+size_t visiblePixels(const NativeData& data) {
+    size_t count = 0;
+    const auto* bytes = static_cast<const uint8_t*>(data->data());
+    for (size_t i = 3; i < data->size(); i += 4) {
+        if (bytes[i] != 0) { ++count; }
+    }
+    return count;
+}
+
+size_t changedPixels(const NativeData& first, const NativeData& last) {
+    size_t count = 0;
+    const auto* a = static_cast<const uint8_t*>(first->data());
+    const auto* b = static_cast<const uint8_t*>(last->data());
+    for (size_t i = 0; i < first->size(); i += 4) {
+        if (a[i] != b[i] || a[i + 1] != b[i + 1] || a[i + 2] != b[i + 2] || a[i + 3] != b[i + 3]) {
+            ++count;
+        }
+    }
+    return count;
+}
+
+bool pixelNear(const NativeData& data, int x, int y, int red, int green, int blue, int alpha) {
+    const auto* bytes = static_cast<const uint8_t*>(data->data());
+    const size_t offset = (static_cast<size_t>(y) * kWidth + x) * 4;
+    return std::abs(static_cast<int>(bytes[offset]) - red) <= 2 &&
+           std::abs(static_cast<int>(bytes[offset + 1]) - green) <= 2 &&
+           std::abs(static_cast<int>(bytes[offset + 2]) - blue) <= 2 &&
+           std::abs(static_cast<int>(bytes[offset + 3]) - alpha) <= 2;
+}
+
+bool expectedPixels(const Scene& scene, const NativeData& data, bool last) {
+    switch (scene.kind) {
+        case 0:
+            return pixelNear(data, 20, 20, 40, 30, 160, 255);
+        case 1:
+            // Shaped text's exact edges vary with backend rasterization.
+            return visiblePixels(data) >= 128;
+        case 2:
+            return pixelNear(data, 20, 20, 255, 0, 0, 255) &&
+                   pixelNear(data, 76, 68, 255, 255, 255, 255);
+        case 3:
+            return pixelNear(data, 120, 40, 255, 0, 0, 255) &&
+                   pixelNear(data, 240, 40, 0, 0, 255, 255);
+        case 4:
+            return pixelNear(data, last ? 240 : 70, 80, 255, 0, 0, 255) &&
+                   pixelNear(data, last ? 70 : 240, 80, 0, 0, 0, 0);
+        default:
+            return false;
+    }
+}
+
+Valdi::Result<NativeData> render(const Scene& scene, const GPUTarget& target, int frame) {
+    auto canvas = target.canvas();
+    auto status = scene.draw(canvas, frame);
+    if (!status) { return status.moveError(); }
+    auto pixels = target.readback();
+    if (!pixels) { return pixels.moveError(); }
+    if (!pixels.value() || pixels.value()->size() != kPixelBytes) {
+        return Valdi::Error("GPU readback did not produce a complete owned RGBA frame");
+    }
+    return pixels;
+}
+
+struct SceneResult {
+    std::string error;
+    std::vector<double> frameMs;
+    int warmupCompleted = 0;
+    uint64_t firstHash = 0;
+    uint64_t lastHash = 0;
+    size_t firstVisible = 0;
+    size_t lastVisible = 0;
+    size_t changed = 0;
+    bool canariesComplete = false;
+    double loopWallMs = 0;
+    Usage before;
+    Usage after;
+};
+
+SceneResult measure(const Scene& scene, const GPUTarget& target) {
+    SceneResult result;
+    result.frameMs.reserve(kMeasured);
+    for (int i = 0; i < kWarmup; ++i) {
+        auto frame = render(scene, target, i);
+        if (!frame) { result.error = frame.error().toString(); return result; }
+        ++result.warmupCompleted;
+    }
+    // Extra first/last renders, native hashes and pixel scans are outside both
+    // the per-frame timing and measured-loop CPU/wall accounting.
+    auto first = render(scene, target, 0);
+    if (!first) { result.error = first.error().toString(); return result; }
+    result.firstHash = hashBytes(first.value()->data(), first.value()->size());
+    result.firstVisible = visiblePixels(first.value());
+    if (result.firstVisible < 128 || !expectedPixels(scene, first.value(), false)) {
+        result.error = "First GPU canary has insufficient visible coverage or wrong fixture pixels";
+        return result;
+    }
+    result.before = usage();
+    const auto loopStart = Clock::now();
+    for (int i = 0; i < kMeasured; ++i) {
+        const auto start = Clock::now();
+        auto frame = render(scene, target, i);
+        const auto end = Clock::now();
+        if (!frame) { result.error = frame.error().toString(); break; }
+        const double milliseconds = std::chrono::duration<double, std::milli>(end - start).count();
+        if (!std::isfinite(milliseconds) || milliseconds <= 0) {
+            result.error = "Invalid monotonic frame timing";
+            break;
+        }
+        result.frameMs.push_back(milliseconds);
+        // Destruction of this owned readback happens after end, outside the
+        // per-frame sample; measured-loop wall/CPU still includes its teardown.
+    }
+    result.loopWallMs = std::chrono::duration<double, std::milli>(Clock::now() - loopStart).count();
+    result.after = usage();
+    if (!result.error.empty()) { return result; }
+    auto last = render(scene, target, kMeasured - 1);
+    if (!last) { result.error = last.error().toString(); return result; }
+    result.lastHash = hashBytes(last.value()->data(), last.value()->size());
+    result.lastVisible = visiblePixels(last.value());
+    result.changed = changedPixels(first.value(), last.value());
+    result.canariesComplete = true;
+    if (result.lastVisible < 128 || !expectedPixels(scene, last.value(), true)) {
+        result.error = "Last GPU canary has insufficient visible coverage or wrong fixture pixels";
+    } else if (scene.kind == 4 && result.changed < 128) {
+        result.error = "Lottie did not visibly change across the real 0.00s/1.19s timeline";
+    } else if (scene.kind != 4 && result.changed != 0) {
+        result.error = "Static scene first/last GPU canaries differ";
+    }
+    return result;
+}
+
+std::string metadata() {
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+    constexpr const char* backend = "full_tgfx";
+#else
+    constexpr const char* backend = "skia";
+#endif
+#if defined(__APPLE__)
+    constexpr const char* gpuAPI = "metal";
+#elif defined(__ANDROID__)
+    constexpr const char* gpuAPI = "opengl_es";
+#else
+    constexpr const char* gpuAPI = "unsupported_for_skia";
+#endif
+#ifdef NDEBUG
+    constexpr const char* ndebug = "true";
+#else
+    constexpr const char* ndebug = "false";
+#endif
+#ifdef __OPTIMIZE__
+    constexpr const char* optimized = "true";
+#else
+    constexpr const char* optimized = "false";
+#endif
+    return "\"schema_version\":1,\"fixture_version\":\"native-gpu-v1\","
+           "\"metric\":\"offscreen_gpu_sync_readback_throughput\","
+           "\"backend\":" + quote(backend) + ",\"gpu_api\":" + quote(gpuAPI) +
+           ",\"width\":360,\"height\":640,\"warmup_frames\":30,\"measured_frames\":300,"
+           "\"lottie_timeline_start_seconds\":0,\"lottie_timeline_end_seconds\":1.19,"
+           "\"untimed_canary_frames\":2,"
+           "\"pixel_format\":\"RGBA8888_premultiplied\",\"sample_count\":1,"
+           "\"surface_color_space\":\"sRGB\",\"ndebug\":" + ndebug +
+           ",\"compiler_optimized\":" + optimized +
+           ",\"on_screen_fps\":null,\"energy_joules\":null,\"package_size_bytes\":null,"
+           "\"clock\":\"std::chrono::steady_clock\","
+           "\"completion\":\"synchronous_owned_RGBA_GPU_readback_each_frame\","
+           "\"readback_overhead_included\":true,\"png_encode_in_timing\":false,"
+           "\"fixture_io_in_timing\":false,\"percentile_method\":\"nearest_rank\","
+           "\"cpu_scope\":\"RUSAGE_SELF_all_process_threads_measured_loop_not_energy\","
+           "\"rss_scope\":\"process_lifetime_high_water_mark_not_scene_delta\","
+           "\"release_validation\":\"parent_must_verify_native_-c_opt_and_host_Release\","
+           "\"comparison\":\"same_workload_and_completion_boundary_backend_internal_costs_included\"";
+}
+
+std::string serialize(const Scene& scene, const SceneResult& result) {
+    const bool success = result.error.empty() && result.frameMs.size() == kMeasured && result.canariesComplete;
+    std::string output = "{\"name\":" + quote(kNames[scene.kind]) +
+        ",\"success\":" + (success ? "true" : "false") + ",\"error\":" + quote(result.error) +
+        ",\"input_file\":" + quote(kInputs[scene.kind]) + ",\"input_bytes\":" + std::to_string(scene.inputBytes) +
+        ",\"input_fnv1a64\":" + quote(scene.inputHash) +
+        ",\"timing_scope\":" + quote(scene.kind == 4 ?
+            "seek_record_DisplayList_replay_sync_readback" : "recorded_DisplayList_replay_sync_readback") +
+        ",\"warmup_completed\":" + std::to_string(result.warmupCompleted) +
+        ",\"measured_completed\":" + std::to_string(result.frameMs.size()) +
+        ",\"canaries_complete\":" + (result.canariesComplete ? "true" : "false") +
+        ",\"first_fnv1a64\":" + quote(hexHash(result.firstHash)) +
+        ",\"last_fnv1a64\":" + quote(hexHash(result.lastHash)) +
+        ",\"first_visible_pixels\":" + std::to_string(result.firstVisible) +
+        ",\"last_visible_pixels\":" + std::to_string(result.lastVisible) +
+        ",\"changed_pixels\":" + std::to_string(result.changed) +
+        ",\"measured_loop_wall_ms\":" + number(result.loopWallMs) +
+        ",\"process_user_cpu_ms\":" +
+            (result.before.valid && result.after.valid ? number(result.after.userMs - result.before.userMs) : "null") +
+        ",\"process_system_cpu_ms\":" +
+            (result.before.valid && result.after.valid ? number(result.after.systemMs - result.before.systemMs) : "null") +
+        ",\"process_peak_rss_bytes\":" +
+            (result.after.valid ? std::to_string(result.after.peakRSSBytes) : "null");
+    if (success) {
+        auto sorted = result.frameMs;
+        std::sort(sorted.begin(), sorted.end());
+        const double total = std::accumulate(result.frameMs.begin(), result.frameMs.end(), 0.0);
+        const auto percentile = [&](double p) {
+            return sorted[static_cast<size_t>(std::ceil(p * sorted.size())) - 1];
+        };
+        output += ",\"frame_mean_ms\":" + number(total / kMeasured) +
+            ",\"frame_p50_ms\":" + number(percentile(0.50)) + ",\"frame_p95_ms\":" + number(percentile(0.95)) +
+            ",\"frame_min_ms\":" + number(sorted.front()) + ",\"frame_max_ms\":" + number(sorted.back()) +
+            ",\"sampled_throughput_frames_per_second\":" + number(1000.0 * kMeasured / total) +
+            ",\"loop_throughput_frames_per_second\":" + number(1000.0 * kMeasured / result.loopWallMs);
+    } else {
+        output += ",\"frame_mean_ms\":null,\"frame_p50_ms\":null,\"frame_p95_ms\":null,"
+                  "\"sampled_throughput_frames_per_second\":null,\"loop_throughput_frames_per_second\":null";
+    }
+    output += ",\"frame_ms\":[";
+    for (size_t i = 0; i < result.frameMs.size(); ++i) {
+        if (i) { output += ','; }
+        output += number(result.frameMs[i]);
+    }
+    return output + "]}";
+}
+
+} // namespace
+
+std::string renderPerformanceFailure(const std::string& message) {
+    return "{" + metadata() + ",\"success\":false,\"error\":" + quote(message) +
+           ",\"expected_scenes\":5,\"completed_scenes\":0,\"scenes\":[]}";
+}
+
+std::string runRenderPerformance(const std::string& fixtureDirectory) {
+    if (fixtureDirectory.empty()) { return renderPerformanceFailure("fixtureDirectory is empty"); }
+    GPUTarget target;
+    auto initialized = target.initialize();
+    if (!initialized) { return renderPerformanceFailure(initialized.error().toString()); }
+    Image::initializeCodecs();
+    std::string scenes;
+    size_t completed = 0;
+    bool success = true;
+    for (size_t kind = 0; kind < 5; ++kind) {
+        Scene scene(kind);
+        auto prepared = scene.prepare(fixtureDirectory);
+        SceneResult result;
+        if (!prepared) {
+            result.error = prepared.error().toString();
+        } else {
+            result = measure(scene, target);
+        }
+        const bool passed = result.error.empty() && result.frameMs.size() == kMeasured && result.canariesComplete;
+        success = success && passed;
+        if (passed) { ++completed; }
+        if (kind) { scenes += ','; }
+        scenes += serialize(scene, result);
+        // All scene-owned pictures/media die before target and its device lock.
+    }
+    return "{" + metadata() + ",\"success\":" + (success ? "true" : "false") +
+        ",\"error\":" + quote(success ? "" : "One or more required native GPU scenes failed") +
+        ",\"expected_scenes\":5,\"completed_scenes\":" + std::to_string(completed) +
+        ",\"scenes\":[" + scenes + "]}";
+}
+
+} // namespace snap::drawing::performance

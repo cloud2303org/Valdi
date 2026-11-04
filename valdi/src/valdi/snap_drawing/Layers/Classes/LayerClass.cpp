@@ -32,7 +32,7 @@ public:
     ValdiMaskLayer() {
         setPositioning(MaskLayerPositioning::BelowBackground);
         setColor(Color::black());
-        setBlendMode(SkBlendMode::kDstOut);
+        setBlendMode(toSkBlendMode(BlendModeDstOut));
     }
 
     ~ValdiMaskLayer() override = default;

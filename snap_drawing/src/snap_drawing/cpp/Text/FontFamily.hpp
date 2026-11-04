@@ -7,13 +7,13 @@
 
 #pragma once
 
-#include "include/core/SkTypeface.h"
+#include "snap_drawing/cpp/Utils/DrawingBackend.hpp"
 #include "snap_drawing/cpp/Utils/Aliases.hpp"
 
 #include "snap_drawing/cpp/Text/FontStyle.hpp"
 #include "valdi_core/cpp/Utils/FlatMap.hpp"
 
-class SkFontMgr;
+#include "snap_drawing/cpp/Text/NativeFontManager.hpp"
 
 namespace snap::drawing {
 
@@ -33,7 +33,7 @@ public:
      Returns the closest matching Typeface from the given FontStyle.
      May return null if the FontFamily holds no typefaces.
      */
-    virtual Ref<Typeface> matchStyle(SkFontMgr& fontMgr, FontStyle fontStyle) = 0;
+    virtual Ref<Typeface> matchStyle(NativeFontManager& fontMgr, FontStyle fontStyle) = 0;
 
 private:
     String _familyName;

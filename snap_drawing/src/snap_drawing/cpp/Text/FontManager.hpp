@@ -20,7 +20,7 @@
 #include "valdi_core/cpp/Utils/Result.hpp"
 #include "valdi_core/cpp/Utils/StringBox.hpp"
 
-#include "include/core/SkFontMgr.h"
+#include "snap_drawing/cpp/Text/NativeFontManager.hpp"
 
 #include <optional>
 #include <vector>
@@ -111,7 +111,7 @@ public:
 
     const Ref<TextShaper>& getTextShaper() const;
 
-    const sk_sp<SkFontMgr>& getSkValue();
+    const NativeFontManagerHandle& getSkValue();
 
     void setListener(const Ref<IFontManagerListener>& listener);
 
@@ -121,10 +121,14 @@ protected:
 private:
     mutable Valdi::Mutex _mutex;
     [[maybe_unused]] Valdi::ILogger& _logger;
-    sk_sp<SkFontMgr> _fontManager;
+    NativeFontManagerHandle _fontManager;
 
     TypefaceRegistry _typefaceRegistry;
     Valdi::FlatMap<Character, Ref<FontFamily>> _fallbackFontFamilies;
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+    Valdi::FlatMap<std::string, Ref<Typeface>> _nativeFallbackTypefaces;
+    Ref<Typeface> _nativeEmojiTypeface;
+#endif
     FontStyle _defaultFontStyle;
     Ref<TextShaper> _textShaper;
     Valdi::StringBox _defaultFontFamilyName;

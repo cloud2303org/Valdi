@@ -1,0 +1,58 @@
+{
+  "registered_cases": 96,
+  "fixture_manifest_entries": 52,
+  "parent_run": "run6: actual301/native362/nativeInterior16 for HgQ; oracle requires >20",
+  "files": {
+    "full/tests/media_checks.cpp": "89d07659a753590e073eabd81e89c74c199e0d90c20050407c03815fa1daf10a",
+    "full/tests/media-data/generate_fixtures.py": "3f3411b69d21d6622e42bacdb349221e7452cf78ae27d603688b3600ce0addf8",
+    "full/tests/media-data/svg-owned-text.svg": "1f1460d5bf13788582e1df547ff2512d87693a16a15e2b794736b0be85c1cd54",
+    "full/tests/media-data/svg-nested-owned.svg": "90c1edf8c4818618a0fb3fd37f1622b99bf2953b8644030ad327af271b55d4f5",
+    "full/tests/media-data/manifest.json": "88bb8e405c063ce6adc846af184a7d27dd924286daadad27e831dec1e9427f40",
+    "full/tests/media-data/PROVENANCE.md": "e4ba986aa03fbe00ef416310a924dd3215848fe425e1790d85847ab2fe9e8523",
+    "README.md": "01bf101b8599a9530bd81ea72214d79f78e848a4dc3222d368a19270ba9ef0d6",
+    "full/patches/media-round4-source-freeze.json": "0f8abc9f8c8645a6b5bdfe4e551db12d74f88988d0a6841b8dd00e6fb709ad7e",
+    "full/patches/media-round4-production-freeze.json": "405274b4c57518aea8f6b7d322ba906cda0ad2463d5b67663722930795a185aa"
+  },
+  "source_font_metrics": {
+    "NotoSans-Regular.ttf": {
+      "glyph_id": 52,
+      "units_per_em": 1000,
+      "advance_units": 781,
+      "Q_bounds_units": [
+        61,
+        -170,
+        720,
+        725
+      ],
+      "font_size": 32,
+      "corpus": "QQQQ",
+      "advance_pixels": 99.968,
+      "ink_bounds_pixels": [
+        9.952,
+        20.8,
+        106.016,
+        49.44
+      ]
+    },
+    "Montserrat-Regular.ttf": {
+      "glyph_id": 167,
+      "units_per_em": 1000,
+      "advance_units": 839,
+      "Q_bounds_units": [
+        52,
+        -139,
+        819,
+        706
+      ],
+      "font_size": 32,
+      "corpus": "QQQQ",
+      "advance_pixels": 107.392,
+      "ink_bounds_pixels": [
+        9.664,
+        21.408,
+        114.752,
+        48.448
+      ]
+    }
+  }
+}

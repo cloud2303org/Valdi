@@ -1,0 +1,69 @@
+load("@build_bazel_rules_apple//apple:apple.bzl", "apple_static_library")
+
+cc_binary(
+    name = "backend_checks",
+    testonly = True,
+    srcs = [
+        "backend_checks.cpp",
+        "tests/effects_checks.cpp",
+        "tests/gpu_error_checks.cpp",
+        "tests/media_checks.cpp",
+        "tests/text_checks.cpp",
+        "tests/effects_checks.hpp",
+        "tests/gpu_error_checks.hpp",
+        "tests/media_checks.hpp",
+        "tests/text_checks.hpp",
+    ],
+    data = glob(["tests/media-data/**", "tests/text-data/**"]),
+    copts = ["-std=c++20"],
+    linkstatic = True,
+    deps = [
+        "//third-party/tgfx:test_support",
+        "//valdi:valdi_snap_drawing",
+    ],
+)
+
+cc_library(
+    name = "mobile_checks",
+    testonly = True,
+    srcs = [
+        "mobile/full_checks.cpp",
+        "tests/effects_checks.cpp",
+        "tests/gpu_error_checks.cpp",
+        "tests/media_checks.cpp",
+        "tests/text_checks.cpp",
+    ],
+    hdrs = [
+        "mobile/full_checks.hpp",
+        "tests/effects_checks.hpp",
+        "tests/gpu_error_checks.hpp",
+        "tests/media_checks.hpp",
+        "tests/text_checks.hpp",
+    ],
+    copts = ["-std=c++20"],
+    local_defines = [
+        'TGFX_FULL_MOBILE_FIXTURE_HASH=\\"ccf78299903855ba8a2603893fa2d090b7a03920b6803551d936525168ac17a2\\"',
+    ],
+    deps = [
+        "//third-party/tgfx:test_support",
+        "//valdi:valdi_snap_drawing",
+    ],
+)
+
+apple_static_library(
+    name = "mobile_checks_ios",
+    testonly = True,
+    platform_type = "ios",
+    minimum_os_version = "15.0",
+    deps = [":mobile_checks"],
+)
+
+cc_binary(
+    name = "libsnap_tgfx_full_probe.so",
+    testonly = True,
+    srcs = ["mobile/android/probe.cpp"],
+    linkshared = True,
+    linkstatic = True,
+    linkopts = ["-Wl,--no-undefined"],
+    deps = [":mobile_checks"],
+)

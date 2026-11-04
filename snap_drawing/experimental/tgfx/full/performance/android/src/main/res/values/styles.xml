@@ -1,0 +1,5 @@
+<resources>
+    <style name="AppTheme" parent="Theme.AppCompat.Light.NoActionBar" />
+    <item name="render_benchmark_status" type="id" />
+    <item name="render_benchmark_root" type="id" />
+</resources>

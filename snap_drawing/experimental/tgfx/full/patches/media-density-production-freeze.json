@@ -1,0 +1,11 @@
+{
+  "source_only": true,
+  "production_files": {
+    "snap_drawing/src/snap_drawing/cpp/Utils/ThorvgMedia.cpp": "eb62fc22656f307d268efbef2f5059b54b55eaa948afe7e8a0178a9ac60721f4"
+  },
+  "native_archive_rebuild_required": false,
+  "consumer_rebuild_required": true,
+  "vendor_edits": false,
+  "density_math_and_validation_cap_unchanged": true,
+  "change": "Place immutable physical raster by canvas translate/scale + drawImage; clip only overflowing fits; preserve deferred ownership/time/final matrix/clip."
+}

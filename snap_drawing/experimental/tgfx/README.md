@@ -1,5 +1,8 @@
 # SnapDrawing vector drawing with TGFX
 
+Archived on November 4, 2026. The full experiment, dependency patches, and final
+results are indexed in [ARCHIVED-20261104.md](ARCHIVED-20261104.md).
+
 This isolated experiment compiles nine actual SnapDrawing translation units
 against real TGFX. It does not enable TGFX in the Valdi runtime or application.
 The normal Skia branches remain selected unless
@@ -129,3 +132,301 @@ fixture 16 checks (15 passing controls plus one real GPU pixel failure before
 the fix). An initial TGFX configuration failure and an
 interrupted dependency download are preserved separately. These failures are
 not behavioral RED tests and are not presented as such.
+
+## Full-backend media checks
+
+`full/tests/media_checks.cpp` is a source-only suite for the complete production
+TGFX media migration. It is separate from the historical nine-source vector
+probe described above. The parent's first native run exited inside libjpeg
+while decoding the original malformed JPEG fixture, before a media report
+returned. After the matching TGFX JPEG/effects rebuild, the parent's second
+native run returned 48 media cases: 46 PASS and 2 FAIL, confined to GIF/WebP
+boundary timing. All JPEG recovery cases passed. The timing fix now accumulates
+GIF delays in integer milliseconds and preserves libwebp's cumulative
+millisecond endpoints before converting each endpoint to `Duration` once.
+The original assertions, tolerances and fixture bytes are unchanged.
+Before/after timing evidence is recorded in the fixture provenance. The current
+capacity/font/deferred-raster changes are source-only and await the parent's
+matching archive rebuild/run; no new native result is claimed here.
+
+The parent runner can include `full/tests/media_checks.hpp`, link the actual
+full SnapDrawing implementation, and call:
+
+```cpp
+MediaTestReport report = runMediaChecks("/absolute/path/to/full/tests/media-data");
+std::cout << report.details;
+return report.success ? 0 : 1;
+```
+
+The interface has no `main`. It returns `passed`, `failed`, `success`, text
+details, and individual named `MediaCheckResult` records. The source requires
+both `SNAP_DRAWING_TGFX_EXPERIMENT` and `SNAP_DRAWING_TGFX_COMPLETE`. It calls
+the actual `Image`, `Bitmap`, `BitmapFactory`, `AnimatedImage`,
+`SkCodecAnimatedImage`, `LottieAnimatedImage`, `SVGAnimatedImage`, `SVGUtils`,
+`FontManager`, `DrawingContext` and `DrawableSurfaceCanvas` APIs. The target
+must include the real `TgfxMedia.cpp`, `TgfxMediaAnimation.cpp`,
+`ThorvgMedia.cpp`, text and GPU integration sources and their actual native
+dependency closure. The suite provides no substitute codec or symbol provider.
+
+The 98 named cases cover (the preceding 97 case names/assertions are preserved):
+
+- PNG/JPEG/lossless WebP pixels and metadata; production PNG/JPEG/WebP encoding
+  and decoding; CPU resize followed by production image recording and GPU draw.
+- GIF/APNG/WebP frame delays, boundary seeks, background/previous disposal,
+  blending, duration/frame metadata, current-time clamping and center-fit.
+  Additional checks cover GIF interlace and APNG's excluded default poster.
+- Lottie rendering at two actual times, metadata and fit modes; SVG intrinsic
+  and preferred sizes, static and animated factory routing, pixels and time.
+- Real custom-font registration from the bundled Noto Sans bytes, byte export
+  and ThorVG Lottie glyph mapping compared with the same actual TGFX typeface.
+- Raw no-copy owner retention through last native-image release on a worker,
+  source-independent copies, actual bitmap disposal while an image pins its
+  bytes, padded strides/canaries and bit-exact F32 raw copies.
+- Production surface snapshots after surface/context destruction, texture
+  readback using an already locked context, and encoding through a retained
+  owning device after the original surface is released.
+- Malformed and truncated containers, bad APNG CRCs, empty/non-image input,
+  short raw spans, invalid stride, allocation overflow and non-finite quality.
+- Original public decode-error labels and byte/magic metadata, fatal JPEG
+  header recovery, four complete-header JPEG pixel failures, real encoder
+  dimension-limit recovery and successful destination growth after failure.
+- Incomplete/mismatched SVG structure rejection with a valid trailing-comment
+  control, and viewBox-only rasterization requiring both preferred dimensions.
+- Nine explicit capacity rejections across GIF/WebP/APNG (large canvas, many
+  delta frames, excessive count), three valid small delta controls, incremental
+  APNG count validation, and a 20000x20000 SVG size query/32x32 preferred raster.
+- Actual SVG text with a cold ThorVG font cache, an unrelated live asset's font
+  cache, two asset-owned providers using the same alias, and strict native
+  resolver rejection propagated as a real SVG load error.
+- SVG/Lottie thin-detail rasters at 2x/3x and one recorded picture replayed at
+  both scales after changing the live animation time and dropping its public
+  owner; captured center-fit bounds, recording/final clips, anisotropic skew,
+  finite perspective, invalid/capacity failure status and empty final clipping.
+- Actual ThorVG memory-font unregister, idempotent copied/file registration,
+  borrowed-font replacement, distinct name/filename removal contracts, and live
+  Text paints rendering fresh glyphs after unregister and source release.
+  Repeated SVG size/static/animated lifecycles and embedded `@font-face` parser
+  destruction must leave no font selectable through the actual public API.
+- One- and two-level data-URI SVG text with a cold cache, an unrelated live
+  font, distinct asset-owned providers, strict host rejection and actual SFNT
+  decode failure. Nested text uses the existing native glyph assertions.
+- Preallocation rejection for default 20000x20000 SVG loading and static PNG
+  thumbnail source staging, oversized/padded destination bitmaps, and aggregate
+  F32 staging. Ordinary 32x32 conversion still normalizes a zero row stride.
+
+The font group runs first and verifies the cold-cache precondition explicitly.
+Run the media suite before any other suite that retains ThorVG fonts; the
+current desktop and mobile parent runners already run media before text.
+A prepopulated cache is a named failure, never a skip or inferred cold result.
+
+`full/patches/thorvg-svg-font-resolver.patch` is the frozen actual ThorVG change
+at pin `f0fd698d56b3b8ae797a242cf06aab6b70aed840`, SHA-256
+`706a80e20f54fe3a9e5d5d97b4431a39c32b429e5ae81fefbb4d95bca0484a0d`.
+Its seven files wire the SVG builder to the actual picture resolver and add
+`Picture::resolver(func, data, fallback, strictSvgFonts=false)`. Enabling the
+last argument makes the owner resolver exclusive for SVG text; rejection
+returns a load failure without named-cache or arbitrary-font fallback. The
+default preserves the original policy. The C++ resolver symbol and internal
+context/resolver layouts change: rebuild ThorVG and all consumers against the
+matching header. The parent's separate WebP prefix change is excluded.
+
+ROUND3 preserves that seven-file patch and the prior 78-case/47-entry fixture
+evidence under `full/patches/round2-before-round3/`, with SHA-256 values in
+`freeze.json`. The source-only incremental follow-up is
+`full/patches/thorvg-memory-font-nested-svg.patch`, SHA-256
+`b2c48f7cfe04c9a2a3536875f362db559a3ca41507c977da1372b2321005d8d1`.
+Apply it after the ROUND2 resolver patch. Alternatively,
+`full/patches/thorvg-media-round3.patch` is the cumulative eleven-file media
+patch from the pinned ThorVG source, SHA-256
+`45e54c85c493418d4f434f24dbbf9cd9cfcc786f2d2c04a5ef0853dbdf183455`.
+Do not apply both alternatives. Both exclude the parent's WebP symbol patch.
+Exact native file hashes are in `thorvg-round3-native-freeze.json`.
+
+The existing documented memory removal API, `Text::load(name, nullptr, 0)`,
+now removes the registration and releases its registry reference.
+`Text::unload(filename)` keeps its filename-only contract. Existing Text
+paints retain detached font loaders and their owned bytes until their last
+release. Repeated registration does not accumulate paint references. The media
+destructor uses memory removal and logs an unexpected failure. Embedded SVG
+fonts copy parser bytes and unregister by memory name. Child data-URI SVG
+pictures inherit the owner's resolver and strict policy, and strict child
+load failure reaches the outer load result.
+
+ROUND3 adds no public signature beyond ROUND2. Its internal LoaderMgr helper
+and SVG font state require matching rebuilt ThorVG archives and consumers.
+The patches passed reverse-apply source checks; no compile, native execution
+or passing result is claimed for these 92 cases. Four new fixtures bring the
+manifest to 51 entries; all preceding 47 fixture entries retain their hashes.
+
+ROUND4 preserves the preceding source, fixture and patch evidence in
+`full/patches/round3-before-round4/`. The parent reported root11 compile/link
+success and native run5 media **81/92**, with the original 294 SnapDrawing and
+50 Valdi integration cases passing. These are parent results from the preceding
+sources. No compile or native run was performed for this follow-up.
+
+SVG's resolved output is checked against the existing 32 MiB RGBA raster cap
+before invoking the bitmap factory. Static codec reads have a checked 128 MiB
+aggregate admission budget: for source pixels `S`, destination pixels `D`,
+destination stride span `O`, and source height `H`, reserve
+`1 MiB + 12*S + sizeof(void*)*H + 8*D + O`, plus another `8*D` for F32 output.
+This covers the full source F16 buffer, a decoder RGBA8 stage and row pointers,
+destination F16 buffers and output storage. It is a bounded allocation admission
+rule with a workspace reserve, not an exact decoder RSS guarantee.
+All products are admitted by division against remaining capacity before vector
+allocation or pixel decoding. `Image` applies the same check before allocating
+resize/conversion/encoding outputs. Identical raw copies retain their existing
+path, and bitmap minimum-stride normalization is preserved.
+
+The follow-up also corrects two verified test prerequisites: the retained-paint
+CPU helper draws a real `Paint::duplicate()` because ThorVG forbids moving a
+renderer-bound paint to a different renderer; the embedded font fixture now
+uses the single-quoted CSS URL required by this pin's `_srcFromUrl`.
+The 92 prior case bodies and all glyph/pixel thresholds remain unchanged.
+The two provider-font failure messages now include actual/native/interior ink
+counts for the next parent run; their failing coverage is not claimed fixed.
+The final-matrix density/empty-clip cases remain unchanged for the GPU owner's
+native fixes. There is no new vendor patch or archive rebuild required here.
+
+The source suite now contains 96 cases and 52 fixture entries. Four cases and
+one bounded malformed PNG fixture were added; only the embedded SVG quoting
+changed among the preceding 51 fixture entries. Production hashes are frozen
+in `full/patches/media-round4-production-freeze.json`; the final suite, fixture
+and documentation hashes are in `media-round4-source-freeze.json`.
+
+The parent's subsequent root12/run6 consumed these capacity additions:
+media returned 87/96, effects 97/97, text 32/32 and GPU 25/30, for 241/255
+overall. All four new allocation cases and the corrected memory/embedded-font
+cases passed in that parent run. The two provider-isolation failures reported
+actual ink 301/native ink 362/native interior 16; the only failed condition was
+the native oracle's existing requirement of more than 20 interior pixels.
+That result does not establish a production font-resolution defect.
+
+The corpus-only follow-up changes `svg-owned-text.svg` and its nested wrapper
+from `HgQ` to `QQQQ`, with four matching native-reference strings. The real
+fonts, size 32, x=8/baseline=44, 128x64 target and every assertion/tolerance
+are unchanged. The bundled `hmtx`/`glyf` metrics place all four curves within
+the target for both faces (Noto x≈10–106/y≈21–49, Montserrat x≈10–115/y≈21–48).
+Qualification of the stronger native interior remains an actual parent-run
+assertion; no new passing result is claimed. Old source, bytes, manifest and
+metrics are preserved in `full/patches/round4-before-font-corpus/`.
+`media-font-corpus-freeze.json` records the follow-up hashes. Counts remain
+96 cases and 52 entries, with no production or vendor changes in this
+corpus follow-up. The seven density/empty-clip failures and their expectations
+remain unchanged pending the GPU owner's matching native fixes.
+
+ROUND5 adds destination-only admission before Image's matching raw-copy
+shortcut: `rowBytes * height` must fit 128 MiB, checked by division before
+allocation. Exact raw copies still avoid codec/F16 staging. The new real public
+raw-image regression rejects a 32x32 RGBA/premul destination with 5 MiB stride
+(160 MiB total), then requires a normal-stride conversion with byte-identical
+pixels. Counts are now 97 cases / 52 fixture entries. The prior 96 case bodies,
+corpus, thresholds and all fixture/font hashes are unchanged.
+`full/patches/media-round5-raw-destination-freeze.json` records the source
+follow-up; prior evidence is in `before-round5-raw-destination/`. This requires
+only a later consumer rebuild; no vendor changes or native execution occurred.
+
+The parent's root14/run7 returned media 91/97, effects 97/97, text 32/32 and
+GPU 31/31 (251/257 overall). The remaining six media cases were direct 2x/3x
+SVG/Lottie raster comparisons and the two finite-perspective comparisons.
+The source follow-up places the physical raster using canvas translate/scale
+and `drawImage`, preserving logical bounds and the final playback transform.
+In the observed TGFX `AARectsVertexProvider`, `drawImageRect` applied
+destination-space AA ring offsets directly to source UV extents when those
+sizes differed. The same operation distorted the old reference placement.
+The independent reference rasters now use the equivalent pixel-coordinate
+placement API; their physical sizes, expected positions and byte tolerance 1
+are unchanged. Contained fits also avoid a redundant antialiased bounds clip;
+overflowing fits retain it.
+
+All 97 case names/assertions and 52 fixture/font hashes remain unchanged.
+`full/patches/before-density-pixel-placement/` preserves the preceding source
+and run7 evidence. Production is frozen in `media-density-production-freeze.json`;
+`media-density-placement-freeze.json` records the complete source follow-up.
+No vendor or ABI changes are required. Native execution of this correction is
+pending the parent consumer rebuild; no passing result is claimed.
+
+One additional native diagnostic calls the unchanged real
+`DrawingContext::drawImage` with the existing 2x2 red/green/blue/white PNG,
+scaled to a 16x16 rectangle at (4,4) on a 24x24 surface. Fixed quadrant
+interior pixels must retain those colors within one byte, and two outside
+pixels must remain transparent. This covers the static Strict-source path
+without using the media placement workaround as its oracle. Counts are now
+98 cases / 52 fixture entries. The diagnostic has not been executed; a
+failure retains its fixed expectations for the parent's generic native fix.
+Neither `DrawingContext.cpp` nor `TgfxMedia.cpp` was edited in this follow-up.
+
+Default SVG font resolution now uses an asset-owned actual `FontManager`, its
+native platform fallback policy, and `Typeface::makeFontData()` selected-face
+SFNT exporter, including CoreText fonts without a TGFX backing stream.
+The experimental animated SVG factory also accepts and
+preserves its caller's `IFontManager`. Both routes register private per-asset
+ThorVG names. An empty export or loader failure remains an error; no raw TTC
+stream fallback is used.
+
+ThorVG drawing uses actual `Canvas::drawDeferred` records that own media,
+time, bounds and fitting mode. Each playback resolves the final device matrix
+and clip. Affine column lengths retain scale, rotation, skew and anisotropy;
+finite perspective uses a conservative bound on the projective Jacobian
+across the fitted rectangle. The raster is drawn back into the same logical
+bounds. Non-finite/horizon-crossing transforms and physical rasters exceeding
+32 MiB of RGBA pixels fail through `Canvas::markRenderFailure`, using the GPU
+owner's public replayable error API. An empty final clip allocates no raster.
+The independent 32-pixel load-validation cap remains unchanged.
+
+The eager animation cache has explicit local admission limits:
+128 MiB decoded/staging storage, 16 MiB encoded input and 4096 frames per
+decode. For RGBA canvas bytes `C`, encoded bytes `E`, and frame count `N`,
+admission requires `1 MiB + 6*E + W*C + N*(C + 4096) <= 128 MiB`.
+`W` is 3 for streamed GIF (composite, restore-previous and row reserve) and 8
+for WebP/APNG. WebP includes its two native canvases plus pixel/transform/row
+workspace reserve; APNG includes composite, restore, decoded rectangle, native
+conversion and row workspace. Source staging and metadata are charged even
+when a particular format uses less. This is an admission budget for one decode,
+not a process-wide allocator/RSS or TGFX GPU-cache limit.
+
+GIF first scans real giflib headers and compressed subblocks with no decoded
+canvas, then reads scanlines through `DGifGetLine`; it no longer calls
+`DGifSlurp` or retains `SavedImages`/full indexed rasters. WebP checks real
+`WebPDemuxGetI` canvas/count metadata before `WebPAnimDecoderNew` allocates its
+canvases. APNG checks `acTL` and each `fcTL` before growing parsed frame storage;
+every retained frame is checked again. Over-capacity inputs return explicit
+errors; frames are never silently dropped or downscaled.
+
+The complete media target requires the real `@expat//:expat` dependency
+(`expat.h` and its library) for bounded XML parsing before ThorVG loading.
+SVG source is capped at 64 MiB, parsed in 64 KiB chunks with a nesting limit of
+1024, with parameter-entity parsing disabled and no external entity resolver.
+Root dimensions and viewBox geometry remain distinct; viewBox alone supplies
+no intrinsic raster size. The default Skia branch is preserved.
+ThorVG load/asset validation still renders the real first frame, with a longest
+edge of at most 32 pixels independently of intrinsic size. Size queries retain
+the original dimensions, and subsequent rendering uses the caller's requested
+target. A large document with a small preferred raster therefore avoids an
+intrinsic-size validation allocation.
+
+`full/patches/tgfx-jpeg-recoverable-errors.patch` records the actual change to
+the pinned TGFX `src/core/codecs/jpeg/JpegCodec.cpp`. Each libjpeg operation
+uses a separate C-only recovery boundary, restores its original error manager,
+and returns explicit failure before normal C++ cleanup. Encoding uses the
+public libjpeg destination-manager API so every buffer growth updates the
+caller-owned allocation immediately, including on an error path. Only premature
+input warnings are promoted to decode failures; ordinary diagnostics remain.
+
+The fixtures and preserved font license are documented in
+`full/tests/media-data/PROVENANCE.md`; `manifest.json` records their hashes.
+The C++ runner needs that directory at runtime. Python/Pillow are only needed
+to regenerate authored encoding fixtures, never to run the checks.
+
+There is no skip outcome. Missing fixture files, unsupported parsers, missing
+font export, inability to create/lock the actual platform offscreen context,
+or failed GPU readback produce named failures and `success=false`. On Apple,
+GPU observations use the production `GrGraphicsContext::makeOffscreen()` Metal
+seam. The suite does not create a separate OpenGL fallback.
+
+Coverage boundaries remain explicit: these are small deterministic fixtures,
+not a format conformance corpus or application/device QA. The glyph comparison
+permits rasterizer edge differences. Static SVG factories use the default
+native provider; custom SVG bytes are covered through the experimental animated
+factory's actual font manager. F32 checks certify raw byte-copy preservation, not HDR GPU
+parity; the pinned TGFX GPU supports native 8-bit buffers. No universal
+Skottie/ThorVG, ICC-profile or antialiasing equivalence is claimed.

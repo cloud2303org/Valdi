@@ -204,9 +204,14 @@ ShapedGlyph WordCachingTextShaper::getSpaceGlyphForFont(FontId fontId, Font& fon
         return cacheResult.value().glyphs[0];
     }
 
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+    auto spaceGlyphId = font.getSkValue().getGlyphID(static_cast<tgfx::Unichar>(text));
+    Scalar width = font.getSkValue().getAdvance(spaceGlyphId);
+#else
     auto spaceGlyphId = font.getSkValue().unicharToGlyph(static_cast<SkUnichar>(text));
     SkScalar width;
     font.getSkValue().getWidths(&spaceGlyphId, 1, &width);
+#endif
 
     ShapedGlyph glyph;
     glyph.glyphID = spaceGlyphId;

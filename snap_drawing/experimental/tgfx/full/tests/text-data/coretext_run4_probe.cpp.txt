@@ -1,0 +1,193 @@
+// Parent-owned native diagnostic source, intentionally not a runner .cpp.
+// Compile only in the parent's native slot with CoreText/CoreFoundation/
+// CoreGraphics; argv[1] is the absolute text-data directory. No registration,
+// GPU, TGFX archive, font mutation, file writes or network operations.
+#include <CoreText/CoreText.h>
+#include <cstdint>
+#include <cstdio>
+#include <fstream>
+#include <initializer_list>
+#include <string>
+#include <utility>
+#include <vector>
+
+template<typename T> struct Hold {
+    T p;
+    explicit Hold(T value) : p(value) {}
+    ~Hold() { if (p) CFRelease(p); }
+    Hold(const Hold&) = delete;
+    Hold& operator=(const Hold&) = delete;
+};
+
+static double numeric(CFTypeRef value, double fallback = 0) {
+    double result = fallback;
+    if (value && CFGetTypeID(value) == CFNumberGetTypeID())
+        CFNumberGetValue(static_cast<CFNumberRef>(value), kCFNumberDoubleType, &result);
+    return result;
+}
+
+static CFDataRef load(const std::string& path) {
+    std::ifstream input(path, std::ios::binary | std::ios::ate);
+    if (!input) return nullptr;
+    auto length = input.tellg();
+    if (length <= 0 || length > 16 * 1024 * 1024) return nullptr;
+    std::vector<UInt8> bytes(static_cast<size_t>(length));
+    input.seekg(0);
+    input.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+    if (!input) return nullptr;
+    return CFDataCreate(kCFAllocatorDefault, bytes.data(), static_cast<CFIndex>(bytes.size()));
+}
+
+static void font(const char* label, CTFontRef value, bool detail = true) {
+    if (!value) { std::printf("%s NULL\n", label); return; }
+    Hold<CFStringRef> name(CTFontCopyPostScriptName(value));
+    char utf8[512]{};
+    if (name.p) CFStringGetCString(name.p, utf8, sizeof(utf8), kCFStringEncodingUTF8);
+    const UniChar chars[] = {0x0100, 0x03a9};
+    CGGlyph glyphs[2]{};
+    CTFontGetGlyphsForCharacters(value, chars, glyphs, 2);
+    Hold<CFArrayRef> axes(CTFontCopyVariationAxes(value));
+    Hold<CFDictionaryRef> variation(CTFontCopyVariation(value));
+    std::printf("%s name=%s size=%.4f glyphs=%u/%u axes=%ld sparseVariation=%ld\n",
+        label, utf8, static_cast<double>(CTFontGetSize(value)),
+        static_cast<unsigned>(glyphs[0]), static_cast<unsigned>(glyphs[1]),
+        axes.p ? static_cast<long>(CFArrayGetCount(axes.p)) : -1L,
+        variation.p ? static_cast<long>(CFDictionaryGetCount(variation.p)) : -1L);
+    for (CFIndex i = 0; detail && axes.p && i < CFArrayGetCount(axes.p); ++i) {
+        auto axis = static_cast<CFDictionaryRef>(CFArrayGetValueAtIndex(axes.p, i));
+        auto key = CFDictionaryGetValue(axis, kCTFontVariationAxisIdentifierKey);
+        auto tag = static_cast<uint32_t>(numeric(key));
+        auto current = variation.p ? CFDictionaryGetValue(variation.p, key) : nullptr;
+        double defaultValue = numeric(CFDictionaryGetValue(axis, kCTFontVariationAxisDefaultValueKey));
+        std::printf("  %c%c%c%c default=%.6f effective=%.6f sparse=%s\n",
+            static_cast<int>((tag >> 24) & 255), static_cast<int>((tag >> 16) & 255),
+            static_cast<int>((tag >> 8) & 255), static_cast<int>(tag & 255),
+            defaultValue, numeric(current, defaultValue), current ? "present" : "omitted");
+    }
+}
+
+static void descriptors(const char* label, CFArrayRef array) {
+    std::printf("%s descriptors=%ld\n", label, array ? static_cast<long>(CFArrayGetCount(array)) : -1L);
+    for (CFIndex i = 0; array && i < CFArrayGetCount(array) && i < 128; ++i) {
+        auto descriptor = static_cast<CTFontDescriptorRef>(CFArrayGetValueAtIndex(array, i));
+        Hold<CTFontRef> candidate(CTFontCreateWithFontDescriptor(descriptor, 0, nullptr));
+        auto item = std::string(label) + "[" + std::to_string(i) + "]";
+        font(item.c_str(), candidate.p, false);
+    }
+}
+
+static void set(CFMutableDictionaryRef dictionary, uint32_t tag, double value) {
+    int64_t identifier = tag;
+    Hold<CFNumberRef> key(CFNumberCreate(nullptr, kCFNumberSInt64Type, &identifier));
+    Hold<CFNumberRef> number(CFNumberCreate(nullptr, kCFNumberDoubleType, &value));
+    CFDictionarySetValue(dictionary, key.p, number.p);
+}
+
+static CTFontRef prepared(CTFontRef base) {
+    if (!base) return nullptr;
+    Hold<CFTypeRef> original(CTFontCopyAttribute(base, CFSTR("NSCTFontOpticalSizeAttribute")));
+    double optical = numeric(original.p, static_cast<double>(CTFontGetSize(base)));
+    if (optical <= 0) optical = CTFontGetSize(base);
+    int tracking = 0;
+    Hold<CFNumberRef> size(CFNumberCreate(nullptr, kCFNumberDoubleType, &optical));
+    Hold<CFNumberRef> zero(CFNumberCreate(nullptr, kCFNumberIntType, &tracking));
+    const void* keys[] = {CFSTR("NSCTFontOpticalSizeAttribute"), CFSTR("NSCTFontUnscaledTrackingAttribute")};
+    const void* values[] = {size.p, zero.p};
+    Hold<CFDictionaryRef> attrs(CFDictionaryCreate(nullptr, keys, values, 2,
+        &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks));
+    Hold<CTFontDescriptorRef> desc(CTFontDescriptorCreateWithAttributes(attrs.p));
+    return CTFontCreateCopyWithAttributes(base, 0, nullptr, desc.p);
+}
+
+static CTFontRef clone(CTFontRef base, const std::vector<std::pair<uint32_t, double>>& requested, bool corrected) {
+    if (!base) return nullptr;
+    Hold<CFArrayRef> axes(CTFontCopyVariationAxes(base));
+    Hold<CFDictionaryRef> old(CTFontCopyVariation(base));
+    Hold<CFMutableDictionaryRef> values(CFDictionaryCreateMutable(nullptr, 0,
+        &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks));
+    double previousOpsz = 0, nextOpsz = 0, minOpsz = 0, maxOpsz = 0;
+    if (corrected && axes.p) {
+        for (CFIndex i = 0; i < CFArrayGetCount(axes.p); ++i) {
+            auto axis = static_cast<CFDictionaryRef>(CFArrayGetValueAtIndex(axes.p, i));
+            auto key = CFDictionaryGetValue(axis, kCTFontVariationAxisIdentifierKey);
+            auto tag = static_cast<uint32_t>(numeric(key));
+            auto current = old.p ? CFDictionaryGetValue(old.p, key) : nullptr;
+            auto effective = numeric(current, numeric(CFDictionaryGetValue(axis, kCTFontVariationAxisDefaultValueKey)));
+            if (tag == 0x6f70737a) {
+                previousOpsz = nextOpsz = effective;
+                minOpsz = numeric(CFDictionaryGetValue(axis, kCTFontVariationAxisMinimumValueKey));
+                maxOpsz = numeric(CFDictionaryGetValue(axis, kCTFontVariationAxisMaximumValueKey));
+            }
+            set(values.p, tag, effective);
+        }
+    } else if (old.p) {
+        std::vector<const void*> keys(static_cast<size_t>(CFDictionaryGetCount(old.p)));
+        std::vector<const void*> entries(keys.size());
+        CFDictionaryGetKeysAndValues(old.p, keys.data(), entries.data());
+        for (size_t i = 0; i < keys.size(); ++i) CFDictionarySetValue(values.p, keys[i], entries[i]);
+    }
+    for (const auto& value : requested) {
+        set(values.p, value.first, value.second);
+        if (value.first == 0x6f70737a) nextOpsz = value.second;
+    }
+    Hold<CFMutableDictionaryRef> attrs(CFDictionaryCreateMutable(nullptr, 0,
+        &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks));
+    CTFontRef intermediate = nullptr;
+    if (corrected && previousOpsz == nextOpsz && maxOpsz > minOpsz) {
+        double different = minOpsz + (maxOpsz - minOpsz) / 2;
+        if (different == nextOpsz) different = minOpsz + (maxOpsz - minOpsz) / 4;
+        set(values.p, 0x6f70737a, different);
+        Hold<CFNumberRef> optical(CFNumberCreate(nullptr, kCFNumberDoubleType, &different));
+        CFDictionarySetValue(attrs.p, CFSTR("NSCTFontOpticalSizeAttribute"), optical.p);
+        CFDictionarySetValue(attrs.p, kCTFontVariationAttribute, values.p);
+        Hold<CTFontDescriptorRef> desc(CTFontDescriptorCreateWithAttributes(attrs.p));
+        intermediate = CTFontCreateCopyWithAttributes(base, 0, nullptr, desc.p);
+        set(values.p, 0x6f70737a, nextOpsz);
+    }
+    Hold<CTFontRef> seed(intermediate);
+    if (corrected) {
+        Hold<CFNumberRef> optical(CFNumberCreate(nullptr, kCFNumberDoubleType, &nextOpsz));
+        CFDictionarySetValue(attrs.p, CFSTR("NSCTFontOpticalSizeAttribute"), optical.p);
+    }
+    CFDictionarySetValue(attrs.p, kCTFontVariationAttribute, values.p);
+    Hold<CTFontDescriptorRef> desc(CTFontDescriptorCreateWithAttributes(attrs.p));
+    return CTFontCreateCopyWithAttributes(seed.p ? seed.p : base, 0, nullptr, desc.p);
+}
+
+int main(int argc, char** argv) {
+    if (argc != 2) { std::fprintf(stderr, "Expected absolute text-data directory\n"); return 2; }
+    std::string directory(argv[1]);
+    for (const auto* name : {"selected-face.ttc", "RobotoFlex.ttf", "NotoSans-Regular.ttf"}) {
+        auto path = directory + "/" + name;
+        Hold<CFDataRef> data(load(path));
+        std::printf("FILE %s bytes=%ld\n", path.c_str(), data.p ? static_cast<long>(CFDataGetLength(data.p)) : -1L);
+        Hold<CFArrayRef> fromData(data.p ? CTFontManagerCreateFontDescriptorsFromData(data.p) : nullptr);
+        Hold<CFURLRef> url(CFURLCreateFromFileSystemRepresentation(nullptr,
+            reinterpret_cast<const UInt8*>(path.data()), static_cast<CFIndex>(path.size()), false));
+        Hold<CFArrayRef> fromURL(url.p ? CTFontManagerCreateFontDescriptorsFromURL(url.p) : nullptr);
+        descriptors("plural-data", fromData.p);
+        descriptors("URL", fromURL.p);
+    }
+    Hold<CFDataRef> data(load(directory + "/RobotoFlex.ttf"));
+    // Singular is used only for this standalone TTF, matching TGFX's current
+    // loader. It is never substituted for collection-face enumeration.
+    Hold<CTFontDescriptorRef> desc(data.p ? CTFontManagerCreateFontDescriptorFromData(data.p) : nullptr);
+    Hold<CTFontRef> base(desc.p ? CTFontCreateWithFontDescriptor(desc.p, 0, nullptr) : nullptr);
+    font("raw", base.p);
+    for (bool corrected : {false, true}) {
+        Hold<CTFontRef> source(clone(base.p, {{0x77676874, 350}, {0x77647468, 80}}, corrected));
+        auto prefix = std::string(corrected ? "corrected" : "old");
+        font((prefix + " source-before").c_str(), source.p);
+        Hold<CTFontRef> sourcePrepared(prepared(source.p));
+        font((prefix + " source-prepared").c_str(), sourcePrepared.p);
+        font((prefix + " source-after-preparation").c_str(), source.p);
+        Hold<CTFontRef> sibling(clone(source.p, {{0x77676874, 900}}, corrected));
+        font((prefix + " sibling").c_str(), sibling.p);
+        Hold<CTFontRef> siblingPrepared(prepared(sibling.p));
+        font((prefix + " sibling-prepared").c_str(), siblingPrepared.p);
+        font((prefix + " source-after").c_str(), source.p);
+        std::printf("%s CFEqual(source,sibling)=%d\n", prefix.c_str(),
+            source.p && sibling.p ? static_cast<int>(CFEqual(source.p, sibling.p)) : -1);
+    }
+    return 0; // Diagnostic exit status is not a backend-test PASS.
+}

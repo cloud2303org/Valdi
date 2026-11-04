@@ -1,5 +1,5 @@
 #include "RasterContext.hpp"
-#include "include/core/SkCanvas.h"
+#include "snap_drawing/cpp/Utils/DrawingBackend.hpp"
 #include "snap_drawing/cpp/Drawing/Composition/CompositionState.hpp"
 #include "snap_drawing/cpp/Drawing/Composition/Compositor.hpp"
 #include "snap_drawing/cpp/Drawing/Composition/CompositorPlaneList.hpp"
@@ -22,6 +22,7 @@
 // These come from Skia SkBlitRow.h .
 // We use them for blending rows. They are highly optimized under the hood,
 // so it's best to re-use instead of rolling out our own.
+#ifndef SNAP_DRAWING_TGFX_EXPERIMENT
 class SkBlitRow {
 public:
     // NOLINTNEXTLINE(readability-identifier-naming)
@@ -33,6 +34,7 @@ public:
     // NOLINTNEXTLINE(readability-identifier-naming)
     static Proc32 Factory32(unsigned flags32);
 };
+#endif
 
 namespace snap::drawing {
 
@@ -186,7 +188,23 @@ Valdi::Result<Valdi::Void> RasterContext::blitDeltaBitmapToOutputBitmap(const Re
             }
         }
     } else {
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+        const auto processProc = [](uint32_t* dst, const uint32_t* src, int count, unsigned) {
+            for (int i = 0; i < count; ++i) {
+                const uint32_t source = src[i];
+                const uint32_t inverseAlpha = 255u - (source >> 24);
+                uint32_t result = 0;
+                for (unsigned shift = 0; shift < 32; shift += 8) {
+                    const uint32_t channel = ((source >> shift) & 255u) +
+                        ((((dst[i] >> shift) & 255u) * inverseAlpha + 127u) / 255u);
+                    result |= std::min(channel, 255u) << shift;
+                }
+                dst[i] = result;
+            }
+        };
+#else
         auto processProc = SkBlitRow::Factory32(SkBlitRow::kSrcPixelAlpha_Flag32);
+#endif
 
         auto* outputPtr = reinterpret_cast<uint8_t*>(outputBytes);
         const auto* inputPtr = reinterpret_cast<const uint8_t*>(inputBytes);
@@ -272,7 +290,12 @@ Valdi::Result<RasterContext::RasterResult> RasterContext::doRasterDelta(const Co
             static_cast<size_t>(damageRect.width()) * static_cast<size_t>(damageRect.height());
     }
 
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+    auto completed = surface->flushWithResult();
+    if (!completed) { return completed.error().rethrow("Failed to complete delta bitmap raster"); }
+#else
     surface->flush();
+#endif
 
     return output;
 }
@@ -295,7 +318,13 @@ Valdi::Result<Valdi::Void> RasterContext::rasterNonDelta(const Ref<Valdi::IBitma
     auto doRasterResult =
         doRaster(canvas.value(), displayList, planeList, bitmapInfo, shouldClearBitmapBeforeDrawing, rasterId);
 
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+    if (!doRasterResult) { return doRasterResult.moveError(); }
+    auto completed = surface->flushWithResult();
+    if (!completed) { return completed.error().rethrow("Failed to complete bitmap raster"); }
+#else
     surface->flush();
+#endif
 
     return doRasterResult;
 }
@@ -341,7 +370,11 @@ Valdi::Result<Valdi::Void> RasterContext::doRaster(DrawableSurfaceCanvas& canvas
     if (shouldClearBitmapBeforeDrawing) {
         Paint paint;
         paint.setColor(Color::transparent());
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+        paint.setBlendMode(tgfx::BlendMode::Src);
+#else
         paint.setBlendMode(SkBlendMode::kSrc);
+#endif
         canvas.getSkiaCanvas()->drawPaint(paint.getSkValue());
     }
 
@@ -405,9 +438,17 @@ Valdi::Result<Valdi::Void> RasterContext::doRaster(DrawableSurfaceCanvas& canvas
                 skiaCanvas->drawImageRect(image.getSkValue(),
                                           srcRect.getSkValue(),
                                           dstRect.getSkValue(),
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+                                          tgfx::SamplingOptions(tgfx::FilterMode::Linear),
+#else
                                           SkSamplingOptions(SkFilterMode::kLinear),
+#endif
                                           &paint.getSkValue(),
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+                                          tgfx::SrcRectConstraint::Strict);
+#else
                                           SkCanvas::kStrict_SrcRectConstraint);
+#endif
                 skiaCanvas->restoreToCount(saveCount);
             } break;
         }

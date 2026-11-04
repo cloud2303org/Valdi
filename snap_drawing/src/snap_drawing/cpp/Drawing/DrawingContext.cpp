@@ -6,7 +6,7 @@
 //
 
 #include "snap_drawing/cpp/Drawing/DrawingContext.hpp"
-#ifndef SNAP_DRAWING_TGFX_EXPERIMENT
+#if !defined(SNAP_DRAWING_TGFX_EXPERIMENT) || defined(SNAP_DRAWING_TGFX_COMPLETE)
 #include "snap_drawing/cpp/Drawing/Surface/ExternalSurface.hpp"
 #include "snap_drawing/cpp/Utils/BitmapUtils.hpp"
 #include "valdi_core/cpp/Interfaces/IBitmap.hpp"
@@ -24,7 +24,7 @@ DrawingContext::~DrawingContext() = default;
 
 LayerContent DrawingContext::finish() {
     LayerContent content;
-#ifndef SNAP_DRAWING_TGFX_EXPERIMENT
+#if !defined(SNAP_DRAWING_TGFX_EXPERIMENT) || defined(SNAP_DRAWING_TGFX_COMPLETE)
     if (_externalSurface != nullptr) {
         content.externalSurface = Valdi::makeShared<ExternalSurfaceSnapshot>(std::move(_externalSurface));
     }
@@ -32,6 +32,9 @@ LayerContent DrawingContext::finish() {
 
     if (_canvas != nullptr) {
         content.picture = _recorder.finishRecordingAsPicture();
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+        content.bounds = _drawBounds;
+#endif
 #ifdef SNAP_DRAWING_TGFX_EXPERIMENT
         // TGFX returns nullptr for an empty recording. Clear the active canvas
         // in either case so repeated finish() and a fresh recording are coherent.
@@ -63,15 +66,23 @@ void DrawingContext::drawPaint(const Paint& paint,
 
 void DrawingContext::drawPaint(const Paint& paint, const Path& path) {
     if (!path.isEmpty()) {
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+        paint.drawPath(canvas(), path.getSkValue());
+#else
         canvas()->drawPath(path.getSkValue(), paint.getSkValue());
+#endif
     }
 }
 
 void DrawingContext::drawPaint(const Paint& paint, const Rect& targetRect) {
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+    paint.drawRect(canvas(), targetRect.getSkValue());
+#else
     canvas()->drawRect(targetRect.getSkValue(), paint.getSkValue());
+#endif
 }
 
-#ifndef SNAP_DRAWING_TGFX_EXPERIMENT
+#if !defined(SNAP_DRAWING_TGFX_EXPERIMENT) || defined(SNAP_DRAWING_TGFX_COMPLETE)
 void DrawingContext::drawBitmap(const Valdi::Ref<Valdi::IBitmap>& bitmap, FittingSizeMode fittingSizeMode) {
     auto imageResult = Image::makeFromBitmap(bitmap, false);
     if (!imageResult) {
@@ -89,9 +100,17 @@ void DrawingContext::drawImage(const Image& image, const Rect& imageRect, const 
     canvas()->drawImageRect(image.getSkValue(),
                             imageRect.getSkValue(),
                             targetRect.getSkValue(),
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+                            tgfx::SamplingOptions(tgfx::FilterMode::Nearest, tgfx::MipmapMode::None),
+#else
                             SkSamplingOptions(),
+#endif
                             paint != nullptr ? &paint->getSkValue() : nullptr,
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+                            tgfx::SrcRectConstraint::Strict);
+#else
                             SkCanvas::kStrict_SrcRectConstraint);
+#endif
 }
 #endif
 
@@ -111,7 +130,7 @@ const Rect& DrawingContext::drawBounds() const {
     return _drawBounds;
 }
 
-#ifndef SNAP_DRAWING_TGFX_EXPERIMENT
+#if !defined(SNAP_DRAWING_TGFX_EXPERIMENT) || defined(SNAP_DRAWING_TGFX_COMPLETE)
 void DrawingContext::drawExternalSurface(const Ref<ExternalSurface>& externalSurface) {
     SC_ASSERT(_externalSurface == nullptr);
     _externalSurface = externalSurface;

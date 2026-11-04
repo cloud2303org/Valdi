@@ -7,14 +7,14 @@
 
 #include "snap_drawing/cpp/Drawing/DisplayList/DrawDisplayListVisitor.hpp"
 
-#include "include/core/SkCanvas.h"
+#include "snap_drawing/cpp/Utils/DrawingBackend.hpp"
 
 #include "snap_drawing/cpp/Drawing/Mask/IMask.hpp"
 #include "snap_drawing/cpp/Drawing/Paint.hpp"
 
 namespace snap::drawing {
 
-DrawDisplayListVisitor::DrawDisplayListVisitor(SkCanvas* canvas, Scalar scaleX, Scalar scaleY)
+DrawDisplayListVisitor::DrawDisplayListVisitor(NativeCanvas* canvas, Scalar scaleX, Scalar scaleY)
     : _canvas(canvas), _scaleX(scaleX), _scaleY(scaleY), _tempRect(Rect::makeEmpty()) {}
 
 void DrawDisplayListVisitor::visit(const Operations::PushContext& pushContext) {
@@ -23,7 +23,11 @@ void DrawDisplayListVisitor::visit(const Operations::PushContext& pushContext) {
     } else {
         Paint paint;
         paint.setAlpha(pushContext.opacity);
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+        _canvas->saveLayer(&paint.getSkValue());
+#else
         _canvas->saveLayer(nullptr, &paint.getSkValue());
+#endif
     }
 
     auto matrix = pushContext.matrix;
@@ -39,12 +43,17 @@ void DrawDisplayListVisitor::visit(const Operations::PopContext& /*popContext*/)
 }
 
 void DrawDisplayListVisitor::visit(const Operations::DrawPicture& drawPicture) {
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+    const auto& picture = *drawPicture.owner;
+#else
+    auto* picture = drawPicture.picture;
+#endif
     if (drawPicture.opacity == 1.0f) {
-        _canvas->drawPicture(drawPicture.picture);
+        _canvas->drawPicture(picture);
     } else {
         Paint paint;
         paint.setAlpha(drawPicture.opacity);
-        _canvas->drawPicture(drawPicture.picture, nullptr, &paint.getSkValue());
+        _canvas->drawPicture(picture, nullptr, &paint.getSkValue());
     }
 }
 

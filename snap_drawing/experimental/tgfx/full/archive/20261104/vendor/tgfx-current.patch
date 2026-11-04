@@ -1,0 +1,2770 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 7ad6abf..b9eb39c 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -453,7 +453,8 @@ endif ()
+ # Auto-sync shaderc sub-dependencies (glslang, SPIRV-Tools, etc.) if any backend needs shaderc.
+ # This runs at configure time; for offline builds, run manually before cmake:
+ #   python third_party/shaderc/utils/git-sync-deps
+-if (NOT EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/third_party/shaderc/third_party/glslang)
++if ((TGFX_USE_METAL OR TGFX_USE_VULKAN OR TGFX_USE_D3D12 OR TGFX_USE_WEBGPU)
++        AND NOT EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/third_party/shaderc/third_party/glslang)
+     find_package(Python3 COMPONENTS Interpreter QUIET)
+     if (Python3_FOUND)
+         message(STATUS "Syncing shaderc sub-dependencies...")
+@@ -684,7 +685,11 @@ elseif (ANDROID)
+     endif ()
+ 
+     # optimizes the output size
+-    list(APPEND TGFX_COMPILE_OPTIONS -ffunction-sections -fdata-sections -Os -fno-exceptions -fno-rtti)
++    list(APPEND TGFX_COMPILE_OPTIONS -ffunction-sections -fdata-sections -Os -fno-exceptions)
++    option(TGFX_ANDROID_ENABLE_RTTI "Emit RTTI for applications subclassing TGFX interfaces" OFF)
++    if (NOT TGFX_ANDROID_ENABLE_RTTI)
++        list(APPEND TGFX_COMPILE_OPTIONS -fno-rtti)
++    endif ()
+ 
+ elseif (WIN32)
+     find_library(Bcrypt_LIB Bcrypt)
+diff --git a/include/tgfx/core/Canvas.h b/include/tgfx/core/Canvas.h
+index e4353e2..05285c7 100644
+--- a/include/tgfx/core/Canvas.h
++++ b/include/tgfx/core/Canvas.h
+@@ -17,6 +17,7 @@
+ /////////////////////////////////////////////////////////////////////////////////////////////////
+ 
+ #pragma once
++#include <functional>
+ 
+ #include <optional>
+ #include <stack>
+@@ -65,6 +66,40 @@ class Canvas {
+    */
+   int save();
+ 
++  /**
++   * Saves pixels inside the device-aligned mapped subset, clears that subset,
++   * and restores its pixels behind subsequent content on restore(). Pixels
++   * outside the subset keep their destination semantics. Returns -1 if a GPU
++   * destination cannot be captured. Picture canvases retain this operation.
++   */
++  int saveBehind(const Rect& subset);
++
++  /**
++   * Reports a native render failure since this destination context was created,
++   * including a failure in an offscreen child used by its rendering operations.
++   * A failed saveBehind still pushes one save and must be restored normally.
++   * Query on the same thread that owns the GPU context.
++   */
++  bool hasError() const;
++
++  /**
++   * Marks this destination and its active rendering ancestors as failed immediately.
++   * Recording canvases preserve an immutable failure marker in the finished Picture,
++   * including across opaque visual discards. Replaying it fails only the receiving
++   * destination; a Picture never retains mutable destination error state.
++   * Does not change the save count. Failure remains sticky for this recording/destination.
++   */
++  void markRenderFailure();
++
++  /**
++   * Records an immutable, replayable drawing operation. The callback is invoked
++   * at playback with the actual matrix/clip; it must own its captured values and
++   * balance all canvas saves. Bounds are local, with an optional device outset.
++   * Measurement uses these bounds without invoking the callback.
++   */
++  void drawDeferred(const Rect& bounds, float deviceOutset,
++                    std::function<void(Canvas*)> draw, bool unbounded = false);
++
+   /**
+    * Saves the current matrix and clip state, and allocates an offscreen layer for subsequent
+    * drawing. When restore() is called, it discards changes to the matrix and clip, and draws the
+@@ -513,6 +548,7 @@ class Canvas {
+   void resetStateStack();
+ 
+   friend class Surface;
++  friend class DrawContext;
+   friend class Picture;
+   friend class PictureRecorder;
+   friend class SVGExporter;
+diff --git a/include/tgfx/core/Picture.h b/include/tgfx/core/Picture.h
+index fba7126..e29151a 100644
+--- a/include/tgfx/core/Picture.h
++++ b/include/tgfx/core/Picture.h
+@@ -88,9 +88,13 @@ class Picture {
+   mutable std::atomic<Rect*> bounds = {nullptr};
+   size_t drawCount = 0;
+   bool _hasUnboundedFill = false;
++  // Value-only status fixed at construction; never a destination state pointer.
++  const bool _hasRenderFailure = false;
++  // Computed once during construction, including referenced child pictures.
++  bool _hasDeferredDrawing = false;
+ 
+   Picture(std::unique_ptr<BlockBuffer> buffer, std::vector<PlacementPtr<PictureRecord>> records,
+-          size_t drawCount);
++          size_t drawCount, bool hasRenderFailure);
+ 
+   void playback(DrawContext* drawContext, const Matrix& matrix, const ClipStack& clip,
+                 AbortCallback* callback = nullptr) const;
+diff --git a/include/tgfx/core/Shader.h b/include/tgfx/core/Shader.h
+index dbb8682..ceecacd 100644
+--- a/include/tgfx/core/Shader.h
++++ b/include/tgfx/core/Shader.h
+@@ -52,6 +52,14 @@ class Shader {
+                                                  TileMode tileModeY = TileMode::Clamp,
+                                                  const SamplingOptions& sampling = {});
+ 
++  /**
++   * Creates an image shader using separable Mitchell-Netravali cubic
++   * reconstruction (B=C=1/3), with no mipmap substitution.
++   */
++  static std::shared_ptr<Shader> MakeCubicImageShader(std::shared_ptr<Image> image,
++                                                     TileMode tileModeX = TileMode::Clamp,
++                                                     TileMode tileModeY = TileMode::Clamp);
++
+   /**
+    * Creates a shader that blends the two specified shaders.
+    */
+diff --git a/include/tgfx/core/Task.h b/include/tgfx/core/Task.h
+index e7ba440..04f2d3b 100644
+--- a/include/tgfx/core/Task.h
++++ b/include/tgfx/core/Task.h
+@@ -47,7 +47,12 @@ enum class TaskStatus {
+   /**
+    * The Task has been canceled.
+    */
+-  Canceled
++  Canceled,
++  /**
++   * Queued execution was prevented, but onCancel() is still releasing its payload.
++   * wait() joins this cleanup just as it joins an executing task.
++   */
++  Canceling
+ };
+ 
+ /**
+@@ -149,7 +154,7 @@ class Task {
+ 
+   /**
+    * Override this method to define the logic for canceling the Task. It is called when the Task is
+-   * canceled and will only be executed once.
++   * canceled and will only be executed once. wait() does not complete until this cleanup returns.
+    */
+   virtual void onCancel() {
+   }
+diff --git a/include/tgfx/core/Typeface.h b/include/tgfx/core/Typeface.h
+index 47909f7..900bbda 100644
+--- a/include/tgfx/core/Typeface.h
++++ b/include/tgfx/core/Typeface.h
+@@ -40,6 +40,14 @@ typedef int32_t Unichar;
+ 
+ typedef uint32_t FontTableTag;
+ 
++/**
++ * An OpenType variation axis tag and its design-space coordinate.
++ */
++struct FontVariation {
++  FontTableTag axis;
++  float value;
++};
++
+ class ScalerContext;
+ class AdvancedTypefaceInfo;
+ 
+@@ -199,5 +207,23 @@ class Typeface {
+   friend class RenderContext;
+   friend class PDFExportContext;
+   friend class PDFFont;
++
++ public:
++  /**
++   * Returns an independent instance with the specified variation coordinates.
++   * Unspecified axes retain this instance's coordinates. Finite values are
++   * clamped to the axis range. Unknown axes, non-finite values, and backend
++   * failures return nullptr. An empty request returns this typeface.
++   * Currently implemented by the FreeType backend.
++   */
++  virtual std::shared_ptr<Typeface> makeWithVariations(
++      const std::vector<FontVariation>& coordinates) const;
++
++  /**
++   * Returns the actual design coordinates of this instance in font axis order,
++   * including unspecified/default axes. Non-variable or unsupported backends
++   * return an empty vector.
++   */
++  virtual std::vector<FontVariation> getVariationDesignPosition() const;
+ };
+ }  // namespace tgfx
+diff --git a/include/tgfx/gpu/Context.h b/include/tgfx/gpu/Context.h
+index dbb7ced..aa3165c 100644
+--- a/include/tgfx/gpu/Context.h
++++ b/include/tgfx/gpu/Context.h
+@@ -40,6 +40,8 @@ class CommandBuffer;
+ class ShaderCaps;
+ class AtlasStrikeCache;
+ class SingleOwner;
++class RenderErrorState;
++class RenderErrorScope;
+ 
+ /**
+  * Context is responsible for creating and managing GPU resources, as well as issuing drawing
+@@ -168,6 +170,19 @@ class Context {
+    */
+   void submit(std::unique_ptr<Recording> recording, bool syncCpu = false);
+ 
++  /**
++   * Discards exactly the pending batch identified by recording, without encoding, submitting or
++   * presenting it. Consumes the token and releases its retained windows and task allocations.
++   * Earlier and later pending batches remain queued, in their original order.
++   *
++   * Returns false for nullptr, a different context, or an already submitted/discarded generation.
++   * Requires the same locked context/owner thread as flush() and submit(). This cannot undo GPU
++   * work already submitted. A batch is atomic: all operations in that flush are discarded.
++   * Callers must abandon outputs of the discarded batch and re-record work depending on them;
++   * cancellation does not repair dependencies in other batches.
++   */
++  bool discard(std::unique_ptr<Recording> recording);
++
+   /**
+    * Call to ensure all drawing to the context has been flushed and submitted to the underlying 3D
+    * API. This is equivalent to calling Context::flush() followed by Context::submit().
+@@ -202,6 +217,9 @@ class Context {
+   }
+ 
+  private:
++  std::shared_ptr<RenderErrorState> activeRenderErrorState = nullptr;
++  friend class RenderErrorScope;
++
+   std::shared_ptr<DrawingBuffer> getDrawingBuffer(const Recording* recording) const;
+ 
+   Device* _device = nullptr;
+diff --git a/include/tgfx/gpu/Recording.h b/include/tgfx/gpu/Recording.h
+index b76cbab..9a5ed97 100644
+--- a/include/tgfx/gpu/Recording.h
++++ b/include/tgfx/gpu/Recording.h
+@@ -32,7 +32,9 @@ class Window;
+  * over when GPU work is actually queued for execution. A Recording can be submitted to the GPU via
+  * Context::submit().
+  * Note: If multiple Recording objects are created, submitting a later Recording will force all
+- * earlier Recordings to be submitted first, maintaining the correct rendering order.
++ * earlier pending Recordings to be submitted first, maintaining the correct rendering order.
++ * Context::discard() cancels only the identified pending batch. Merely releasing a Recording
++ * does not cancel its batch, and discarding an already submitted/recycled generation has no effect.
+  * A Recording keeps the windows it rendered to alive until it is submitted or released.
+  */
+ class Recording {
+diff --git a/src/core/Canvas.cpp b/src/core/Canvas.cpp
+index f22d4c0..97f8c9b 100644
+--- a/src/core/Canvas.cpp
++++ b/src/core/Canvas.cpp
+@@ -17,6 +17,7 @@
+ /////////////////////////////////////////////////////////////////////////////////////////////////
+ 
+ #include "tgfx/core/Canvas.h"
++#include <cmath>
+ #include "core/CanvasState.h"
+ #include "core/ClipStack.h"
+ #include "core/DrawContext.h"
+@@ -80,6 +81,106 @@ Canvas::Canvas(DrawContext* drawContext, Surface* surface)
+ 
+ Canvas::~Canvas() = default;
+ 
++DrawContext::DrawContext(std::shared_ptr<RenderErrorState> state)
++    : errorState(state ? std::move(state) : std::make_shared<RenderErrorState>()) {}
++
++bool DrawContext::hasError() const {
++  return errorState && errorState->hasError();
++}
++
++bool Canvas::hasError() const {
++  return drawContext->hasError();
++}
++
++void Canvas::markRenderFailure() {
++  drawContext->markRenderFailure();
++}
++
++void DrawContext::drawDeferred(const Rect&, float,
++                               const std::function<void(Canvas*)>& draw, bool,
++                               const Matrix& matrix, const ClipStack& clip) {
++  Canvas canvas(this);
++  canvas._matrix = matrix;
++  *canvas.clipStack = clip;
++  auto bounds = deviceBounds();
++  if (!bounds.isEmpty()) {
++    canvas.clipStack->clipRect(bounds, Matrix::I(), false);
++  }
++  draw(&canvas);
++  if (canvas.getSaveCount() != 0) {
++    markRenderFailure();
++    LOGE("Deferred draw did not balance its canvas saves");
++    canvas.restoreToCount(0);
++  }
++}
++
++bool DrawContext::saveBehind(const Rect& subset, const Matrix& matrix, const ClipStack& clip) {
++  if (!matrix.isFinite() || !std::isfinite(subset.left) || !std::isfinite(subset.top) ||
++      !std::isfinite(subset.right) || !std::isfinite(subset.bottom)) {
++    behindStack.push({});
++    markRenderFailure();
++    return false;
++  }
++  auto bounds = matrix.mapRect(subset);
++  bounds.roundOut();
++  auto targetBounds = deviceBounds();
++  if (bounds.isEmpty() || clip.state() == ClipState::Empty ||
++      (!targetBounds.isEmpty() && !bounds.intersect(targetBounds)) ||
++      (clip.state() != ClipState::WideOpen && !bounds.intersect(clip.bounds()))) {
++    // Empty saves are successful, allocation-free, and still balanced.
++    behindStack.push({});
++    return true;
++  }
++  bounds.roundOut();
++  if (!targetBounds.isEmpty() && !bounds.intersect(targetBounds)) {
++    behindStack.push({});
++    return true;
++  }
++  auto savedClip = clip;
++  savedClip.clipRect(bounds, Matrix::I(), false);
++  auto image = captureDestination(bounds);
++  behindStack.push({image, savedClip, {bounds.left, bounds.top}});
++  if (!image) {
++    markRenderFailure();
++    LOGE("saveBehind could not capture its GPU destination");
++    return false;
++  }
++  Brush clear = {};
++  clear.blendMode = BlendMode::Clear;
++  drawRect(bounds, Matrix::I(), savedClip, clear, nullptr);
++  return true;
++}
++
++void DrawContext::restoreBehind() {
++  if (behindStack.empty()) {
++    markRenderFailure();
++    LOGE("restoreBehind without matching saveBehind");
++    return;
++  }
++  auto saved = std::move(behindStack.top());
++  behindStack.pop();
++  if (saved.image) {
++    Brush behind = {};
++    behind.blendMode = BlendMode::DstOver;
++    drawImage(std::move(saved.image), SamplingOptions(FilterMode::Nearest, MipmapMode::None),
++              Matrix::MakeTrans(saved.origin.x, saved.origin.y), saved.clip, behind);
++  }
++}
++
++int Canvas::saveBehind(const Rect& subset) {
++  auto captured = drawContext->saveBehind(subset, _matrix, *clipStack);
++  auto count = save();
++  stateStack.top()->savedBehind = true;
++  return captured ? count : -1;
++}
++
++void Canvas::drawDeferred(const Rect& bounds, float deviceOutset,
++                          std::function<void(Canvas*)> draw, bool unbounded) {
++  if (draw) {
++    drawContext->drawDeferred(bounds, deviceOutset, draw, unbounded, _matrix, *clipStack);
++  }
++}
++
+ int Canvas::save() {
+   stateStack.push(std::make_unique<CanvasState>(_matrix));
+   clipStack->save();
+@@ -108,7 +209,11 @@ void Canvas::restore() {
+   _matrix = canvasState->matrix;
+   clipStack->restore();
+   auto layer = std::move(canvasState->savedLayer);
++  auto savedBehind = canvasState->savedBehind;
+   stateStack.pop();
++  if (savedBehind) {
++    drawContext->restoreBehind();
++  }
+   if (layer != nullptr) {
+     drawContext = layer->drawContext;
+     auto layerContext = reinterpret_cast<PictureContext*>(layer->layerContext.get());
+@@ -684,6 +789,9 @@ void Canvas::drawPicture(std::shared_ptr<Picture> picture) {
+   if (picture == nullptr) {
+     return;
+   }
++  if (picture->_hasRenderFailure) {
++    markRenderFailure();
++  }
+   drawContext->drawPicture(std::move(picture), _matrix, *clipStack);
+ }
+ 
+@@ -692,6 +800,9 @@ void Canvas::drawPicture(std::shared_ptr<Picture> picture, const Matrix* matrix,
+   if (picture == nullptr) {
+     return;
+   }
++  if (picture->_hasRenderFailure) {
++    markRenderFailure();
++  }
+   auto drawMatrix = _matrix;
+   if (matrix) {
+     drawMatrix.preConcat(*matrix);
+@@ -710,7 +821,10 @@ void Canvas::drawLayer(std::shared_ptr<Picture> picture, const Matrix& matrix,
+                        std::shared_ptr<ImageFilter> imageFilter) {
+   DEBUG_ASSERT(brush.shader == nullptr);
+   DEBUG_ASSERT(picture != nullptr);
+-  if (imageFilter != nullptr) {
++  if (picture->_hasRenderFailure) {
++    markRenderFailure();
++  }
++  if (imageFilter != nullptr && !picture->_hasDeferredDrawing) {
+     Point offset = {};
+     if (auto image = picture->asImage(&offset)) {
+       Point filterOffset = {};
+@@ -726,7 +840,7 @@ void Canvas::drawLayer(std::shared_ptr<Picture> picture, const Matrix& matrix,
+                              brush.makeWithMatrix(brushMatrix));
+       return;
+     }
+-  } else if (picture->drawCount == 1 && brush.maskFilter == nullptr) {
++  } else if (!picture->_hasDeferredDrawing && picture->drawCount == 1 && brush.maskFilter == nullptr) {
+     LayerUnrollContext unrollContext(drawContext, brush);
+     picture->playback(&unrollContext, matrix, clip);
+     if (unrollContext.hasUnrolled()) {
+diff --git a/src/core/CanvasState.cpp b/src/core/CanvasState.cpp
+index 43b811a..a2ba202 100644
+--- a/src/core/CanvasState.cpp
++++ b/src/core/CanvasState.cpp
+@@ -22,6 +22,7 @@
+ namespace tgfx {
+ CanvasLayer::CanvasLayer(DrawContext* drawContext, const Paint* paint)
+     : drawContext(drawContext), layerContext(std::make_unique<PictureContext>()) {
++  layerContext->inheritRenderErrorState(*drawContext);
+   if (paint) {
+     layerPaint = *paint;
+     layerPaint.setShader(nullptr);
+diff --git a/src/core/CanvasState.h b/src/core/CanvasState.h
+index cd0109a..6424d31 100644
+--- a/src/core/CanvasState.h
++++ b/src/core/CanvasState.h
+@@ -41,6 +41,7 @@ class CanvasState {
+   }
+ 
+   Matrix matrix = Matrix::I();
++  bool savedBehind = false;
+   std::unique_ptr<CanvasLayer> savedLayer = nullptr;
+ };
+ }  // namespace tgfx
+diff --git a/src/core/DrawContext.h b/src/core/DrawContext.h
+index c8b088a..cd773c7 100644
+--- a/src/core/DrawContext.h
++++ b/src/core/DrawContext.h
+@@ -19,7 +19,9 @@
+ #pragma once
+ 
+ #include <stack>
++#include <functional>
+ #include "core/ClipStack.h"
++#include "core/RenderErrorState.h"
+ #include "tgfx/core/Brush.h"
+ #include "tgfx/core/Matrix.h"
+ #include "tgfx/core/Mesh.h"
+@@ -37,7 +39,29 @@ class TextBlob;
+  */
+ class DrawContext {
+  public:
++  explicit DrawContext(std::shared_ptr<RenderErrorState> state = nullptr);
+   virtual ~DrawContext() = default;
++  bool hasError() const;
++  void markRenderFailure() {
++    if (!errorState) {
++      errorState = std::make_shared<RenderErrorState>();
++    }
++    errorState->markFailure();
++  }
++  const std::shared_ptr<RenderErrorState>& renderErrorState() const { return errorState; }
++  void inheritRenderErrorState(const DrawContext& parent) { errorState = parent.errorState; }
++
++  virtual void drawDeferred(const Rect& bounds, float deviceOutset,
++                            const std::function<void(Canvas*)>& draw, bool unbounded,
++                            const Matrix& matrix, const ClipStack& clip);
++
++  virtual bool saveBehind(const Rect& subset, const Matrix& matrix, const ClipStack& clip);
++  virtual void restoreBehind();
++
++  virtual Rect deviceBounds() const { return Rect::MakeEmpty(); }
++  // bounds are an integral, nonempty device-space subset of deviceBounds().
++  // The returned image starts at (0, 0) and has exactly bounds' dimensions.
++  virtual std::shared_ptr<Image> captureDestination(const Rect&) { return nullptr; }
+ 
+   /**
+    * Fills the entire clip area with the specified Brush.
+@@ -110,5 +134,20 @@ class DrawContext {
+    */
+   virtual void drawLayer(std::shared_ptr<Picture> picture, std::shared_ptr<ImageFilter> filter,
+                          const Matrix& matrix, const ClipStack& clip, const Brush& brush) = 0;
++
++ protected:
++  // A new top-level recording gets independent status. Opaque visual discards
++  // within an existing recording must never call this.
++  void resetRenderErrorState() { errorState = std::make_shared<RenderErrorState>(); }
++
++ private:
++  struct Behind {
++    std::shared_ptr<Image> image;
++    ClipStack clip;
++    Point origin = {};
++  };
++  // Playback state belongs to a draw context, never to the immutable Picture.
++  std::stack<Behind> behindStack;
++  std::shared_ptr<RenderErrorState> errorState;
+ };
+ }  // namespace tgfx
+diff --git a/src/core/LayerUnrollContext.cpp b/src/core/LayerUnrollContext.cpp
+index 9c97855..89061a6 100644
+--- a/src/core/LayerUnrollContext.cpp
++++ b/src/core/LayerUnrollContext.cpp
+@@ -20,7 +20,8 @@
+ 
+ namespace tgfx {
+ LayerUnrollContext::LayerUnrollContext(DrawContext* drawContext, Brush layerBrush)
+-    : drawContext(drawContext), layerBrush(std::move(layerBrush)) {
++    : DrawContext(drawContext->renderErrorState()), drawContext(drawContext),
++      layerBrush(std::move(layerBrush)) {
+ }
+ 
+ void LayerUnrollContext::drawFill(const Brush& brush) {
+diff --git a/src/core/LayerUnrollContext.h b/src/core/LayerUnrollContext.h
+index 62db520..254b74e 100644
+--- a/src/core/LayerUnrollContext.h
++++ b/src/core/LayerUnrollContext.h
+@@ -35,6 +35,11 @@ class LayerUnrollContext : public DrawContext {
+     return unrolled;
+   }
+ 
++  // A deferred operation may emit arbitrarily many overlapping draws. It cannot
++  // inherit per-primitive layer alpha or execute while recording an outer picture.
++  void drawDeferred(const Rect&, float, const std::function<void(Canvas*)>&, bool,
++                    const Matrix&, const ClipStack&) override {}
++
+   void drawFill(const Brush& brush) override;
+ 
+   void drawRect(const Rect& rect, const Matrix& matrix, const ClipStack& clip, const Brush& brush,
+diff --git a/src/core/MeasureContext.cpp b/src/core/MeasureContext.cpp
+index fd57fea..82df6ea 100644
+--- a/src/core/MeasureContext.cpp
++++ b/src/core/MeasureContext.cpp
+@@ -94,6 +94,36 @@ void MeasureContext::drawLayer(std::shared_ptr<Picture> picture,
+                                std::shared_ptr<ImageFilter> imageFilter, const Matrix& matrix,
+                                const ClipStack& clip, const Brush&) {
+   DEBUG_ASSERT(picture != nullptr);
++  if (picture->_hasDeferredDrawing) {
++    // Do not measure device outsets in identity/local coordinates and then
++    // scale them again. Nested opacity/filter layers retain the final matrix.
++    if (clip.state() == ClipState::Empty) {
++      return;
++    }
++    auto inputClip = clip;
++    Matrix inverse;
++    if (imageFilter) {
++      if (!matrix.invert(&inverse)) {
++        return;
++      }
++      if (clip.state() != ClipState::WideOpen) {
++        // A filter can move offscreen input into the destination clip. Measure
++        // its required input first, then clip the filtered output below.
++        auto inputBounds = matrix.mapRect(
++            imageFilter->filterBounds(inverse.mapRect(clip.bounds()), MapDirection::Reverse));
++        inputClip = ClipStack();
++        inputClip.clipRect(inputBounds, Matrix::I(), false);
++      }
++    }
++    MeasureContext child;
++    picture->playback(&child, matrix, inputClip);
++    auto deviceBounds = child.getBounds();
++    if (imageFilter) {
++      deviceBounds = matrix.mapRect(imageFilter->filterBounds(inverse.mapRect(deviceBounds)));
++    }
++    addDeviceBounds(clip, deviceBounds, picture->hasUnboundedFill());
++    return;
++  }
+   auto localBounds = picture->getBounds();
+   if (imageFilter) {
+     localBounds = imageFilter->filterBounds(localBounds);
+diff --git a/src/core/MeasureContext.h b/src/core/MeasureContext.h
+index b1b3bad..c569aef 100644
+--- a/src/core/MeasureContext.h
++++ b/src/core/MeasureContext.h
+@@ -28,6 +28,16 @@ class MeasureContext : public DrawContext {
+     return bounds;
+   }
+ 
++  void drawDeferred(const Rect& localBounds, float deviceOutset,
++                    const std::function<void(Canvas*)>&, bool unbounded,
++                    const Matrix& matrix, const ClipStack& clip) override {
++    auto device = matrix.mapRect(localBounds);
++    device.outset(deviceOutset, deviceOutset);
++    addDeviceBounds(clip, device, unbounded);
++  }
++  bool saveBehind(const Rect&, const Matrix&, const ClipStack&) override { return true; }
++  void restoreBehind() override {}
++
+   void drawFill(const Brush& brush) override;
+ 
+   void drawRect(const Rect& rect, const Matrix& matrix, const ClipStack& clip, const Brush& brush,
+diff --git a/src/core/Picture.cpp b/src/core/Picture.cpp
+index 7c20f8c..65f7117 100644
+--- a/src/core/Picture.cpp
++++ b/src/core/Picture.cpp
+@@ -31,15 +31,29 @@
+ 
+ namespace tgfx {
+ Picture::Picture(std::unique_ptr<BlockBuffer> buffer,
+-                 std::vector<PlacementPtr<PictureRecord>> recordList, size_t drawCount)
+-    : blockBuffer(std::move(buffer)), records(std::move(recordList)), drawCount(drawCount) {
++                 std::vector<PlacementPtr<PictureRecord>> recordList, size_t drawCount,
++                 bool hasRenderFailure)
++    : blockBuffer(std::move(buffer)), records(std::move(recordList)), drawCount(drawCount),
++      _hasRenderFailure(hasRenderFailure) {
+   DEBUG_ASSERT(blockBuffer != nullptr);
+   DEBUG_ASSERT(!records.empty());
+   bool hasInverseClip = true;
+   for (auto& record : records) {
+     if (record->hasUnboundedFill(hasInverseClip)) {
+       _hasUnboundedFill = true;
+-      break;
++    }
++    switch (record->type()) {
++      case PictureRecordType::DrawDeferred:
++        _hasDeferredDrawing = true;
++        break;
++      case PictureRecordType::DrawPicture:
++        _hasDeferredDrawing |= static_cast<const DrawPicture*>(record.get())->picture->_hasDeferredDrawing;
++        break;
++      case PictureRecordType::DrawLayer:
++        _hasDeferredDrawing |= static_cast<const DrawLayer*>(record.get())->picture->_hasDeferredDrawing;
++        break;
++      default:
++        break;
+     }
+   }
+ }
+@@ -71,6 +85,9 @@ void Picture::playback(Canvas* canvas, AbortCallback* callback) const {
+ void Picture::playback(DrawContext* drawContext, const Matrix& matrix, const ClipStack& clip,
+                        AbortCallback* callback) const {
+   DEBUG_ASSERT(drawContext != nullptr);
++  if (_hasRenderFailure) {
++    drawContext->markRenderFailure();
++  }
+   PlaybackContext playbackContext(matrix, clip);
+   for (auto& record : records) {
+     if (callback && callback->abort()) {
+@@ -125,7 +142,7 @@ static bool GetHardClipRect(const ClipStack& clip, const Matrix* matrix, Rect* c
+ 
+ std::shared_ptr<Image> Picture::asImage(Point* offset, const Matrix* matrix,
+                                         const ISize* clipSize) const {
+-  if (drawCount != 1) {
++  if (_hasRenderFailure || _hasDeferredDrawing || drawCount != 1) {
+     return nullptr;
+   }
+   auto recordMatrix = Matrix::I();
+diff --git a/src/core/PictureContext.cpp b/src/core/PictureContext.cpp
+index 4b0c1d8..dcdb5b5 100644
+--- a/src/core/PictureContext.cpp
++++ b/src/core/PictureContext.cpp
+@@ -21,6 +21,30 @@
+ #include "utils/RectToRectMatrix.h"
+ 
+ namespace tgfx {
++
++void PictureContext::drawDeferred(const Rect& bounds, float deviceOutset,
++                                  const std::function<void(Canvas*)>& draw, bool unbounded,
++                                  const Matrix& matrix, const ClipStack& clip) {
++  recordAll(matrix, clip, {});
++  records.emplace_back(blockAllocator.make<DrawDeferred>(bounds, deviceOutset, draw, unbounded));
++  ++drawCount;
++}
++
++bool PictureContext::saveBehind(const Rect& subset, const Matrix& matrix, const ClipStack& clip) {
++  recordAll(matrix, clip, {});
++  records.emplace_back(blockAllocator.make<SaveBehind>(subset));
++  ++drawCount;
++  ++behindDepth;
++  return true;
++}
++
++void PictureContext::restoreBehind() {
++  records.emplace_back(blockAllocator.make<RestoreBehind>());
++  ++drawCount;
++  if (behindDepth > 0) {
++    --behindDepth;
++  }
++}
+ /**
+  * This const is used to strike a balance between the speed of referencing a sub-picture into a
+  * parent picture and the playback cost of recursing into the sub-picture to access its actual
+@@ -34,7 +58,7 @@ PictureContext::~PictureContext() {
+   records.clear();
+ }
+ 
+-void PictureContext::clear() {
++void PictureContext::clear(bool resetFailure) {
+   records.clear();
+   blockAllocator.clear();
+   lastMatrix = {};
+@@ -43,9 +67,20 @@ void PictureContext::clear() {
+   lastStroke = {};
+   hasStroke = false;
+   drawCount = 0;
++  behindDepth = 0;
++  if (resetFailure) {
++    resetRenderErrorState();
++  }
+ }
+ 
+ std::shared_ptr<Picture> PictureContext::finishRecordingAsPicture() {
++  const bool failed = hasError();
++  if (failed) {
++    // Preserve failure even when no geometry was emitted, or an opaque fill
++    // discarded every earlier visual command. The marker owns no destination.
++    records.emplace_back(blockAllocator.make<RenderFailureRecord>());
++    ++drawCount;
++  }
+   if (records.empty()) {
+     return nullptr;
+   }
+@@ -54,18 +89,19 @@ std::shared_ptr<Picture> PictureContext::finishRecordingAsPicture() {
+     return nullptr;
+   }
+   std::shared_ptr<Picture> picture =
+-      std::shared_ptr<Picture>(new Picture(std::move(blockBuffer), std::move(records), drawCount));
++      std::shared_ptr<Picture>(new Picture(std::move(blockBuffer), std::move(records), drawCount, failed));
+   lastMatrix = {};
+   lastClip = {};
+   lastBrush = {};
+   lastStroke = {};
+   hasStroke = false;
+   drawCount = 0;
++  behindDepth = 0;
+   return picture;
+ }
+ 
+ void PictureContext::drawFill(const Brush& brush) {
+-  if (brush.isOpaque()) {
++  if (brush.isOpaque() && behindDepth == 0) {
+     // The clip is wide open, and the brush is opaque, so we can discard all previous records as
+     // they are now invisible.
+     clear();
+@@ -176,6 +212,9 @@ void PictureContext::drawLayer(std::shared_ptr<Picture> picture,
+                                std::shared_ptr<ImageFilter> filter, const Matrix& matrix,
+                                const ClipStack& clip, const Brush& brush) {
+   DEBUG_ASSERT(picture != nullptr);
++  if (picture->_hasRenderFailure) {
++    markRenderFailure();
++  }
+   recordAll(matrix, clip, brush);
+   auto record = blockAllocator.make<DrawLayer>(std::move(picture), std::move(filter));
+   records.emplace_back(std::move(record));
+@@ -185,7 +224,13 @@ void PictureContext::drawLayer(std::shared_ptr<Picture> picture,
+ void PictureContext::drawPicture(std::shared_ptr<Picture> picture, const Matrix& matrix,
+                                  const ClipStack& clip) {
+   DEBUG_ASSERT(picture != nullptr);
+-  if (picture->drawCount > MaxPictureDrawsToUnrollInsteadOfReference) {
++  if (picture->_hasRenderFailure) {
++    // A referenced child may never replay before an opaque fill discards it.
++    // Keep its immutable failure in this recorder's independent sticky status.
++    markRenderFailure();
++  }
++  if (picture->_hasDeferredDrawing ||
++      picture->drawCount > MaxPictureDrawsToUnrollInsteadOfReference) {
+     recordMatrix(matrix);
+     recordClip(clip);
+     drawCount += picture->drawCount;
+diff --git a/src/core/PictureContext.h b/src/core/PictureContext.h
+index 5002b91..6c71634 100644
+--- a/src/core/PictureContext.h
++++ b/src/core/PictureContext.h
+@@ -29,7 +29,8 @@ class PictureContext : public DrawContext {
+  public:
+   ~PictureContext() override;
+ 
+-  void clear();
++  // Only beginRecording resets failure. Opaque-fill optimization preserves it.
++  void clear(bool resetFailure = false);
+ 
+   /**
+    * Signals that the caller is done recording and returns a Picture object that captures all the
+@@ -38,6 +39,12 @@ class PictureContext : public DrawContext {
+    */
+   std::shared_ptr<Picture> finishRecordingAsPicture();
+ 
++  void drawDeferred(const Rect& bounds, float deviceOutset,
++                    const std::function<void(Canvas*)>& draw, bool unbounded,
++                    const Matrix& matrix, const ClipStack& clip) override;
++  bool saveBehind(const Rect& subset, const Matrix& matrix, const ClipStack& clip) override;
++  void restoreBehind() override;
++
+   void drawFill(const Brush& brush) override;
+ 
+   void drawRect(const Rect& rect, const Matrix& matrix, const ClipStack& clip, const Brush& brush,
+@@ -81,6 +88,7 @@ class PictureContext : public DrawContext {
+   Brush lastBrush = {};
+   Stroke lastStroke = {};
+   bool hasStroke = false;
++  size_t behindDepth = 0;
+ 
+   void recordMatrix(const Matrix& matrix);
+   void recordClip(const ClipStack& clip);
+diff --git a/src/core/PictureRecorder.cpp b/src/core/PictureRecorder.cpp
+index e796b04..9bfffa1 100644
+--- a/src/core/PictureRecorder.cpp
++++ b/src/core/PictureRecorder.cpp
+@@ -31,7 +31,7 @@ Canvas* PictureRecorder::beginRecording() {
+     canvas = new Canvas(pictureContext);
+   } else {
+     canvas->resetStateStack();
+-    pictureContext->clear();
++    pictureContext->clear(true);
+   }
+   activelyRecording = true;
+   return getRecordingCanvas();
+diff --git a/src/core/PictureRecords.h b/src/core/PictureRecords.h
+index 5d7d3f6..76a2cae 100644
+--- a/src/core/PictureRecords.h
++++ b/src/core/PictureRecords.h
+@@ -41,7 +41,11 @@ enum class PictureRecordType {
+   DrawImageRectToRect,
+   DrawTextBlob,
+   DrawPicture,
+-  DrawLayer
++  DrawLayer,
++  DrawDeferred,
++  SaveBehind,
++  RestoreBehind,
++  RenderFailure
+ };
+ 
+ class PictureRecord {
+@@ -57,6 +61,51 @@ class PictureRecord {
+   virtual void playback(DrawContext* context, PlaybackContext* playback) const = 0;
+ };
+ 
++class RenderFailureRecord : public PictureRecord {
++ public:
++  PictureRecordType type() const override { return PictureRecordType::RenderFailure; }
++  void playback(DrawContext* context, PlaybackContext*) const override {
++    if (context != nullptr) {
++      context->markRenderFailure();
++    }
++  }
++};
++
++class DrawDeferred : public PictureRecord {
++ public:
++  DrawDeferred(Rect bounds, float outset, std::function<void(Canvas*)> draw, bool unbounded)
++      : bounds(bounds), outset(outset), draw(std::move(draw)), unbounded(unbounded) {}
++  PictureRecordType type() const override { return PictureRecordType::DrawDeferred; }
++  bool hasUnboundedFill(bool& hasInverseClip) const override {
++    return unbounded && hasInverseClip;
++  }
++  void playback(DrawContext* context, PlaybackContext* playback) const override {
++    context->drawDeferred(bounds, outset, draw, unbounded, playback->matrix(), playback->clip());
++  }
++ private:
++  Rect bounds;
++  float outset;
++  std::function<void(Canvas*)> draw;
++  bool unbounded;
++};
++
++class SaveBehind : public PictureRecord {
++ public:
++  explicit SaveBehind(Rect subset) : subset(subset) {}
++  PictureRecordType type() const override { return PictureRecordType::SaveBehind; }
++  void playback(DrawContext* context, PlaybackContext* playback) const override {
++    context->saveBehind(subset, playback->matrix(), playback->clip());
++  }
++ private:
++  Rect subset;
++};
++
++class RestoreBehind : public PictureRecord {
++ public:
++  PictureRecordType type() const override { return PictureRecordType::RestoreBehind; }
++  void playback(DrawContext* context, PlaybackContext*) const override { context->restoreBehind(); }
++};
++
+ class SetMatrix : public PictureRecord {
+  public:
+   explicit SetMatrix(const Matrix& matrix) : matrix(matrix) {
+diff --git a/src/core/RenderErrorState.h b/src/core/RenderErrorState.h
+new file mode 100644
+index 0000000..acde5e0
+--- /dev/null
++++ b/src/core/RenderErrorState.h
+@@ -0,0 +1,49 @@
++#pragma once
++
++#include <atomic>
++#include <memory>
++#include <utility>
++#include "tgfx/gpu/Context.h"
++
++namespace tgfx {
++
++// Status belongs to the rendering destination, including work it requests from
++// offscreen children. Pictures never retain it. Atomic storage preserves status
++// across serialized Device unlock/lock transfers to another thread.
++class RenderErrorState {
++ public:
++  bool hasError() const { return failed.load(std::memory_order_relaxed); }
++  void markFailure() { failed.store(true, std::memory_order_relaxed); }
++
++ private:
++  std::atomic<bool> failed{false};
++};
++
++// Explicit dynamic ancestry on the locked GPU Context, never on thread-local
++// storage. Each compositor installs its OWN state, including when another
++// destination closes its pending work. Nested offscreen rendering shares only
++// the state explicitly passed by the operation requesting it.
++class RenderErrorScope {
++ public:
++  RenderErrorScope(Context* context, std::shared_ptr<RenderErrorState> state)
++      : context(context), previous(std::move(context->activeRenderErrorState)) {
++    context->activeRenderErrorState = std::move(state);
++  }
++  ~RenderErrorScope() { context->activeRenderErrorState = std::move(previous); }
++  RenderErrorScope(const RenderErrorScope&) = delete;
++  RenderErrorScope& operator=(const RenderErrorScope&) = delete;
++
++  static std::shared_ptr<RenderErrorState> Current(Context* context) {
++    return context->activeRenderErrorState;
++  }
++  static void MarkFailure(Context* context) {
++    if (auto state = Current(context)) {
++      state->markFailure();
++    }
++  }
++
++ private:
++  Context* context;
++  std::shared_ptr<RenderErrorState> previous;
++};
++}  // namespace tgfx
+diff --git a/src/core/Typeface.cpp b/src/core/Typeface.cpp
+index c8d1c44..5234127 100644
+--- a/src/core/Typeface.cpp
++++ b/src/core/Typeface.cpp
+@@ -86,6 +86,15 @@ std::shared_ptr<Typeface> Typeface::MakeEmpty() {
+   return emptyTypeface;
+ }
+ 
++std::shared_ptr<Typeface> Typeface::makeWithVariations(
++    const std::vector<FontVariation>& coordinates) const {
++  return coordinates.empty() ? weakThis.lock() : nullptr;
++}
++
++std::vector<FontVariation> Typeface::getVariationDesignPosition() const {
++  return {};
++}
++
+ GlyphID Typeface::getGlyphID(const std::string& name) const {
+   if (name.empty()) {
+     return 0;
+diff --git a/src/core/codecs/jpeg/JpegCodec.cpp b/src/core/codecs/jpeg/JpegCodec.cpp
+index aa2cd0f..b7f2c7b 100644
+--- a/src/core/codecs/jpeg/JpegCodec.cpp
++++ b/src/core/codecs/jpeg/JpegCodec.cpp
+@@ -18,6 +18,9 @@
+ 
+ #include "core/codecs/jpeg/JpegCodec.h"
+ #include <csetjmp>
++#include <cstdlib>
++#include <limits>
++#include <type_traits>
+ #include "core/utils/ColorSpaceHelper.h"
+ #include "core/utils/Log.h"
+ #include "core/utils/MathExtra.h"
+@@ -70,11 +73,68 @@ static Orientation get_exif_orientation(jpeg_decompress_struct* dinfo) {
+   return Orientation::TopLeft;
+ }
+ 
+-struct my_error_mgr {
+-  struct jpeg_error_mgr pub;
+-  jmp_buf setjmp_buffer;
++struct JpegCallError {
++  jpeg_error_mgr pub;
++  std::jmp_buf jump;
++  jpeg_error_mgr* previous;
+ };
+ 
++extern "C" {
++static void RecoverJpegError(j_common_ptr cinfo) {
++  auto* error = reinterpret_cast<JpegCallError*>(cinfo->err);
++  // Retain the normal diagnostic; replace only the process-exiting control flow.
++  (*cinfo->err->output_message)(cinfo);
++  std::longjmp(error->jump, 1);
++}
++
++static void RecoverJpegWarning(j_common_ptr cinfo, int level) {
++  auto* error = reinterpret_cast<JpegCallError*>(cinfo->err);
++  (*error->previous->emit_message)(cinfo, level);
++  // libjpeg otherwise inserts a fabricated EOI and can return successful
++  // partial pixels for an incomplete header/entropy stream. Keep warnings
++  // visible, but report these specific incomplete-input conditions as failure.
++  if (level < 0 &&
++      (cinfo->err->msg_code == JWRN_JPEG_EOF || cinfo->err->msg_code == JWRN_HIT_MARKER)) {
++    std::longjmp(error->jump, 1);
++  }
++}
++}
++
++// The jump target covers ONE C-only operation, never an enclosing decode or
++// encode function. Bitmap/Pixmap/vector/shared_ptr lifetimes remain in the
++// caller frame, which is not unwound by a libjpeg error. The operation must
++// capture only trivial state and must not create C++ objects or call C++ code.
++template <typename CInfo, typename Operation>
++static bool JpegCall(CInfo* cinfo, Operation operation) {
++  static_assert(std::is_trivially_copyable<Operation>::value,
++                "JPEG operations may capture only trivial state");
++  static_assert(std::is_trivially_destructible<Operation>::value,
++                "JPEG operations must not require unwinding");
++  auto* previous = cinfo->err;
++  JpegCallError error = {};
++  error.pub = *previous;
++  error.previous = previous;
++  error.pub.error_exit = RecoverJpegError;
++  error.pub.emit_message = RecoverJpegWarning;
++  cinfo->err = &error.pub;
++  if (setjmp(error.jump) != 0) {
++    // Do not inspect error.pub after longjmp: libjpeg modified this automatic
++    // object after setjmp, so its value is indeterminate on this branch.
++    cinfo->err = previous;
++    return false;
++  }
++  operation();
++  // Preserve ordinary warning counts/messages without retaining stack-local
++  // callbacks or a jump buffer after this guarded call returns.
++  const auto errorExit = previous->error_exit;
++  const auto emitMessage = previous->emit_message;
++  *previous = error.pub;
++  previous->error_exit = errorExit;
++  previous->emit_message = emitMessage;
++  cinfo->err = previous;
++  return true;
++}
++
+ std::shared_ptr<ImageCodec> JpegCodec::MakeFrom(const std::string& filePath) {
+   return MakeFromData(filePath, nullptr);
+ }
+@@ -108,21 +168,33 @@ std::shared_ptr<ImageCodec> JpegCodec::MakeFromData(const std::string& filePath,
+     return nullptr;
+   }
+   jpeg_decompress_struct cinfo = {};
+-  my_error_mgr jerr = {};
+-  cinfo.err = jpeg_std_error(&jerr.pub);
++  jpeg_error_mgr jerr = {};
++  cinfo.err = jpeg_std_error(&jerr);
+   Orientation orientation = Orientation::TopLeft;
+   std::shared_ptr<ColorSpace> cs = nullptr;
++  int imageWidth = 0;
++  int imageHeight = 0;
++  bool success = false;
+   do {
+-    if (setjmp(jerr.setjmp_buffer)) break;
+-    jpeg_create_decompress(&cinfo);
++    if (!JpegCall(&cinfo, [&cinfo] { jpeg_create_decompress(&cinfo); })) break;
+     if (infile) {
+-      jpeg_stdio_src(&cinfo, infile);
++      if (!JpegCall(&cinfo, [&cinfo, infile] { jpeg_stdio_src(&cinfo, infile); })) break;
+     } else {
+-      jpeg_mem_src(&cinfo, byteData->bytes(), byteData->size());
++      const auto* bytes = byteData->bytes();
++      const auto size = byteData->size();
++      if (size > std::numeric_limits<unsigned long>::max()) break;
++      if (!JpegCall(&cinfo, [&cinfo, bytes, size] { jpeg_mem_src(&cinfo, bytes, size); })) break;
+     }
+-    jpeg_save_markers(&cinfo, kExifMarker, 0xFFFF);
+-    jpeg_save_markers(&cinfo, JPEG_APP0 + 2, 0xFFFF);
+-    if (jpeg_read_header(&cinfo, TRUE) != JPEG_HEADER_OK) break;
++    if (!JpegCall(&cinfo, [&cinfo] { jpeg_save_markers(&cinfo, kExifMarker, 0xFFFF); })) break;
++    if (!JpegCall(&cinfo, [&cinfo] { jpeg_save_markers(&cinfo, JPEG_APP0 + 2, 0xFFFF); })) break;
++    int header = 0;
++    if (!JpegCall(&cinfo, [&cinfo, &header] { header = jpeg_read_header(&cinfo, TRUE); }) ||
++        header != JPEG_HEADER_OK) break;
++    if (cinfo.image_width > static_cast<JDIMENSION>(std::numeric_limits<int>::max()) ||
++        cinfo.image_height > static_cast<JDIMENSION>(std::numeric_limits<int>::max())) break;
++    imageWidth = static_cast<int>(cinfo.image_width);
++    imageHeight = static_cast<int>(cinfo.image_height);
++    if (!ImageInfo::IsValidSize(imageWidth, imageHeight)) break;
+     orientation = get_exif_orientation(&cinfo);
+     std::vector<uint8_t> iccProfileData;
+     if (ExtractICCProfile(&cinfo, iccProfileData)) {
+@@ -131,15 +203,15 @@ std::shared_ptr<ImageCodec> JpegCodec::MakeFromData(const std::string& filePath,
+     if (!cs) {
+       cs = ColorSpace::SRGB();
+     }
++    success = true;
+   } while (false);
+-  jpeg_destroy_decompress(&cinfo);
++  const auto destroyed = JpegCall(&cinfo, [&cinfo] { jpeg_destroy_decompress(&cinfo); });
+   if (infile) fclose(infile);
+-  if (cinfo.image_width == 0 || cinfo.image_height == 0) {
++  if (!success || !destroyed) {
+     return nullptr;
+   }
+   return std::shared_ptr<ImageCodec>(
+-      new JpegCodec(static_cast<int>(cinfo.image_width), static_cast<int>(cinfo.image_height),
+-                    orientation, filePath, std::move(byteData), std::move(cs)));
++      new JpegCodec(imageWidth, imageHeight, orientation, filePath, std::move(byteData), std::move(cs)));
+ }
+ 
+ static bool ConvertCMYKWithProfile(void* dst, const gfx::skcms_ICCProfile& cmykProfile,
+@@ -284,20 +356,24 @@ bool JpegCodec::readScaledPixels(ColorType colorType, AlphaType alphaType, size_
+     return false;
+   }
+   jpeg_decompress_struct cinfo = {};
+-  my_error_mgr jerr = {};
+-  cinfo.err = jpeg_std_error(&jerr.pub);
++  jpeg_error_mgr jerr = {};
++  cinfo.err = jpeg_std_error(&jerr);
+   bool result = false;
+   do {
+-    if (setjmp(jerr.setjmp_buffer)) break;
+-    jpeg_create_decompress(&cinfo);
++    if (!JpegCall(&cinfo, [&cinfo] { jpeg_create_decompress(&cinfo); })) break;
+     if (infile) {
+-      jpeg_stdio_src(&cinfo, infile);
++      if (!JpegCall(&cinfo, [&cinfo, infile] { jpeg_stdio_src(&cinfo, infile); })) break;
+     } else {
+-      jpeg_mem_src(&cinfo, fileData->bytes(), fileData->size());
++      const auto* bytes = fileData->bytes();
++      const auto size = fileData->size();
++      if (size > std::numeric_limits<unsigned long>::max()) break;
++      if (!JpegCall(&cinfo, [&cinfo, bytes, size] { jpeg_mem_src(&cinfo, bytes, size); })) break;
+     }
+-    jpeg_save_markers(&cinfo, JPEG_APP0 + 1, 0xFFFF);
+-    jpeg_save_markers(&cinfo, JPEG_APP0 + 2, 0xFFFF);
+-    if (jpeg_read_header(&cinfo, TRUE) != JPEG_HEADER_OK) {
++    if (!JpegCall(&cinfo, [&cinfo] { jpeg_save_markers(&cinfo, JPEG_APP0 + 1, 0xFFFF); })) break;
++    if (!JpegCall(&cinfo, [&cinfo] { jpeg_save_markers(&cinfo, JPEG_APP0 + 2, 0xFFFF); })) break;
++    int header = 0;
++    if (!JpegCall(&cinfo, [&cinfo, &header] { header = jpeg_read_header(&cinfo, TRUE); }) ||
++        header != JPEG_HEADER_OK) {
+       break;
+     }
+     cinfo.scale_num = scaleNum;
+@@ -305,8 +381,13 @@ bool JpegCodec::readScaledPixels(ColorType colorType, AlphaType alphaType, size_
+     cinfo.out_color_space = out_color_space;
+     if (cinfo.jpeg_color_space == JCS_CMYK || cinfo.jpeg_color_space == JCS_YCCK) {
+       cinfo.out_color_space = JCS_CMYK;
++      // CMYK scanlines always contain four bytes per pixel. Convert through a
++      // real native bitmap when the caller requested Gray/RGB565/F16/etc.
++      needsBitmapConversion = colorType != ColorType::RGBA_8888 && colorType != ColorType::BGRA_8888;
+     }
+-    if (!jpeg_start_decompress(&cinfo)) {
++    boolean started = FALSE;
++    if (!JpegCall(&cinfo, [&cinfo, &started] { started = jpeg_start_decompress(&cinfo); }) ||
++        !started) {
+       break;
+     }
+ #ifdef DEBUG
+@@ -321,6 +402,10 @@ bool JpegCodec::readScaledPixels(ColorType colorType, AlphaType alphaType, size_
+     auto dstHeight = static_cast<int>(cinfo.output_height);
+     auto dstInfo =
+         ImageInfo::Make(dstWidth, dstHeight, colorType, alphaType, dstRowBytes, dstColorSpace);
++    if (dstInfo.isEmpty() ||
++        dstInfo.rowBytes() > std::numeric_limits<size_t>::max() / static_cast<size_t>(dstHeight)) {
++      break;
++    }
+     auto outPixels = dstPixels;
+     auto outRowBytes = dstRowBytes;
+     Bitmap bitmap = {};
+@@ -334,40 +419,50 @@ bool JpegCodec::readScaledPixels(ColorType colorType, AlphaType alphaType, size_
+       outPixels = pixmap.writablePixels();
+       outRowBytes = pixmap.rowBytes();
+     }
+-    JSAMPROW pRow[1];
++    bool scanlinesComplete = true;
+     while (cinfo.output_scanline < cinfo.output_height) {
+-      pRow[0] = static_cast<JSAMPROW>(static_cast<unsigned char*>(outPixels) +
+-                                      outRowBytes * static_cast<size_t>(cinfo.output_scanline));
+-      jpeg_read_scanlines(&cinfo, pRow, 1);
++      auto* row = static_cast<unsigned char*>(outPixels) +
++                  outRowBytes * static_cast<size_t>(cinfo.output_scanline);
++      JDIMENSION read = 0;
++      if (!JpegCall(&cinfo, [&cinfo, &row, &read] { read = jpeg_read_scanlines(&cinfo, &row, 1); }) ||
++          read != 1) {
++        scanlinesComplete = false;
++        break;
++      }
+     }
++    if (!scanlinesComplete) break;
+     if (cinfo.out_color_space == JCS_CMYK) {
+       bool converted = false;
+       std::vector<uint8_t> iccProfileData;
++      const auto& cmykInfo = pixmap.isEmpty() ? dstInfo : pixmap.info();
+       if (ExtractICCProfile(&cinfo, iccProfileData)) {
+         gfx::skcms_ICCProfile cmykProfile;
+         if (ParseICCProfile(iccProfileData, &cmykProfile)) {
+-          converted = ConvertCMYKWithProfile(outPixels, cmykProfile, dstInfo);
++          converted = ConvertCMYKWithProfile(outPixels, cmykProfile, cmykInfo);
+         }
+       }
+       if (!converted) {
+-        ConvertCMYKToRGBWithFormula(outPixels, dstInfo);
++        ConvertCMYKToRGBWithFormula(outPixels, cmykInfo);
+       }
+     }
+-    result = jpeg_finish_decompress(&cinfo);
+-    if (result) {
+-      if (!pixmap.isEmpty()) {
+-        pixmap.readPixels(dstInfo, dstPixels);
+-      } else if (NeedConvertColorSpace(colorSpace(), dstColorSpace)) {
++    boolean finished = FALSE;
++    if (!JpegCall(&cinfo, [&cinfo, &finished] { finished = jpeg_finish_decompress(&cinfo); }) ||
++        !finished) break;
++    if (!pixmap.isEmpty()) {
++      result = pixmap.readPixels(dstInfo, dstPixels);
++    } else {
++      if (NeedConvertColorSpace(colorSpace(), dstColorSpace)) {
+         ConvertColorSpaceInPlace(dstWidth, dstHeight, colorType, alphaType, dstRowBytes,
+                                  colorSpace(), dstColorSpace, dstPixels);
+       }
++      result = true;
+     }
+   } while (false);
+-  jpeg_destroy_decompress(&cinfo);
++  const auto destroyed = JpegCall(&cinfo, [&cinfo] { jpeg_destroy_decompress(&cinfo); });
+   if (infile) {
+     fclose(infile);
+   }
+-  return result;
++  return result && destroyed;
+ }
+ 
+ std::shared_ptr<Data> JpegCodec::getEncodedData() const {
+@@ -381,64 +476,132 @@ std::shared_ptr<Data> JpegCodec::getEncodedData() const {
+ }
+ 
+ #ifdef TGFX_USE_JPEG_ENCODE
++// libjpeg's stock jpeg_mem_dest publishes its grown buffer only at finish.
++// A fatal error after a grow can therefore leave the caller with a stale
++// pointer. Keep the current allocation in caller-owned state on every grow.
++struct JpegOutput {
++  jpeg_destination_mgr pub;
++  unsigned char* bytes = nullptr;
++  size_t capacity = 0;
++  size_t length = 0;
++};
++
++extern "C" {
++static void InitJpegOutput(j_compress_ptr cinfo) {
++  auto* output = reinterpret_cast<JpegOutput*>(cinfo->dest);
++  if (output->bytes == nullptr) {
++    output->capacity = 4096;
++    output->bytes = static_cast<unsigned char*>(std::malloc(output->capacity));
++    if (output->bytes == nullptr) ERREXIT1(cinfo, JERR_OUT_OF_MEMORY, 10);
++  }
++  output->length = 0;
++  output->pub.next_output_byte = output->bytes;
++  output->pub.free_in_buffer = output->capacity;
++}
++
++static boolean GrowJpegOutput(j_compress_ptr cinfo) {
++  auto* output = reinterpret_cast<JpegOutput*>(cinfo->dest);
++  if (output->capacity > std::numeric_limits<size_t>::max() / 2) {
++    ERREXIT1(cinfo, JERR_OUT_OF_MEMORY, 10);
++  }
++  const auto nextCapacity = output->capacity * 2;
++  auto* bytes = static_cast<unsigned char*>(std::realloc(output->bytes, nextCapacity));
++  if (bytes == nullptr) ERREXIT1(cinfo, JERR_OUT_OF_MEMORY, 10);
++  output->bytes = bytes;
++  output->pub.next_output_byte = bytes + output->capacity;
++  output->pub.free_in_buffer = nextCapacity - output->capacity;
++  output->capacity = nextCapacity;
++  return TRUE;
++}
++
++static void FinishJpegOutput(j_compress_ptr cinfo) {
++  auto* output = reinterpret_cast<JpegOutput*>(cinfo->dest);
++  output->length = output->capacity - output->pub.free_in_buffer;
++}
++}
++
+ std::shared_ptr<Data> JpegCodec::Encode(const Pixmap& pixmap, int quality) {
++  if (pixmap.isEmpty() || pixmap.pixels() == nullptr) return nullptr;
+   auto srcPixels = static_cast<uint8_t*>(const_cast<void*>(pixmap.pixels()));
+-  int srcRowBytes = static_cast<int>(pixmap.rowBytes());
+-  jpeg_compress_struct cinfo = {};
+-  jpeg_error_mgr jerr = {};
+-  JSAMPROW row_pointer[1];
+-  cinfo.err = jpeg_std_error(&jerr);
+-  jpeg_create_compress(&cinfo);
+-  uint8_t* dstBuffer = nullptr;
+-  unsigned long dstBufferSize = 0;  // NOLINT
+-  jpeg_mem_dest(&cinfo, &dstBuffer, &dstBufferSize);
+-  cinfo.image_width = static_cast<JDIMENSION>(pixmap.width());
+-  cinfo.image_height = static_cast<JDIMENSION>(pixmap.height());
++  size_t srcRowBytes = pixmap.rowBytes();
+   Buffer buffer = {};
++  J_COLOR_SPACE inputColorSpace;
++  int inputComponents;
+   switch (pixmap.colorType()) {
+     case ColorType::RGBA_8888:
+-      cinfo.in_color_space = JCS_EXT_RGBA;
+-      cinfo.input_components = 4;
++      inputColorSpace = JCS_EXT_RGBA;
++      inputComponents = 4;
+       break;
+     case ColorType::BGRA_8888:
+-      cinfo.in_color_space = JCS_EXT_BGRA;
+-      cinfo.input_components = 4;
++      inputColorSpace = JCS_EXT_BGRA;
++      inputComponents = 4;
+       break;
+     case ColorType::Gray_8:
+-      cinfo.in_color_space = JCS_GRAYSCALE;
+-      cinfo.input_components = 1;
++      inputColorSpace = JCS_GRAYSCALE;
++      inputComponents = 1;
+       break;
+     default:
+       auto info = ImageInfo::Make(pixmap.width(), pixmap.height(), ColorType::RGBA_8888,
+                                   AlphaType::Premultiplied, 0, pixmap.colorSpace());
+-      buffer.alloc(info.byteSize());
+-      if (buffer.isEmpty()) {
++      if (info.isEmpty() || !buffer.alloc(info.byteSize())) {
+         return nullptr;
+       }
+       srcPixels = buffer.bytes();
+-      srcRowBytes = static_cast<int>(info.rowBytes());
+-      Pixmap(info, srcPixels).writePixels(pixmap.info(), pixmap.pixels());
+-      cinfo.in_color_space = JCS_EXT_RGBA;
+-      cinfo.input_components = 4;
++      srcRowBytes = info.rowBytes();
++      if (!Pixmap(info, srcPixels).writePixels(pixmap.info(), pixmap.pixels())) return nullptr;
++      inputColorSpace = JCS_EXT_RGBA;
++      inputComponents = 4;
+       break;
+   }
+-  jpeg_set_defaults(&cinfo);
+-  cinfo.optimize_coding = TRUE;
+-  jpeg_set_quality(&cinfo, quality, TRUE);
+-  jpeg_start_compress(&cinfo, TRUE);
++  std::shared_ptr<Data> iccData;
+   if (pixmap.colorSpace()) {
+-    auto iccData = pixmap.colorSpace()->toICCProfile();
+-    jpeg_write_icc_profile(&cinfo, iccData->bytes(), static_cast<uint32_t>(iccData->size()));
++    iccData = pixmap.colorSpace()->toICCProfile();
++    if (!iccData || iccData->size() > std::numeric_limits<uint32_t>::max()) return nullptr;
+   }
+-  while (cinfo.next_scanline < cinfo.image_height) {
+-    row_pointer[0] = &(srcPixels)[cinfo.next_scanline * static_cast<JDIMENSION>(srcRowBytes)];
+-    (void)jpeg_write_scanlines(&cinfo, row_pointer, 1);
++  jpeg_compress_struct cinfo = {};
++  jpeg_error_mgr jerr = {};
++  cinfo.err = jpeg_std_error(&jerr);
++  JpegOutput output = {};
++  output.pub.init_destination = InitJpegOutput;
++  output.pub.empty_output_buffer = GrowJpegOutput;
++  output.pub.term_destination = FinishJpegOutput;
++  bool success = false;
++  do {
++    if (!JpegCall(&cinfo, [&cinfo] { jpeg_create_compress(&cinfo); })) break;
++    cinfo.dest = &output.pub;
++    cinfo.image_width = static_cast<JDIMENSION>(pixmap.width());
++    cinfo.image_height = static_cast<JDIMENSION>(pixmap.height());
++    cinfo.in_color_space = inputColorSpace;
++    cinfo.input_components = inputComponents;
++    if (!JpegCall(&cinfo, [&cinfo] { jpeg_set_defaults(&cinfo); })) break;
++    cinfo.optimize_coding = TRUE;
++    if (!JpegCall(&cinfo, [&cinfo, quality] { jpeg_set_quality(&cinfo, quality, TRUE); })) break;
++    if (!JpegCall(&cinfo, [&cinfo] { jpeg_start_compress(&cinfo, TRUE); })) break;
++    if (iccData) {
++      const auto* bytes = iccData->bytes();
++      const auto size = static_cast<uint32_t>(iccData->size());
++      if (!JpegCall(&cinfo, [&cinfo, bytes, size] { jpeg_write_icc_profile(&cinfo, bytes, size); })) break;
++    }
++    bool scanlinesComplete = true;
++    while (cinfo.next_scanline < cinfo.image_height) {
++      auto* row = srcPixels + static_cast<size_t>(cinfo.next_scanline) * srcRowBytes;
++      JDIMENSION written = 0;
++      if (!JpegCall(&cinfo, [&cinfo, &row, &written] { written = jpeg_write_scanlines(&cinfo, &row, 1); }) ||
++          written != 1) {
++        scanlinesComplete = false;
++        break;
++      }
++    }
++    if (!scanlinesComplete) break;
++    if (!JpegCall(&cinfo, [&cinfo] { jpeg_finish_compress(&cinfo); })) break;
++    success = true;
++  } while (false);
++  const auto destroyed = JpegCall(&cinfo, [&cinfo] { jpeg_destroy_compress(&cinfo); });
++  if (!success || !destroyed) {
++    std::free(output.bytes);
++    return nullptr;
+   }
+-
+-  /* similar to read file, clean up after we're done compressing */
+-  jpeg_finish_compress(&cinfo);
+-  jpeg_destroy_compress(&cinfo);
+-  return Data::MakeAdopted(dstBuffer, dstBufferSize, Data::FreeProc);
++  return Data::MakeAdopted(output.bytes, output.length, Data::FreeProc);
+ }
+ #endif
+ 
+diff --git a/src/core/images/PictureImage.cpp b/src/core/images/PictureImage.cpp
+index 2fd042f..b82acad 100644
+--- a/src/core/images/PictureImage.cpp
++++ b/src/core/images/PictureImage.cpp
+@@ -164,7 +164,9 @@ bool PictureImage::drawPicture(std::shared_ptr<RenderTargetProxy> renderTarget,
+   if (renderTarget == nullptr) {
+     return false;
+   }
+-  RenderContext renderContext(std::move(renderTarget), renderFlags, true, nullptr, _colorSpace);
++  auto errorState = RenderErrorScope::Current(renderTarget->getContext());
++  RenderContext renderContext(std::move(renderTarget), renderFlags, true, nullptr, _colorSpace,
++                               std::move(errorState));
+   Matrix totalMatrix = {};
+   if (extraMatrix) {
+     totalMatrix = *extraMatrix;
+@@ -174,7 +176,7 @@ bool PictureImage::drawPicture(std::shared_ptr<RenderTargetProxy> renderTarget,
+   }
+   picture->playback(&renderContext, totalMatrix, ClipStack());
+   renderContext.flush();
+-  return true;
++  return !renderContext.hasError();
+ }
+ 
+ }  // namespace tgfx
+diff --git a/src/core/shaders/ImageShader.cpp b/src/core/shaders/ImageShader.cpp
+index a474453..b3aa2d8 100644
+--- a/src/core/shaders/ImageShader.cpp
++++ b/src/core/shaders/ImageShader.cpp
+@@ -17,14 +17,92 @@
+ /////////////////////////////////////////////////////////////////////////////////////////////////
+ 
+ #include "ImageShader.h"
++#include "core/RenderErrorState.h"
+ #include "core/utils/ColorSpaceHelper.h"
+ #include "core/utils/Types.h"
+ #include "gpu/ops/DrawOp.h"
++#include "gpu/processors/FragmentProcessor.h"
+ #include "gpu/processors/ColorSpaceXFormEffect.h"
+ #include "gpu/processors/TiledTextureEffect.h"
+ #include "tgfx/gpu/Texture.h"
+ 
+ namespace tgfx {
++
++// This emits the same GPU shader IR used by the existing processors, including
++// TGFX's GLSL-to-MSL compilation for Metal. Samples are taken in original image
++// pixel coordinates; tile/clamp/decal semantics remain owned by the child FP.
++class MitchellImageProcessor final : public FragmentProcessor {
++ public:
++  MitchellImageProcessor(PlacementPtr<FragmentProcessor> image, const Matrix& matrix, bool alphaOnly)
++      : FragmentProcessor(ClassID()), coordinates(matrix), alphaOnly(alphaOnly) {
++    addCoordTransform(&coordinates);
++    registerChildProcessor(std::move(image));
++  }
++  std::string name() const override { return "MitchellImageProcessor"; }
++
++  void emitCode(EmitArgs& args) const override {
++    auto* builder = args.fragBuilder;
++    auto point = builder->emitPerspTextCoord((*args.transformedCoords)[0]);
++    if (args.coordFunc) {
++      point = args.coordFunc(point);
++    }
++    const auto imageMatrix = args.uniformHandler->addUniform(
++        "ImageSampleMatrix", UniformFormat::Float3x3, ShaderStage::Fragment);
++    builder->codeAppendf("vec2 cubicPoint = %s - vec2(0.5);", point.c_str());
++    builder->codeAppend("vec2 cubicBase = floor(cubicPoint) + vec2(0.5);");
++    builder->codeAppend("vec2 cubicFraction = fract(cubicPoint);");
++    builder->codeAppend("vec4 cubicSum = vec4(0.0);");
++    // Emit the child once inside fixed-bound shader loops, so its uniforms and
++    // samplers are registered once rather than duplicated sixteen times.
++    builder->codeAppend("for (int cy = 0; cy < 4; ++cy) {");
++    builder->codeAppend("for (int cx = 0; cx < 4; ++cx) {");
++    builder->codeAppend("vec2 sampleOffset = vec2(float(cx) - 1.0, float(cy) - 1.0);");
++    builder->codeAppend("vec2 distance = abs(cubicFraction - sampleOffset);");
++    builder->codeAppend("vec2 distance2 = distance * distance;");
++    builder->codeAppend("vec2 distance3 = distance2 * distance;");
++    builder->codeAppend("vec2 nearWeight = (21.0 * distance3 - 36.0 * distance2 + vec2(16.0)) / 18.0;");
++    builder->codeAppend(
++        "vec2 farWeight = (-7.0 * distance3 + 36.0 * distance2 - 60.0 * distance + vec2(32.0)) / 18.0;");
++    builder->codeAppend("vec2 weight = mix(nearWeight, farWeight, step(vec2(1.0), distance));");
++    builder->codeAppendf("vec3 samplePoint = %s * vec3(cubicBase + sampleOffset, 1.0);", imageMatrix.c_str());
++    std::string color = "cubicSample";
++    emitChild(0, &color, args, [](std::string_view) {
++      return std::string("(samplePoint.xy / samplePoint.z)");
++    });
++    builder->codeAppendf("cubicSum += %s * weight.x * weight.y;", color.c_str());
++    builder->codeAppend("}}");
++    // Clamp cubic ringing to legal premultiplied output.
++    builder->codeAppend("cubicSum.a = clamp(cubicSum.a, 0.0, 1.0);");
++    builder->codeAppend("cubicSum.rgb = clamp(cubicSum.rgb, vec3(0.0), vec3(cubicSum.a));");
++    if (alphaOnly) {
++      builder->codeAppendf("%s = cubicSum.a * %s;", args.outputColor.c_str(), args.inputColor.c_str());
++    } else {
++      builder->codeAppendf("%s = cubicSum * %s.a;", args.outputColor.c_str(), args.inputColor.c_str());
++    }
++  }
++
++ private:
++  DEFINE_PROCESSOR_CLASS_ID
++  CoordTransform coordinates;
++  bool alphaOnly;
++  void onComputeProcessorKey(BytesKey* key) const override { key->write(static_cast<uint32_t>(alphaOnly)); }
++  void onSetData(UniformData*, UniformData* data) const override {
++    data->setData("ImageSampleMatrix", childProcessor(0)->coordTransform(0)->getTotalMatrix());
++  }
++};
++
++std::shared_ptr<Shader> Shader::MakeCubicImageShader(std::shared_ptr<Image> image,
++                                                    TileMode tileModeX, TileMode tileModeY) {
++  if (!image) {
++    return nullptr;
++  }
++  auto shader = std::shared_ptr<ImageShader>(new ImageShader(
++      std::move(image), tileModeX, tileModeY, SamplingOptions(FilterMode::Nearest, MipmapMode::None)));
++  shader->cubic = true;
++  shader->weakThis = shader;
++  return shader;
++}
++
+ std::shared_ptr<Shader> Shader::MakeImageShader(std::shared_ptr<Image> image, TileMode tileModeX,
+                                                 TileMode tileModeY,
+                                                 const SamplingOptions& sampling) {
+@@ -44,14 +122,30 @@ bool ImageShader::isEqual(const Shader* shader) const {
+   }
+   auto other = static_cast<const ImageShader*>(shader);
+   return image == other->image && tileModeX == other->tileModeX && tileModeY == other->tileModeY &&
+-         sampling == other->sampling;
++         sampling == other->sampling && cubic == other->cubic;
+ }
+ 
+ PlacementPtr<FragmentProcessor> ImageShader::asFragmentProcessor(
+     const FPArgs& args, const Matrix* uvMatrix,
+     const std::shared_ptr<ColorSpace>& dstColorSpace) const {
+   SamplingArgs samplingArgs = {tileModeX, tileModeY, sampling, SrcRectConstraint::Fast};
+-  auto fp = image->asFragmentProcessor(args, samplingArgs, uvMatrix);
++  auto sourceArgs = args;
++  if (cubic) {
++    sourceArgs.drawRect = uvMatrix ? uvMatrix->mapRect(args.drawRect) : args.drawRect;
++    sourceArgs.drawRect.outset(2, 2);
++    sourceArgs.drawScale = 1;
++  }
++  auto fp = image->asFragmentProcessor(sourceArgs, samplingArgs, cubic ? nullptr : uvMatrix);
++  if (cubic && fp) {
++    // Image providers expose their image-to-texture coordinates on the image
++    // processor. Refuse an incompatible provider instead of bilinear fallback.
++    if (fp->numCoordTransforms() != 1) {
++      RenderErrorScope::MarkFailure(args.context);
++      return nullptr;
++    }
++    fp = args.context->drawingAllocator()->make<MitchellImageProcessor>(
++        std::move(fp), uvMatrix ? *uvMatrix : Matrix::I(), image->isAlphaOnly());
++  }
+   if (!image->isAlphaOnly() && fp && NeedConvertColorSpace(image->colorSpace(), dstColorSpace)) {
+     auto xformEffect = ColorSpaceXformEffect::Make(
+         args.context->drawingAllocator(), image->colorSpace().get(), AlphaType::Premultiplied,
+diff --git a/src/core/shaders/ImageShader.h b/src/core/shaders/ImageShader.h
+index 13fb110..75e8aae 100644
+--- a/src/core/shaders/ImageShader.h
++++ b/src/core/shaders/ImageShader.h
+@@ -29,9 +29,12 @@ class ImageShader : public Shader {
+   TileMode tileModeX = TileMode::Clamp;
+   TileMode tileModeY = TileMode::Clamp;
+   SamplingOptions sampling = {};
++  bool cubic = false;
+ 
+   bool isAImage() const override {
+-    return true;
++    // The single-image picture shortcut preserves only SamplingOptions; cubic
++    // reconstruction must keep this shader rather than unwrap its source.
++    return !cubic;
+   }
+ 
+  protected:
+diff --git a/src/core/utils/Task.cpp b/src/core/utils/Task.cpp
+index 2ec3f47..9d14b14 100644
+--- a/src/core/utils/Task.cpp
++++ b/src/core/utils/Task.cpp
+@@ -68,9 +68,14 @@ void Task::Run(std::shared_ptr<Task> task, TaskPriority priority) {
+ void Task::cancel() {
+   auto currentStatus = _status.load(std::memory_order_acquire);
+   if (currentStatus == TaskStatus::Queueing) {
+-    if (_status.compare_exchange_strong(currentStatus, TaskStatus::Canceled,
++    if (_status.compare_exchange_strong(currentStatus, TaskStatus::Canceling,
+                                         std::memory_order_acq_rel, std::memory_order_relaxed)) {
+       onCancel();
++      {
++        std::lock_guard<std::mutex> autoLock(locker);
++        _status.store(TaskStatus::Canceled, std::memory_order_release);
++      }
++      condition.notify_all();
+     }
+   }
+ }
+@@ -81,7 +86,7 @@ bool Task::wait(uint64_t timeout) {
+   execute();
+   std::unique_lock<std::mutex> autoLock(locker);
+   if (timeout == 0) {
+-    while (_status.load(std::memory_order_acquire) == TaskStatus::Executing) {
++    while (status() == TaskStatus::Executing || status() == TaskStatus::Canceling) {
+       condition.wait(autoLock);
+     }
+     return true;
+@@ -93,9 +98,10 @@ bool Task::wait(uint64_t timeout) {
+   auto deadline = timeout >= static_cast<uint64_t>(maxTimeout)
+                       ? maxDeadline
+                       : now + std::chrono::milliseconds(timeout);
+-  while (_status.load(std::memory_order_acquire) == TaskStatus::Executing) {
++  while (status() == TaskStatus::Executing || status() == TaskStatus::Canceling) {
+     if (condition.wait_until(autoLock, deadline) == std::cv_status::timeout) {
+-      return _status.load(std::memory_order_acquire) != TaskStatus::Executing;
++      const auto state = status();
++      return state != TaskStatus::Executing && state != TaskStatus::Canceling;
+     }
+   }
+   return true;
+diff --git a/src/core/vectors/freetype/FTTypeface.cpp b/src/core/vectors/freetype/FTTypeface.cpp
+index a6cf0f1..f29896f 100644
+--- a/src/core/vectors/freetype/FTTypeface.cpp
++++ b/src/core/vectors/freetype/FTTypeface.cpp
+@@ -18,6 +18,7 @@
+ 
+ #if defined(__ANDROID__) || defined(ANDROID)
+ #include "platform/android/GlyphRenderer.h"
++#include "platform/android/JNIUtil.h"
+ #include "tgfx/platform/android/JNIEnvironment.h"
+ #endif
+ #include "FTLibrary.h"
+@@ -29,10 +30,16 @@
+ #include FT_TRUETYPE_TABLES_H
+ #include FT_FONT_FORMATS_H
+ #include FT_TYPE1_TABLES_H
++#include FT_MULTIPLE_MASTERS_H
++#include <algorithm>
+ #include <array>
++#include <cmath>
++#include <cstring>
++#include <limits>
+ #include "FTScalerContext.h"
+ #include "SystemFont.h"
+ #include "core/utils/UniqueID.h"
++#include "core/utils/Log.h"
+ #include "tgfx/core/UTF.h"
+ 
+ namespace tgfx {
+@@ -86,7 +93,11 @@ static FT_Face CreateFTFace(const FTFontData& data) {
+   FT_Face face = nullptr;
+   auto ftLibrary = FTLibrary::Get();
+   auto err = FT_Open_Face(ftLibrary, &args, data.ttcIndex, &face);
+-  if (err || !face->family_name) {
++  if (err) {
++    return nullptr;
++  }
++  if (!face->family_name) {
++    FT_Done_Face(face);
+     return nullptr;
+   }
+   if (!face->charmap) {
+@@ -96,33 +107,274 @@ static FT_Face CreateFTFace(const FTFontData& data) {
+ }
+ 
+ std::shared_ptr<FTTypeface> FTTypeface::Make(FTFontData data) {
++  return Make(std::move(data), {});
++}
++
++static void DeleteFTFace(FT_Face face) {
++  if (face) {
++    std::lock_guard<std::mutex> autoLock(FTMutex());
++    FT_Done_Face(face);
++  }
++}
++
++static bool SetVariations(FT_Face face, const std::vector<FontVariation>& requested,
++                          std::vector<FontVariation>* applied) {
++  if (!FT_HAS_MULTIPLE_MASTERS(face) || !FT_IS_SFNT(face)) {
++    return requested.empty();
++  }
++  FT_MM_Var* axes = nullptr;
++  if (FT_Get_MM_Var(face, &axes) != FT_Err_Ok || axes == nullptr) {
++    return false;
++  }
++  auto releaseAxes = [](FT_MM_Var* value) { FT_Done_MM_Var(FTLibrary::Get(), value); };
++  std::unique_ptr<FT_MM_Var, decltype(releaseAxes)> axesOwner(axes, releaseAxes);
++  std::vector<FT_Fixed> values(axes->num_axis);
++  // Preserve a named TTC instance as well as every unrequested axis.
++  if (FT_Get_Var_Design_Coordinates(face, axes->num_axis, values.data()) != FT_Err_Ok) {
++    return false;
++  }
++  for (const auto& coordinate : requested) {
++    if (!std::isfinite(coordinate.value)) {
++      return false;
++    }
++    FT_UInt index = 0;
++    for (; index < axes->num_axis; ++index) {
++      if (axes->axis[index].tag == coordinate.axis) {
++        break;
++      }
++    }
++    if (index == axes->num_axis) {
++      return false;
++    }
++    auto value = std::clamp(static_cast<double>(coordinate.value) * 65536.0,
++                            static_cast<double>(axes->axis[index].minimum),
++                            static_cast<double>(axes->axis[index].maximum));
++    values[index] = static_cast<FT_Fixed>(std::round(value));
++  }
++  if (!requested.empty() &&
++      FT_Set_Var_Design_Coordinates(face, axes->num_axis, values.data()) != FT_Err_Ok) {
++    return false;
++  }
++  // Read back the actual instance rather than echoing an unclamped request.
++  if (FT_Get_Var_Design_Coordinates(face, axes->num_axis, values.data()) != FT_Err_Ok) {
++    return false;
++  }
++  applied->reserve(axes->num_axis);
++  for (FT_UInt i = 0; i < axes->num_axis; ++i) {
++    applied->push_back({static_cast<FontTableTag>(axes->axis[i].tag),
++                        static_cast<float>(static_cast<double>(values[i]) / 65536.0)});
++  }
++  return true;
++}
++
++std::shared_ptr<FTTypeface> FTTypeface::Make(
++    FTFontData data, const std::vector<FontVariation>& coordinates) {
+   auto face = CreateFTFace(data);
+   if (face == nullptr) {
+     return nullptr;
+   }
+-  auto typeface = std::shared_ptr<FTTypeface>(new FTTypeface(std::move(data), face));
++  std::unique_ptr<FT_FaceRec, decltype(&DeleteFTFace)> faceOwner(face, DeleteFTFace);
++  std::vector<FontVariation> applied;
++  if (!SetVariations(face, coordinates, &applied)) {
++    LOGE("FTTypeface: unable to create the requested variable font instance.");
++    return nullptr;
++  }
++  auto* rawTypeface = new FTTypeface(std::move(data), face, std::move(applied));
++  faceOwner.release();
++  auto typeface = std::shared_ptr<FTTypeface>(rawTypeface);
++#if defined(__ANDROID__) || defined(ANDROID)
++  // The Java color-vector renderer must never substitute the default Typeface
++  // for a variation instance that FreeType has already selected.
++  if (typeface->hasColor() && typeface->hasOutlines() &&
++      !typeface->variationCoordinates.empty() && typeface->typeface.isEmpty()) {
++    LOGE("FTTypeface: unable to create the matching Android variable color font.");
++    return nullptr;
++  }
++#endif
+   typeface->weakThis = typeface;
+   return typeface;
+ }
+ 
+-FTTypeface::FTTypeface(FTFontData data, FT_Face face)
+-    : _uniqueID(UniqueID::Next()), data(std::move(data)), face(std::move(face)) {
++#if defined(__ANDROID__) || defined(ANDROID)
++static jobject MakeAndroidVariableTypeface(JNIEnv* env, const FTFontData& data,
++                                           const std::vector<FontVariation>& coordinates) {
++  if (!env) {
++    return nullptr;
++  }
++  if (env->PushLocalFrame(32) < 0) {
++    env->ExceptionClear();
++    return nullptr;
++  }
++  auto result = [&]() -> jobject {
++    auto axisClass = env->FindClass("android/graphics/fonts/FontVariationAxis");
++    if (!axisClass) return nullptr;
++    auto axisConstructor = env->GetMethodID(axisClass, "<init>", "(Ljava/lang/String;F)V");
++    if (!axisConstructor) return nullptr;
++    auto axes = env->NewObjectArray(static_cast<jsize>(coordinates.size()), axisClass, nullptr);
++    if (!axes) return nullptr;
++    for (size_t i = 0; i < coordinates.size(); ++i) {
++      auto tag = coordinates[i].axis;
++      jchar chars[] = {static_cast<jchar>((tag >> 24) & 0xff),
++                       static_cast<jchar>((tag >> 16) & 0xff),
++                       static_cast<jchar>((tag >> 8) & 0xff),
++                       static_cast<jchar>(tag & 0xff)};
++      auto name = env->NewString(chars, 4);
++      if (!name) return nullptr;
++      auto axis = env->NewObject(axisClass, axisConstructor, name, coordinates[i].value);
++      env->DeleteLocalRef(name);
++      if (!axis || env->ExceptionCheck()) return nullptr;
++      env->SetObjectArrayElement(axes, static_cast<jsize>(i), axis);
++      env->DeleteLocalRef(axis);
++      if (env->ExceptionCheck()) return nullptr;
++    }
++    // FT_Open_Face can encode a named instance in the upper 16 bits. Java
++    // expects only the collection index; its axes above carry that instance.
++    auto ttcIndex = static_cast<jint>(data.ttcIndex & 0xffff);
++    if (!data.path.empty()) {
++      auto builderClass = env->FindClass("android/graphics/Typeface$Builder");
++      if (!builderClass) return nullptr;
++      auto constructor = env->GetMethodID(builderClass, "<init>", "(Ljava/lang/String;)V");
++      if (!constructor) return nullptr;
++      auto setIndex = env->GetMethodID(builderClass, "setTtcIndex", "(I)Landroid/graphics/Typeface$Builder;");
++      if (!setIndex) return nullptr;
++      auto setAxes = env->GetMethodID(builderClass, "setFontVariationSettings",
++          "([Landroid/graphics/fonts/FontVariationAxis;)Landroid/graphics/Typeface$Builder;");
++      if (!setAxes) return nullptr;
++      auto build = env->GetMethodID(builderClass, "build", "()Landroid/graphics/Typeface;");
++      if (!build) return nullptr;
++      auto path = SafeToJString(env, data.path);
++      if (!path) return nullptr;
++      auto builder = env->NewObject(builderClass, constructor, path);
++      if (!builder || env->ExceptionCheck()) return nullptr;
++      env->CallObjectMethod(builder, setIndex, ttcIndex);
++      if (env->ExceptionCheck()) return nullptr;
++      env->CallObjectMethod(builder, setAxes, axes);
++      if (env->ExceptionCheck()) return nullptr;
++      return env->CallObjectMethod(builder, build);
++    }
++    if (!data.data || data.data->size() > static_cast<size_t>(std::numeric_limits<jint>::max())) {
++      return nullptr;
++    }
++    // Public memory-font construction is available from API 29. Use a
++    // Java-owned buffer, never a direct view into a native temporary allocation.
++    auto bufferClass = env->FindClass("java/nio/ByteBuffer");
++    if (!bufferClass) return nullptr;
++    auto allocate = env->GetStaticMethodID(bufferClass, "allocateDirect", "(I)Ljava/nio/ByteBuffer;");
++    if (!allocate) return nullptr;
++    auto buffer = env->CallStaticObjectMethod(bufferClass, allocate, static_cast<jint>(data.data->size()));
++    if (!buffer || env->ExceptionCheck()) return nullptr;
++    auto bytes = env->GetDirectBufferAddress(buffer);
++    if (!bytes) return nullptr;
++    std::memcpy(bytes, data.data->data(), data.data->size());
++    auto fontBuilderClass = env->FindClass("android/graphics/fonts/Font$Builder");
++    if (!fontBuilderClass) return nullptr;
++    auto fontConstructor = env->GetMethodID(fontBuilderClass, "<init>", "(Ljava/nio/ByteBuffer;)V");
++    if (!fontConstructor) return nullptr;
++    auto setIndex = env->GetMethodID(fontBuilderClass, "setTtcIndex", "(I)Landroid/graphics/fonts/Font$Builder;");
++    if (!setIndex) return nullptr;
++    auto setAxes = env->GetMethodID(fontBuilderClass, "setFontVariationSettings",
++        "([Landroid/graphics/fonts/FontVariationAxis;)Landroid/graphics/fonts/Font$Builder;");
++    if (!setAxes) return nullptr;
++    auto buildFont = env->GetMethodID(fontBuilderClass, "build", "()Landroid/graphics/fonts/Font;");
++    if (!buildFont) return nullptr;
++    auto fontBuilder = env->NewObject(fontBuilderClass, fontConstructor, buffer);
++    if (!fontBuilder || env->ExceptionCheck()) return nullptr;
++    env->CallObjectMethod(fontBuilder, setIndex, ttcIndex);
++    if (env->ExceptionCheck()) return nullptr;
++    env->CallObjectMethod(fontBuilder, setAxes, axes);
++    if (env->ExceptionCheck()) return nullptr;
++    auto font = env->CallObjectMethod(fontBuilder, buildFont);
++    if (!font || env->ExceptionCheck()) return nullptr;
++    auto familyBuilderClass = env->FindClass("android/graphics/fonts/FontFamily$Builder");
++    if (!familyBuilderClass) return nullptr;
++    auto familyConstructor = env->GetMethodID(familyBuilderClass, "<init>", "(Landroid/graphics/fonts/Font;)V");
++    if (!familyConstructor) return nullptr;
++    auto buildFamily = env->GetMethodID(familyBuilderClass, "build", "()Landroid/graphics/fonts/FontFamily;");
++    if (!buildFamily) return nullptr;
++    auto familyBuilder = env->NewObject(familyBuilderClass, familyConstructor, font);
++    if (!familyBuilder || env->ExceptionCheck()) return nullptr;
++    auto family = env->CallObjectMethod(familyBuilder, buildFamily);
++    if (!family || env->ExceptionCheck()) return nullptr;
++    auto builderClass = env->FindClass("android/graphics/Typeface$CustomFallbackBuilder");
++    if (!builderClass) return nullptr;
++    auto constructor = env->GetMethodID(builderClass, "<init>", "(Landroid/graphics/fonts/FontFamily;)V");
++    if (!constructor) return nullptr;
++    auto setStyle = env->GetMethodID(builderClass, "setStyle",
++        "(Landroid/graphics/fonts/FontStyle;)Landroid/graphics/Typeface$CustomFallbackBuilder;");
++    if (!setStyle) return nullptr;
++    auto build = env->GetMethodID(builderClass, "build", "()Landroid/graphics/Typeface;");
++    if (!build) return nullptr;
++    auto builder = env->NewObject(builderClass, constructor, family);
++    if (!builder || env->ExceptionCheck()) return nullptr;
++    auto fontClass = env->GetObjectClass(font);
++    if (!fontClass) return nullptr;
++    auto getStyle = env->GetMethodID(fontClass, "getStyle", "()Landroid/graphics/fonts/FontStyle;");
++    if (!getStyle) return nullptr;
++    auto style = env->CallObjectMethod(font, getStyle);
++    if (!style || env->ExceptionCheck()) return nullptr;
++    env->CallObjectMethod(builder, setStyle, style);
++    if (env->ExceptionCheck()) return nullptr;
++    return env->CallObjectMethod(builder, build);
++  }();
++  if (env->ExceptionCheck()) {
++    env->ExceptionClear();
++    result = nullptr;
++  }
++  return env->PopLocalFrame(result);
++}
++#endif
++
++FTTypeface::FTTypeface(FTFontData data, FT_Face face, std::vector<FontVariation> coordinates)
++    : _uniqueID(UniqueID::Next()),
++      data(std::move(data)),
++      face(face),
++      variationCoordinates(std::move(coordinates)) {
+   _hasColor = FT_HAS_COLOR(this->face);
+   _hasOutlines = FT_IS_SCALABLE(this->face);
+ #if defined(__ANDROID__) || defined(ANDROID)
+-  if (hasColor() && hasOutlines() && GlyphRenderer::IsAvailable()) {
++  if (hasColor() && hasOutlines() &&
++      (!variationCoordinates.empty() || GlyphRenderer::IsAvailable())) {
+     JNIEnvironment environment;
+     auto env = environment.current();
+     if (env != nullptr) {
+-      typeface = GlyphRenderer::CreateTypeface(env, this->data.path);
++      auto javaTypeface = variationCoordinates.empty() ?
++          GlyphRenderer::CreateTypeface(env, this->data.path) :
++          MakeAndroidVariableTypeface(env, this->data, variationCoordinates);
++      typeface = javaTypeface;
++      if (javaTypeface) env->DeleteLocalRef(javaTypeface);
++      if (env->ExceptionCheck()) env->ExceptionClear();
+     }
+   }
+ #endif
+ }
+ 
+ FTTypeface::~FTTypeface() {
+-  std::lock_guard<std::mutex> autoLock(FTMutex());
+-  FT_Done_Face(face);
++  DeleteFTFace(face);
++}
++
++std::shared_ptr<Typeface> FTTypeface::makeWithVariations(
++    const std::vector<FontVariation>& coordinates) const {
++  if (coordinates.empty()) {
++    return weakThis.lock();
++  }
++  auto merged = variationCoordinates;
++  for (const auto& coordinate : coordinates) {
++    if (!std::isfinite(coordinate.value)) return nullptr;
++    auto found = std::find_if(merged.begin(), merged.end(), [&](const FontVariation& previous) {
++      return previous.axis == coordinate.axis;
++    });
++    if (found == merged.end()) {
++      merged.push_back(coordinate);
++    } else {
++      found->value = coordinate.value;
++    }
++  }
++  // A new face, uniqueID, and scaler/bounds caches keep existing fonts immutable.
++  return Make(data, merged);
++}
++
++std::vector<FontVariation> FTTypeface::getVariationDesignPosition() const {
++  return variationCoordinates;
+ }
+ 
+ std::string FTTypeface::fontFamily() const {
+diff --git a/src/core/vectors/freetype/FTTypeface.h b/src/core/vectors/freetype/FTTypeface.h
+index b312b51..8bd323e 100644
+--- a/src/core/vectors/freetype/FTTypeface.h
++++ b/src/core/vectors/freetype/FTTypeface.h
+@@ -62,6 +62,11 @@ class FTTypeface : public Typeface {
+ 
+   std::shared_ptr<Data> copyTableData(FontTableTag tag) const override;
+ 
++  std::shared_ptr<Typeface> makeWithVariations(
++      const std::vector<FontVariation>& coordinates) const override;
++
++  std::vector<FontVariation> getVariationDesignPosition() const override;
++
+  protected:
+ #ifdef TGFX_USE_ADVANCED_TYPEFACE_PROPERTY
+   AdvancedTypefaceInfo getAdvancedInfo() const override;
+@@ -75,12 +80,16 @@ class FTTypeface : public Typeface {
+   FT_Face face = nullptr;
+   bool _hasColor = false;
+   bool _hasOutlines = true;
++  std::vector<FontVariation> variationCoordinates;
+ 
+ #if defined(__ANDROID__) || defined(ANDROID)
+   Global<jobject> typeface;
+ #endif
+ 
+-  FTTypeface(FTFontData data, FT_Face face);
++  FTTypeface(FTFontData data, FT_Face face, std::vector<FontVariation> coordinates);
++
++  static std::shared_ptr<FTTypeface> Make(FTFontData data,
++                                        const std::vector<FontVariation>& coordinates);
+ 
+   int unitsPerEmInternal() const;
+ 
+diff --git a/src/gpu/Context.cpp b/src/gpu/Context.cpp
+index 50a7e8c..7363bdd 100644
+--- a/src/gpu/Context.cpp
++++ b/src/gpu/Context.cpp
+@@ -93,7 +93,7 @@ std::unique_ptr<Recording> Context::flush(BackendSemaphore* signalSemaphore) {
+   }
+   _atlasManager->postFlush();
+   _proxyProvider->purgeExpiredProxies();
+-  // The pending queue keeps the buffer and its frames alive until submitted; the Recording
++  // The pending queue keeps the buffer and its frames alive until submitted or discarded; the Recording
+   // keeps the windows alive.
+   pendingDrawingBuffers.push_back(drawingBuffer);
+   return std::unique_ptr<Recording>(new Recording(uniqueID(), drawingBuffer->uniqueID(),
+@@ -120,6 +120,27 @@ std::shared_ptr<DrawingBuffer> Context::getDrawingBuffer(const Recording* record
+   return nullptr;
+ }
+ 
++bool Context::discard(std::unique_ptr<Recording> recording) {
++  ASSERT_OWNER_THREAD;
++  auto drawingBuffer = getDrawingBuffer(recording.get());
++  if (drawingBuffer == nullptr) {
++    return false;
++  }
++  for (auto iter = pendingDrawingBuffers.begin(); iter != pendingDrawingBuffers.end(); ++iter) {
++    if (*iter == drawingBuffer) {
++      pendingDrawingBuffers.erase(iter);
++      break;
++    }
++  }
++  // DrawingManager's reuse pool also holds this buffer. Erasing the queue entry alone would
++  // leave its tasks, proxies and allocator blocks alive until a later reuse.
++  drawingBuffer->discard();
++  recording.reset();
++  _proxyProvider->purgeExpiredProxies();
++  _resourceCache->purgeUntilMemoryTo(_resourceCache->cacheLimit());
++  return true;
++}
++
+ void Context::submit(std::unique_ptr<Recording> recording, bool syncCpu) {
+   ASSERT_OWNER_THREAD;
+   _resourceCache->processUnreferencedResources();
+diff --git a/src/gpu/DrawingBuffer.cpp b/src/gpu/DrawingBuffer.cpp
+index 23ebc90..7d8bcbe 100644
+--- a/src/gpu/DrawingBuffer.cpp
++++ b/src/gpu/DrawingBuffer.cpp
+@@ -17,6 +17,7 @@
+ /////////////////////////////////////////////////////////////////////////////////////////////////
+ 
+ #include "DrawingBuffer.h"
++#include "core/AtlasManager.h"
+ #include "core/utils/UniqueID.h"
+ #include "gpu/GlobalCache.h"
+ #include "gpu/proxies/RenderTargetProxy.h"
+@@ -96,4 +97,36 @@ void DrawingBuffer::reset() {
+   _generation++;
+ }
+ 
++void DrawingBuffer::discard() {
++  // Shared immutable index/gradient proxies can already be referenced by other
++  // pending batches. Complete only their uploads before canceling this batch:
++  // clearing their creation task would leave the cache (and queued users) with
++  // an empty proxy forever. No render task or rejected frame is executed here.
++  for (auto& task : resourceTasks) {
++    if (task && context->globalCache()->ownsResourceProxy(task->proxy.get())) {
++      task->execute(context);
++    }
++  }
++  // Atlas cells are marked resident while recording, before their upload tasks execute. Losing
++  // an upload must invalidate that residency for future draws. Queued batches retain their own
++  // proxies/tasks, so releasing the lookup cache does not cancel unrelated queued work.
++  if (!atlasTasks.empty()) {
++    context->atlasManager()->releaseAll();
++  }
++  // Destruct placement objects before freeing the memory they occupy. Also release vector
++  // storage: a failed oversized asset must not establish the reuse pool's high water mark.
++  // Resource/atlas owners cancel queued writers and join executing writers in
++  // their destructors. Do not clear any allocator (or hardware atlas lock) before
++  // those joins have completed.
++  decltype(renderTasks){}.swap(renderTasks);
++  decltype(resourceTasks){}.swap(resourceTasks);
++  decltype(atlasTasks){}.swap(atlasTasks);
++  decltype(windowUsages){}.swap(windowUsages);
++  decltype(presentables){}.swap(presentables);
++  vertexAllocator.clear(0);
++  instanceAllocator.clear(0);
++  drawingAllocator.clear(0);
++  _generation++;
++}
++
+ }  // namespace tgfx
+diff --git a/src/gpu/DrawingBuffer.h b/src/gpu/DrawingBuffer.h
+index 379ac16..6e23918 100644
+--- a/src/gpu/DrawingBuffer.h
++++ b/src/gpu/DrawingBuffer.h
+@@ -45,6 +45,12 @@ class DrawingBuffer {
+    */
+   void reset();
+ 
++  /**
++   * Cancels an unsubmitted batch. Destroys its tasks/frame references and frees all allocator
++   * blocks, including blocks otherwise retained by the reuse pool. Advances the generation.
++   */
++  void discard();
++
+   /**
+    * Returns the unique ID of this drawing buffer.
+    */
+diff --git a/src/gpu/GlobalCache.cpp b/src/gpu/GlobalCache.cpp
+index 96cf3ec..e9d5c99 100644
+--- a/src/gpu/GlobalCache.cpp
++++ b/src/gpu/GlobalCache.cpp
+@@ -187,6 +187,28 @@ void GlobalCache::resetUniformBuffer() {
+   activePacket = reusable;
+ }
+ 
++bool GlobalCache::ownsResourceProxy(const ResourceProxy* proxy) const {
++  if (proxy == nullptr) {
++    return false;
++  }
++  if (proxy->sharedImmutableUpload) {
++    return true;
++  }
++  const GPUBufferProxy* buffers[] = {
++      aaQuadIndexBuffer.get(), nonAAQuadIndexBuffer.get(), rRectFillIndexBuffer.get(),
++      rRectStrokeIndexBuffer.get(), nonAARRectIndexBuffer.get(), aaRectMiterStrokeIndexBuffer.get(),
++      aaRectRoundStrokeIndexBuffer.get(), aaRectBevelStrokeIndexBuffer.get(),
++      nonAARectMiterStrokeIndexBuffer.get(), nonAARectBevelStrokeIndexBuffer.get(),
++      nonAARectRoundStrokeIndexBuffer.get(), hairlineLineIndexBuffer.get(),
++      hairlineQuadIndexBuffer.get()};
++  for (auto buffer : buffers) {
++    if (buffer == proxy) {
++      return true;
++    }
++  }
++  return false;
++}
++
+ void GlobalCache::addProgram(const BytesKey& programKey, std::shared_ptr<Program> program) {
+   if (program == nullptr) {
+     return;
+@@ -225,6 +247,7 @@ std::shared_ptr<TextureProxy> GlobalCache::getGradient(const Color* colors, cons
+   if (textureProxy == nullptr) {
+     return nullptr;
+   }
++  textureProxy->sharedImmutableUpload = true;
+   auto gradientTexture = std::make_unique<GradientTexture>(textureProxy, bytesKey);
+   gradientLRU.push_front(gradientTexture.get());
+   gradientTexture->cachedPosition = gradientLRU.begin();
+diff --git a/src/gpu/GlobalCache.h b/src/gpu/GlobalCache.h
+index b3be918..02ecd40 100644
+--- a/src/gpu/GlobalCache.h
++++ b/src/gpu/GlobalCache.h
+@@ -60,6 +60,13 @@ class GlobalCache {
+    */
+   void resetUniformBuffer();
+ 
++  /**
++   * Returns whether this proxy is immutable shared content. Gradient classification lives on
++   * the proxy so its upload survives LRU eviction and cancellation of the requesting batch
++   * while already queued users retain it. Index buffers are permanent cache members.
++   */
++  bool ownsResourceProxy(const ResourceProxy* proxy) const;
++
+   /**
+    * Adds a program to the cache with the specified key. The caller must ensure that the key does
+    * not already exist in the cache, otherwise the LRU tracking will be corrupted.
+diff --git a/src/gpu/OpsCompositor.cpp b/src/gpu/OpsCompositor.cpp
+index 0863576..5d350fa 100644
+--- a/src/gpu/OpsCompositor.cpp
++++ b/src/gpu/OpsCompositor.cpp
+@@ -69,6 +69,7 @@ OpsCompositor::OpsCompositor(std::shared_ptr<RenderTargetProxy> proxy, uint32_t
+ 
+ void OpsCompositor::fillImage(std::shared_ptr<Image> image, const SamplingOptions& sampling,
+                               const Matrix& matrix, const ClipStack& clip, const Brush& brush) {
++  RenderErrorScope errorScope(context, errorState);
+   DEBUG_ASSERT(image != nullptr);
+   auto imageRect = Rect::MakeWH(image->width(), image->height());
+   if (!canAppend(PendingOpType::Image, clip, brush) || pendingImage != image ||
+@@ -87,6 +88,7 @@ void OpsCompositor::fillImageRect(std::shared_ptr<Image> image, const Rect& srcR
+                                   const Rect& dstRect, const SamplingOptions& sampling,
+                                   const Matrix& matrix, const ClipStack& clip, const Brush& brush,
+                                   SrcRectConstraint constraint, const Rect* strictRect) {
++  RenderErrorScope errorScope(context, errorState);
+   DEBUG_ASSERT(image != nullptr);
+   DEBUG_ASSERT(!srcRect.isEmpty());
+   DEBUG_ASSERT(!dstRect.isEmpty());
+@@ -134,6 +136,7 @@ static bool ComplexMismatch(const RRect& newRRect,
+ 
+ void OpsCompositor::fillRect(const Rect& rect, const Matrix& matrix, const ClipStack& clip,
+                              const Brush& brush, const Stroke* stroke) {
++  RenderErrorScope errorScope(context, errorState);
+   DEBUG_ASSERT(!rect.isEmpty());
+   if (!canAppend(PendingOpType::Rect, clip, brush) || ShouldFlushRectOps(pendingStrokes, stroke)) {
+     flushPendingOps(PendingOpType::Rect, clip, brush);
+@@ -149,6 +152,7 @@ void OpsCompositor::fillRect(const Rect& rect, const Matrix& matrix, const ClipS
+ 
+ void OpsCompositor::drawRRect(const RRect& rRect, const Matrix& matrix, const ClipStack& clip,
+                               const Brush& brush, const Stroke* stroke) {
++  RenderErrorScope errorScope(context, errorState);
+   DEBUG_ASSERT(!rRect.rect().isEmpty());
+   auto rectBrush = brush.makeWithMatrix(matrix);
+   // Complex and non-Complex RRects use different GPs and vertex layouts, so they cannot be
+@@ -184,6 +188,7 @@ static bool MatrixOnlyDiffersInTranslation(const Matrix& a, const Matrix& b) {
+ 
+ void OpsCompositor::drawShape(std::shared_ptr<Shape> shape, const Matrix& matrix,
+                               const ClipStack& clip, const Brush& brush) {
++  RenderErrorScope errorScope(context, errorState);
+   DEBUG_ASSERT(shape != nullptr);
+   if (shouldUseStencilCover(brush, *shape)) {
+     if (!canAppend(PendingOpType::StencilCoverPath, clip, brush)) {
+@@ -266,6 +271,7 @@ bool OpsCompositor::shouldUseStencilCover(const Brush& brush, const Shape& shape
+ 
+ void OpsCompositor::drawMesh(std::shared_ptr<Mesh> mesh, const Matrix& matrix,
+                              const ClipStack& clip, const Brush& brush) {
++  RenderErrorScope errorScope(context, errorState);
+   DEBUG_ASSERT(mesh != nullptr);
+   flushPendingOps();
+ 
+@@ -338,6 +344,7 @@ void OpsCompositor::drawMesh(std::shared_ptr<Mesh> mesh, const Matrix& matrix,
+ void OpsCompositor::drawHairlineShape(std::shared_ptr<Shape> shape, const Matrix& matrix,
+                                       const ClipStack& clip, const Brush& brush,
+                                       const Stroke* stroke) {
++  RenderErrorScope errorScope(context, errorState);
+   DEBUG_ASSERT(shape != nullptr);
+   flushPendingOps();
+   Matrix uvMatrix = {};
+@@ -382,6 +389,7 @@ void OpsCompositor::drawHairlineShape(std::shared_ptr<Shape> shape, const Matrix
+ }
+ 
+ void OpsCompositor::discardAll() {
++  RenderErrorScope errorScope(context, errorState);
+   drawOps.clear();
+   clearColor.reset();
+   if (pendingType != PendingOpType::Unknown) {
+@@ -474,6 +482,7 @@ class PendingOpsAutoReset {
+ };
+ 
+ void OpsCompositor::flushPendingOps(PendingOpType type, ClipStack clip, Brush brush) {
++  RenderErrorScope errorScope(context, errorState);
+   if (pendingType == PendingOpType::Unknown) {
+     if (type != PendingOpType::Unknown) {
+       pendingType = type;
+@@ -821,6 +830,7 @@ bool OpsCompositor::drawAsClear(const Rect& rect, const Matrix& matrix, const Cl
+ }
+ 
+ void OpsCompositor::makeClosed() {
++  RenderErrorScope errorScope(context, errorState);
+   if (renderTarget == nullptr) {
+     return;
+   }
+@@ -1138,6 +1148,7 @@ DstTextureInfo OpsCompositor::makeDstTextureInfo(const Rect& deviceBounds, AATyp
+ void OpsCompositor::addDrawOp(PlacementPtr<DrawOp> op, const ClipStack& clip, const Brush& brush,
+                               const std::optional<Rect>& localBounds,
+                               const std::optional<Rect>& deviceBounds, float drawScale) {
++  RenderErrorScope errorScope(context, errorState);
+ 
+   if (op == nullptr || brush.nothingToDraw()) {
+     return;
+@@ -1207,6 +1218,7 @@ void OpsCompositor::addDrawOp(PlacementPtr<DrawOp> op, const ClipStack& clip, co
+ void OpsCompositor::fillTextAtlas(std::shared_ptr<TextureProxy> textureProxy, const Rect& rect,
+                                   const SamplingOptions& sampling, const Matrix& matrix,
+                                   const ClipStack& clip, const Brush& brush) {
++  RenderErrorScope errorScope(context, errorState);
+   DEBUG_ASSERT(textureProxy != nullptr);
+   DEBUG_ASSERT(!rect.isEmpty());
+   if (!canAppend(PendingOpType::Atlas, clip, brush) || pendingAtlasTexture != textureProxy ||
+diff --git a/src/gpu/OpsCompositor.h b/src/gpu/OpsCompositor.h
+index 9cffe6e..ba4f77c 100644
+--- a/src/gpu/OpsCompositor.h
++++ b/src/gpu/OpsCompositor.h
+@@ -19,6 +19,7 @@
+ #pragma once
+ 
+ #include "core/ClipStack.h"
++#include "core/RenderErrorState.h"
+ #include "gpu/ops/RRectDrawOp.h"
+ #include "gpu/ops/RectDrawOp.h"
+ #include "tgfx/core/Brush.h"
+@@ -142,7 +143,12 @@ class OpsCompositor {
+     return renderTarget == nullptr;
+   }
+ 
++  void setRenderErrorState(std::shared_ptr<RenderErrorState> state) {
++    errorState = std::move(state);
++  }
++
+  private:
++  std::shared_ptr<RenderErrorState> errorState = nullptr;
+   Context* context = nullptr;
+   std::list<std::shared_ptr<OpsCompositor>>::iterator cachedPosition;
+   std::shared_ptr<RenderTargetProxy> renderTarget = nullptr;
+diff --git a/src/gpu/RectsVertexProvider.cpp b/src/gpu/RectsVertexProvider.cpp
+index e31a712..4499535 100644
+--- a/src/gpu/RectsVertexProvider.cpp
++++ b/src/gpu/RectsVertexProvider.cpp
+@@ -130,8 +130,11 @@ class AARectsVertexProvider : public RectsVertexProvider {
+       auto subset = rect;
+       if (hasUVRect) {
+         auto& uvRect = *uvRects[i];
+-        insetUV = uvRect.makeInset(insetX, insetY);
+-        outsetUV = uvRect.makeOutset(outsetX, outsetY);
++        // Geometry is in destination units; the AA ring's UVs are in source pixels.
++        auto uvScaleX = uvRect.width() / rect.width();
++        auto uvScaleY = uvRect.height() / rect.height();
++        insetUV = uvRect.makeInset(insetX * uvScaleX, insetY * uvScaleY);
++        outsetUV = uvRect.makeOutset(outsetX * uvScaleX, outsetY * uvScaleY);
+         subset = uvRect;
+       }
+       if (hasSubsetRect) {
+diff --git a/src/gpu/RenderContext.cpp b/src/gpu/RenderContext.cpp
+index 1bf4347..b277772 100644
+--- a/src/gpu/RenderContext.cpp
++++ b/src/gpu/RenderContext.cpp
+@@ -24,6 +24,7 @@
+ #include "core/GlyphTransform.h"
+ #include "core/PathRasterizer.h"
+ #include "core/PathRef.h"
++#include "core/MeasureContext.h"
+ #include "core/ScalerContext.h"
+ #include "core/UserTypeface.h"
+ #include "core/shapes/GlyphShape.h"
+@@ -33,11 +34,56 @@
+ #include "core/utils/ShapeUtils.h"
+ #include "core/utils/StrokeUtils.h"
+ #include "gpu/DrawingManager.h"
++#include "core/images/TextureImage.h"
+ #include "tgfx/core/Surface.h"
++#include "tgfx/core/PictureRecorder.h"
+ #include "tgfx/gpu/Window.h"
+ 
+ namespace tgfx {
+ 
++std::shared_ptr<Image> RenderContext::captureDestination(const Rect& bounds) {
++  RenderErrorScope errorScope(getContext(), renderErrorState());
++  auto drawingManager = getContext()->drawingManager();
++  auto source = renderTarget;
++  if (surface) {
++    source = surface->resolveCopySource(drawingManager);
++    if (!source) {
++      return nullptr;
++    }
++    surface->closeDrawingForCopy(drawingManager, source);
++  } else {
++    flush();
++  }
++  if (bounds.isEmpty() || !source->bounds().contains(bounds)) {
++    return nullptr;
++  }
++  // Independent, exact-sized copy: never snapshot the whole target or create
++  // a subset view retaining a target-sized COW image.
++  auto copy = getContext()->proxyProvider()->createTextureProxy(
++      {}, static_cast<int>(bounds.width()), static_cast<int>(bounds.height()),
++      source->format(), false, source->origin(), BackingFit::Exact);
++  if (!copy) {
++    return nullptr;
++  }
++  auto sourceBounds = source->getOriginTransform().mapRect(bounds);
++  drawingManager->addRenderTargetCopyTask(source, copy, static_cast<int>(sourceBounds.left),
++                                         static_cast<int>(sourceBounds.top));
++  if (surface) {
++    surface->collectFrameUsage(drawingManager, source);
++  }
++  return TextureImage::Wrap(std::move(copy), _colorSpace);
++}
++
++void RenderContext::drawDeferred(const Rect& bounds, float deviceOutset,
++                                  const std::function<void(Canvas*)>& draw, bool unbounded,
++                                  const Matrix& matrix, const ClipStack& clip) {
++  RenderErrorScope errorScope(getContext(), renderErrorState());
++  if (clip.state() == ClipState::Empty || getClipBounds(clip).isEmpty()) {
++    return;
++  }
++  DrawContext::drawDeferred(bounds, deviceOutset, draw, unbounded, matrix, clip);
++}
++
+ static uint32_t GetTypefaceID(const Typeface* typeface, bool isCustom) {
+   return isCustom ? static_cast<const UserTypeface*>(typeface)->builderID() : typeface->uniqueID();
+ }
+@@ -265,8 +311,11 @@ static SamplingOptions GetSamplingOptions(float glyphRenderScale, bool fauxItali
+ 
+ RenderContext::RenderContext(std::shared_ptr<RenderTargetProxy> proxy, uint32_t renderFlags,
+                              bool clearAll, Surface* surface,
+-                             std::shared_ptr<ColorSpace> colorSpace)
+-    : renderTarget(std::move(proxy)), renderFlags(renderFlags), surface(surface),
++                             std::shared_ptr<ColorSpace> colorSpace,
++                             std::shared_ptr<RenderErrorState> errorState)
++    : DrawContext(errorState ? std::move(errorState) : std::make_shared<RenderErrorState>()),
++      renderTarget(std::move(proxy)),
++      renderFlags(renderFlags), surface(surface),
+       _colorSpace(std::move(colorSpace)) {
+   if (clearAll) {
+     auto drawingManager = renderTarget->getContext()->drawingManager();
+@@ -275,6 +324,7 @@ RenderContext::RenderContext(std::shared_ptr<RenderTargetProxy> proxy, uint32_t
+       renderTarget = std::move(target);
+       opsCompositor = drawingManager->addOpsCompositor(renderTarget, renderFlags,
+                                                        PMColor::Transparent(), _colorSpace);
++      opsCompositor->setRenderErrorState(renderErrorState());
+     }
+   }
+ }
+@@ -291,6 +341,7 @@ Rect RenderContext::getClipBounds(const ClipStack& clip) {
+ }
+ 
+ void RenderContext::drawFill(const Brush& brush) {
++  RenderErrorScope errorScope(getContext(), renderErrorState());
+   if (auto compositor = getOpsCompositor(brush.isOpaque())) {
+     compositor->fillRect(renderTarget->bounds(), Matrix::I(), ClipStack(), brush, nullptr);
+   }
+@@ -298,13 +349,31 @@ void RenderContext::drawFill(const Brush& brush) {
+ 
+ void RenderContext::drawRect(const Rect& rect, const Matrix& matrix, const ClipStack& clip,
+                              const Brush& brush, const Stroke* stroke) {
++  RenderErrorScope errorScope(getContext(), renderErrorState());
+   if (auto compositor = getOpsCompositor()) {
+-    compositor->fillRect(rect, matrix, clip, brush, stroke);
++    auto alignedRect = rect;
++    if (!brush.antiAlias && stroke == nullptr && matrix.isScaleTranslate() && matrix.isFinite()) {
++      Matrix inverse = {};
++      if (!matrix.invert(&inverse)) {
++        return;
++      }
++      // Preserve aliased bitmap rasterization at half-pixel edges. Round in device space,
++      // but retain the original matrix so local brush coordinates do not move.
++      auto deviceRect = matrix.mapRect(rect);
++      deviceRect.setLTRB(std::floor(deviceRect.left + 0.5f), std::floor(deviceRect.top + 0.5f),
++                         std::floor(deviceRect.right + 0.5f), std::floor(deviceRect.bottom + 0.5f));
++      if (deviceRect.isEmpty()) {
++        return;
++      }
++      alignedRect = inverse.mapRect(deviceRect);
++    }
++    compositor->fillRect(alignedRect, matrix, clip, brush, stroke);
+   }
+ }
+ 
+ void RenderContext::drawRRect(const RRect& rRect, const Matrix& matrix, const ClipStack& clip,
+                               const Brush& brush, const Stroke* stroke) {
++  RenderErrorScope errorScope(getContext(), renderErrorState());
+   if (auto compositor = getOpsCompositor()) {
+     compositor->drawRRect(rRect, matrix, clip, brush, stroke);
+   }
+@@ -312,12 +381,14 @@ void RenderContext::drawRRect(const RRect& rRect, const Matrix& matrix, const Cl
+ 
+ void RenderContext::drawPath(const Path& path, const Matrix& matrix, const ClipStack& clip,
+                              const Brush& brush) {
++  RenderErrorScope errorScope(getContext(), renderErrorState());
+   // Temporarily use drawShape for rendering, and perform merging in the compositor later.
+   drawShape(Shape::MakeFrom(path), matrix, clip, brush, nullptr);
+ }
+ 
+ void RenderContext::drawImage(std::shared_ptr<Image> image, const SamplingOptions& sampling,
+                               const Matrix& matrix, const ClipStack& clip, const Brush& brush) {
++  RenderErrorScope errorScope(getContext(), renderErrorState());
+   if (auto compositor = getOpsCompositor()) {
+     compositor->fillImage(std::move(image), sampling, matrix, clip, brush);
+   }
+@@ -325,6 +396,7 @@ void RenderContext::drawImage(std::shared_ptr<Image> image, const SamplingOption
+ 
+ void RenderContext::drawShape(std::shared_ptr<Shape> shape, const Matrix& matrix,
+                               const ClipStack& clip, const Brush& brush, const Stroke* stroke) {
++  RenderErrorScope errorScope(getContext(), renderErrorState());
+   if (auto compositor = getOpsCompositor()) {
+     if (stroke != nullptr && TreatStrokeAsHairline(*stroke, matrix)) {
+       compositor->drawHairlineShape(std::move(shape), matrix, clip, brush, stroke);
+@@ -345,6 +417,7 @@ void RenderContext::drawShape(std::shared_ptr<Shape> shape, const Matrix& matrix
+ 
+ void RenderContext::drawMesh(std::shared_ptr<Mesh> mesh, const Matrix& matrix,
+                              const ClipStack& clip, const Brush& brush) {
++  RenderErrorScope errorScope(getContext(), renderErrorState());
+   if (auto compositor = getOpsCompositor()) {
+     compositor->drawMesh(std::move(mesh), matrix, clip, brush);
+   }
+@@ -354,6 +427,7 @@ void RenderContext::drawImageRect(std::shared_ptr<Image> image, const Rect& srcR
+                                   const Rect& dstRect, const SamplingOptions& sampling,
+                                   const Matrix& matrix, const ClipStack& clip, const Brush& brush,
+                                   SrcRectConstraint constraint, const Rect* strictRect) {
++  RenderErrorScope errorScope(getContext(), renderErrorState());
+   DEBUG_ASSERT(image != nullptr);
+   DEBUG_ASSERT(image->isAlphaOnly() || brush.shader == nullptr);
+   auto compositor = getOpsCompositor();
+@@ -375,6 +449,7 @@ void RenderContext::drawImageRect(std::shared_ptr<Image> image, const Rect& srcR
+ 
+ void RenderContext::drawTextBlob(std::shared_ptr<TextBlob> textBlob, const Matrix& matrix,
+                                  const ClipStack& clip, const Brush& brush, const Stroke* stroke) {
++  RenderErrorScope errorScope(getContext(), renderErrorState());
+   DEBUG_ASSERT(textBlob != nullptr);
+   if (FloatNearlyZero(matrix.getMaxScale())) {
+     return;
+@@ -426,13 +501,22 @@ void RenderContext::drawTextBlob(std::shared_ptr<TextBlob> textBlob, const Matri
+ 
+ void RenderContext::drawPicture(std::shared_ptr<Picture> picture, const Matrix& matrix,
+                                 const ClipStack& clip) {
++  RenderErrorScope errorScope(getContext(), renderErrorState());
+   DEBUG_ASSERT(picture != nullptr);
+   picture->playback(this, matrix, clip);
+ }
+ 
+ void RenderContext::drawLayer(std::shared_ptr<Picture> picture, std::shared_ptr<ImageFilter> filter,
+                               const Matrix& matrix, const ClipStack& clip, const Brush& brush) {
++  RenderErrorScope errorScope(getContext(), renderErrorState());
+   DEBUG_ASSERT(brush.shader == nullptr);
++  if (picture->_hasRenderFailure) {
++    markRenderFailure();
++  }
++  if (picture->_hasDeferredDrawing) {
++    drawDeferredLayer(std::move(picture), std::move(filter), matrix, clip, brush);
++    return;
++  }
+   Matrix viewMatrix = {};
+   Rect bounds = {};
+   if (picture->hasUnboundedFill()) {
+@@ -470,7 +554,80 @@ void RenderContext::drawLayer(std::shared_ptr<Picture> picture, std::shared_ptr<
+   drawImage(image, {}, drawMatrix, clip, brush.makeWithMatrix(viewMatrix));
+ }
+ 
++void RenderContext::drawDeferredLayer(std::shared_ptr<Picture> picture,
++                                      std::shared_ptr<ImageFilter> filter, const Matrix& matrix,
++                                      const ClipStack& clip, const Brush& brush) {
++  // Device effects must see the complete final transform. PictureImage's scalar
++  // drawScale would rasterize at (maxScale,maxScale), then compress an axis during
++  // composition, changing device-space blur/outset semantics.
++  auto neededBounds = getClipBounds(clip);
++  if (neededBounds.isEmpty()) {
++    return;
++  }
++  Matrix inverse;
++  if (!matrix.isFinite() || !matrix.invert(&inverse)) {
++    return;
++  }
++  if (filter) {
++    // Preserve filter input outside the destination clip that can contribute to
++    // visible output. The outer filter still operates in its original local space.
++    neededBounds = matrix.mapRect(filter->filterBounds(inverse.mapRect(neededBounds),
++                                                        MapDirection::Reverse));
++  }
++  ClipStack measureClip;
++  measureClip.clipRect(neededBounds, Matrix::I(), false);
++  MeasureContext measure;
++  picture->playback(&measure, matrix, measureClip); // Never invokes deferred callbacks.
++  auto bounds = picture->hasUnboundedFill() ? neededBounds : measure.getBounds();
++  if (!bounds.intersect(neededBounds)) {
++    return;
++  }
++  bounds.roundOut();
++  const auto width = FloatSaturateToInt(bounds.width());
++  const auto height = FloatSaturateToInt(bounds.height());
++  auto target = RenderTargetProxy::Make(getContext(), width, height, false, 1, false,
++                                         ImageOrigin::TopLeft, BackingFit::Exact);
++  if (target == nullptr) {
++    markRenderFailure();
++    return;
++  }
++  auto replayMatrix = matrix;
++  replayMatrix.postTranslate(-bounds.left, -bounds.top);
++  RenderContext child(target, renderFlags, true, nullptr, colorSpace(), renderErrorState());
++  picture->playback(&child, replayMatrix, ClipStack());
++  child.flush();
++  if (child.hasError()) {
++    markRenderFailure();
++    return;
++  }
++  auto image = TextureImage::Wrap(target->asTextureProxy(), colorSpace());
++  if (image == nullptr) {
++    markRenderFailure();
++    return;
++  }
++  if (filter) {
++    // Bake the device-effect result first, then map that texture back to local
++    // coordinates for the ordinary layer-filter pipeline. Subsequent scalar
++    // sampling can resample pixels but cannot re-execute a deferred device effect
++    // under a different transform. Group brush/opacity is applied only at the end.
++    PictureRecorder recorder;
++    auto canvas = recorder.beginRecording();
++    canvas->concat(inverse);
++    canvas->drawImage(std::move(image), bounds.left, bounds.top);
++    auto flattened = recorder.finishRecordingAsPicture();
++    if (flattened == nullptr) {
++      markRenderFailure();
++      return;
++    }
++    drawLayer(std::move(flattened), std::move(filter), matrix, clip, brush);
++    return;
++  }
++  drawImage(std::move(image), {}, Matrix::MakeTrans(bounds.left, bounds.top), clip,
++            brush.makeWithMatrix(replayMatrix));
++}
++
+ bool RenderContext::flush() {
++  RenderErrorScope errorScope(getContext(), renderErrorState());
+   if (opsCompositor != nullptr) {
+     auto closed = opsCompositor->isClosed();
+     opsCompositor->makeClosed();
+@@ -493,6 +650,7 @@ OpsCompositor* RenderContext::getOpsCompositor(bool discardContent) {
+     renderTarget = std::move(target);
+     opsCompositor =
+         drawingManager->addOpsCompositor(renderTarget, renderFlags, std::nullopt, _colorSpace);
++    opsCompositor->setRenderErrorState(renderErrorState());
+   } else if (discardContent) {
+     opsCompositor->discardAll();
+   }
+@@ -501,6 +659,7 @@ OpsCompositor* RenderContext::getOpsCompositor(bool discardContent) {
+ 
+ void RenderContext::replaceRenderTarget(std::shared_ptr<RenderTargetProxy> newRenderTarget,
+                                         std::shared_ptr<Image> oldContent) {
++  RenderErrorScope errorScope(getContext(), renderErrorState());
+   renderTarget = std::move(newRenderTarget);
+   if (oldContent != nullptr) {
+     DEBUG_ASSERT(oldContent->width() == renderTarget->width() &&
+@@ -508,6 +667,7 @@ void RenderContext::replaceRenderTarget(std::shared_ptr<RenderTargetProxy> newRe
+     auto drawingManager = renderTarget->getContext()->drawingManager();
+     opsCompositor =
+         drawingManager->addOpsCompositor(renderTarget, renderFlags, std::nullopt, _colorSpace);
++    opsCompositor->setRenderErrorState(renderErrorState());
+     Brush brush = {{}, BlendMode::Src, false};
+     opsCompositor->fillImageRect(std::move(oldContent), renderTarget->bounds(),
+                                  renderTarget->bounds(), {}, Matrix::I(), ClipStack{}, brush,
+diff --git a/src/gpu/RenderContext.h b/src/gpu/RenderContext.h
+index b54fc7c..96b2d9c 100644
+--- a/src/gpu/RenderContext.h
++++ b/src/gpu/RenderContext.h
+@@ -30,12 +30,21 @@ class RenderContext : public DrawContext {
+  public:
+   RenderContext(std::shared_ptr<RenderTargetProxy> proxy, uint32_t renderFlags,
+                 bool clearAll = false, Surface* surface = nullptr,
+-                std::shared_ptr<ColorSpace> colorSpace = nullptr);
++                std::shared_ptr<ColorSpace> colorSpace = nullptr,
++                std::shared_ptr<RenderErrorState> errorState = nullptr);
+ 
+   Context* getContext() const {
+     return renderTarget->getContext();
+   }
+ 
++  Rect deviceBounds() const override {
++    return Rect::MakeWH(renderTarget->width(), renderTarget->height());
++  }
++  std::shared_ptr<Image> captureDestination(const Rect& bounds) override;
++  void drawDeferred(const Rect& bounds, float deviceOutset,
++                    const std::function<void(Canvas*)>& draw, bool unbounded,
++                    const Matrix& matrix, const ClipStack& clip) override;
++
+   void drawFill(const Brush& brush) override;
+ 
+   void drawRect(const Rect& rect, const Matrix& matrix, const ClipStack& clip, const Brush& brush,
+@@ -104,6 +113,8 @@ class RenderContext : public DrawContext {
+   std::shared_ptr<ColorSpace> _colorSpace = nullptr;
+ 
+   Rect getClipBounds(const ClipStack& clip);
++  void drawDeferredLayer(std::shared_ptr<Picture> picture, std::shared_ptr<ImageFilter> filter,
++                         const Matrix& matrix, const ClipStack& clip, const Brush& brush);
+   OpsCompositor* getOpsCompositor(bool discardContent = false);
+   void replaceRenderTarget(std::shared_ptr<RenderTargetProxy> newRenderTarget,
+                            std::shared_ptr<Image> oldContent);
+diff --git a/src/gpu/ShaderCaps.cpp b/src/gpu/ShaderCaps.cpp
+index 759981e..9f3bdde 100644
+--- a/src/gpu/ShaderCaps.cpp
++++ b/src/gpu/ShaderCaps.cpp
+@@ -18,6 +18,9 @@
+ 
+ #include "ShaderCaps.h"
+ #include "core/utils/Log.h"
++#if defined(__APPLE__)
++#include <TargetConditionals.h>
++#endif
+ 
+ namespace tgfx {
+ static bool HasExtension(const GPUInfo* info, const std::string& extension) {
+@@ -74,10 +77,15 @@ ShaderCaps::ShaderCaps(GPU* gpu) {
+   maxUBOSize = limits->maxUniformBufferBindingSize;
+   uboOffsetAlignment = limits->minUniformBufferOffsetAlignment;
+   if (info->backend == Backend::Metal) {
+-    // Metal natively supports framebuffer fetch via [[color(0)]] in MSL. The GLSL->SPIRV->MSL
+-    // pipeline uses Vulkan subpassInput to represent this, and SPIRV-Cross converts it to
+-    // the [[color(0)]] attribute when use_framebuffer_fetch_subpasses is enabled.
++    // The simulator does not support programmable blending, even on an Apple Silicon host.
++    // Use the destination-copy path there instead of generating an unsupported [[color(0)]]
++    // fragment input. This also applies to Clear, which uses the transfer processor.
++#if defined(__APPLE__) && TARGET_OS_SIMULATOR
++    frameBufferFetchSupport = false;
++#else
++    // The GLSL->SPIRV->MSL pipeline represents framebuffer fetch with subpassInput.
+     frameBufferFetchSupport = true;
++#endif
+     frameBufferFetchUsesSubpassInput = true;
+   } else if (info->backend == Backend::WebGPU) {
+     // WebGPU does not support framebuffer fetch. The shader generation path uses subpassInput
+diff --git a/src/gpu/VertexProvider.cpp b/src/gpu/VertexProvider.cpp
+index 85bdc0e..75c1241 100644
+--- a/src/gpu/VertexProvider.cpp
++++ b/src/gpu/VertexProvider.cpp
+@@ -31,9 +31,15 @@ void VertexProviderTask::onCancel() {
+ }
+ 
+ AsyncVertexSource::~AsyncVertexSource() {
++  // Cancel every queued provider before waiting: wait() alone can execute queued
++  // work inline. Executing providers still own raw pointers into the vertex data
++  // and placement objects in the drawing allocator, so both must outlive this join.
+   for (auto& task : tasks) {
+     task->cancel();
+   }
++  for (auto& task : tasks) {
++    task->wait();
++  }
+ }
+ 
+ std::shared_ptr<Data> AsyncVertexSource::getData() const {
+diff --git a/src/gpu/proxies/ResourceProxy.h b/src/gpu/proxies/ResourceProxy.h
+index 2f775a6..502ff75 100644
+--- a/src/gpu/proxies/ResourceProxy.h
++++ b/src/gpu/proxies/ResourceProxy.h
+@@ -48,6 +48,9 @@ class ResourceProxy {
+   Context* context = nullptr;
+   mutable std::shared_ptr<Resource> resource = nullptr;
+   UniqueKey uniqueKey;
++  // Immutable shared uploads may outlive their cache entry while queued draws
++  // retain this proxy. Keep the classification for the proxy's entire lifetime.
++  bool sharedImmutableUpload = false;
+ 
+   explicit ResourceProxy(std::shared_ptr<Resource> resource) : resource(std::move(resource)) {
+   }
+@@ -57,6 +60,7 @@ class ResourceProxy {
+   friend class ResourceTask;
+   friend class ShapeBufferUploadTask;
+   friend class ProxyProvider;
++  friend class GlobalCache;
+   friend class GPUHairlineProxy;
+   friend class HairlineBufferUploadTask;
+ };
+diff --git a/src/gpu/tasks/AtlasUploadTask.cpp b/src/gpu/tasks/AtlasUploadTask.cpp
+index 3b9b989..1aff123 100644
+--- a/src/gpu/tasks/AtlasUploadTask.cpp
++++ b/src/gpu/tasks/AtlasUploadTask.cpp
+@@ -43,8 +43,12 @@ class AsyncCellUploadTask : public Task, public CellUploadTask {
+ 
+   ~AsyncCellUploadTask() override {
+     Task::cancel();
++    Task::wait();
+   }
+ 
++  void cancelPending() override { Task::cancel(); }
++  void waitUntilFinished() override { Task::wait(); }
++
+  protected:
+   void onExecute() override {
+     DEBUG_ASSERT(imageCodec != nullptr)
+@@ -86,6 +90,16 @@ AtlasUploadTask::AtlasUploadTask(std::shared_ptr<TextureProxy> proxy)
+ }
+ 
+ AtlasUploadTask::~AtlasUploadTask() {
++  // TaskQueue may still retain the cells after this owner drops its references.
++  // Join outside any Task/TaskPool lock, BEFORE releasing the hardware lock or
++  // returning control to DrawingBuffer, which can free the cells' allocator.
++  for (auto& task : cellTasks) {
++    task->cancelPending();
++  }
++  for (auto& task : cellTasks) {
++    task->waitUntilFinished();
++  }
++  cellTasks.clear();
+   if (hardwarePixels != nullptr) {
+     auto hardwareBuffer = textureProxy->getHardwareBuffer();
+     DEBUG_ASSERT(hardwareBuffer != nullptr);
+diff --git a/src/gpu/tasks/AtlasUploadTask.h b/src/gpu/tasks/AtlasUploadTask.h
+index 3565bc7..4547a10 100644
+--- a/src/gpu/tasks/AtlasUploadTask.h
++++ b/src/gpu/tasks/AtlasUploadTask.h
+@@ -33,6 +33,11 @@ class CellUploadTask {
+   virtual ~CellUploadTask() = default;
+ 
+   virtual void upload(std::shared_ptr<Texture> texture, CommandQueue* queue) = 0;
++
++  // Direct uploads have no workers. Async uploads override both phases so the
++  // owner can cancel all queued writers, then join executing writers.
++  virtual void cancelPending() {}
++  virtual void waitUntilFinished() {}
+ };
+ 
+ class AtlasUploadTask {
+diff --git a/src/gpu/tasks/ResourceTask.h b/src/gpu/tasks/ResourceTask.h
+index 15b7b9f..b81d4b1 100644
+--- a/src/gpu/tasks/ResourceTask.h
++++ b/src/gpu/tasks/ResourceTask.h
+@@ -44,5 +44,6 @@ class ResourceTask {
+   std::shared_ptr<ResourceProxy> proxy = nullptr;
+ 
+   friend class DrawingManager;
++  friend class DrawingBuffer;
+ };
+ }  // namespace tgfx

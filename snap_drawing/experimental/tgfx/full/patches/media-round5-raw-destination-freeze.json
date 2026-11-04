@@ -1,0 +1,22 @@
+{
+  "source_only": true,
+  "registered_cases": 97,
+  "previous_case_bodies_unchanged": 96,
+  "new_cases": 1,
+  "fixture_manifest_entries": 52,
+  "all_fixture_and_font_hashes_unchanged": true,
+  "production_delta": "Image::canReadPixels admits destination bytes before matching raw shortcut; no F16 staging charged for exact raw copies",
+  "destination_capacity_bytes": 134217728,
+  "consumer_rebuild_required": true,
+  "vendor_changes": false,
+  "native_archive_rebuild_required": false,
+  "native_execution_performed": false,
+  "prior_evidence": "before-round5-raw-destination/freeze.json",
+  "files": {
+    "snap_drawing/src/snap_drawing/cpp/Utils/Image.cpp": "52a536fff2257b138908546313384d0ff4bb6f12085fa78b20f233fa2175e55c",
+    "snap_drawing/experimental/tgfx/full/tests/media_checks.cpp": "30bdcfc8ba4426ce5de231fbeaf559561d603f381531f89abc563be6afac0b9e",
+    "snap_drawing/experimental/tgfx/README.md": "cac0dad1af32a0f446568e6bbc188bb4766922b624dc2698ae9ff7c3fbcb195c",
+    "snap_drawing/experimental/tgfx/full/tests/media-data/PROVENANCE.md": "667341300e126a75f0fd39a468e59ec404548bfbe320610347c918a4f2a545ed"
+  },
+  "fixture_manifest_sha256": "83312a8fd70d753d4aeea26de32f077f80cca1479f4cedcf1e3e014577a9e2f6"
+}

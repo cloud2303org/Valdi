@@ -1,0 +1,443 @@
+diff --git a/src/core/codecs/jpeg/JpegCodec.cpp b/src/core/codecs/jpeg/JpegCodec.cpp
+index aa2cd0f..b7f2c7b 100644
+--- a/src/core/codecs/jpeg/JpegCodec.cpp
++++ b/src/core/codecs/jpeg/JpegCodec.cpp
+@@ -18,6 +18,9 @@
+ 
+ #include "core/codecs/jpeg/JpegCodec.h"
+ #include <csetjmp>
++#include <cstdlib>
++#include <limits>
++#include <type_traits>
+ #include "core/utils/ColorSpaceHelper.h"
+ #include "core/utils/Log.h"
+ #include "core/utils/MathExtra.h"
+@@ -70,11 +73,68 @@ static Orientation get_exif_orientation(jpeg_decompress_struct* dinfo) {
+   return Orientation::TopLeft;
+ }
+ 
+-struct my_error_mgr {
+-  struct jpeg_error_mgr pub;
+-  jmp_buf setjmp_buffer;
++struct JpegCallError {
++  jpeg_error_mgr pub;
++  std::jmp_buf jump;
++  jpeg_error_mgr* previous;
+ };
+ 
++extern "C" {
++static void RecoverJpegError(j_common_ptr cinfo) {
++  auto* error = reinterpret_cast<JpegCallError*>(cinfo->err);
++  // Retain the normal diagnostic; replace only the process-exiting control flow.
++  (*cinfo->err->output_message)(cinfo);
++  std::longjmp(error->jump, 1);
++}
++
++static void RecoverJpegWarning(j_common_ptr cinfo, int level) {
++  auto* error = reinterpret_cast<JpegCallError*>(cinfo->err);
++  (*error->previous->emit_message)(cinfo, level);
++  // libjpeg otherwise inserts a fabricated EOI and can return successful
++  // partial pixels for an incomplete header/entropy stream. Keep warnings
++  // visible, but report these specific incomplete-input conditions as failure.
++  if (level < 0 &&
++      (cinfo->err->msg_code == JWRN_JPEG_EOF || cinfo->err->msg_code == JWRN_HIT_MARKER)) {
++    std::longjmp(error->jump, 1);
++  }
++}
++}
++
++// The jump target covers ONE C-only operation, never an enclosing decode or
++// encode function. Bitmap/Pixmap/vector/shared_ptr lifetimes remain in the
++// caller frame, which is not unwound by a libjpeg error. The operation must
++// capture only trivial state and must not create C++ objects or call C++ code.
++template <typename CInfo, typename Operation>
++static bool JpegCall(CInfo* cinfo, Operation operation) {
++  static_assert(std::is_trivially_copyable<Operation>::value,
++                "JPEG operations may capture only trivial state");
++  static_assert(std::is_trivially_destructible<Operation>::value,
++                "JPEG operations must not require unwinding");
++  auto* previous = cinfo->err;
++  JpegCallError error = {};
++  error.pub = *previous;
++  error.previous = previous;
++  error.pub.error_exit = RecoverJpegError;
++  error.pub.emit_message = RecoverJpegWarning;
++  cinfo->err = &error.pub;
++  if (setjmp(error.jump) != 0) {
++    // Do not inspect error.pub after longjmp: libjpeg modified this automatic
++    // object after setjmp, so its value is indeterminate on this branch.
++    cinfo->err = previous;
++    return false;
++  }
++  operation();
++  // Preserve ordinary warning counts/messages without retaining stack-local
++  // callbacks or a jump buffer after this guarded call returns.
++  const auto errorExit = previous->error_exit;
++  const auto emitMessage = previous->emit_message;
++  *previous = error.pub;
++  previous->error_exit = errorExit;
++  previous->emit_message = emitMessage;
++  cinfo->err = previous;
++  return true;
++}
++
+ std::shared_ptr<ImageCodec> JpegCodec::MakeFrom(const std::string& filePath) {
+   return MakeFromData(filePath, nullptr);
+ }
+@@ -108,21 +168,33 @@ std::shared_ptr<ImageCodec> JpegCodec::MakeFromData(const std::string& filePath,
+     return nullptr;
+   }
+   jpeg_decompress_struct cinfo = {};
+-  my_error_mgr jerr = {};
+-  cinfo.err = jpeg_std_error(&jerr.pub);
++  jpeg_error_mgr jerr = {};
++  cinfo.err = jpeg_std_error(&jerr);
+   Orientation orientation = Orientation::TopLeft;
+   std::shared_ptr<ColorSpace> cs = nullptr;
++  int imageWidth = 0;
++  int imageHeight = 0;
++  bool success = false;
+   do {
+-    if (setjmp(jerr.setjmp_buffer)) break;
+-    jpeg_create_decompress(&cinfo);
++    if (!JpegCall(&cinfo, [&cinfo] { jpeg_create_decompress(&cinfo); })) break;
+     if (infile) {
+-      jpeg_stdio_src(&cinfo, infile);
++      if (!JpegCall(&cinfo, [&cinfo, infile] { jpeg_stdio_src(&cinfo, infile); })) break;
+     } else {
+-      jpeg_mem_src(&cinfo, byteData->bytes(), byteData->size());
++      const auto* bytes = byteData->bytes();
++      const auto size = byteData->size();
++      if (size > std::numeric_limits<unsigned long>::max()) break;
++      if (!JpegCall(&cinfo, [&cinfo, bytes, size] { jpeg_mem_src(&cinfo, bytes, size); })) break;
+     }
+-    jpeg_save_markers(&cinfo, kExifMarker, 0xFFFF);
+-    jpeg_save_markers(&cinfo, JPEG_APP0 + 2, 0xFFFF);
+-    if (jpeg_read_header(&cinfo, TRUE) != JPEG_HEADER_OK) break;
++    if (!JpegCall(&cinfo, [&cinfo] { jpeg_save_markers(&cinfo, kExifMarker, 0xFFFF); })) break;
++    if (!JpegCall(&cinfo, [&cinfo] { jpeg_save_markers(&cinfo, JPEG_APP0 + 2, 0xFFFF); })) break;
++    int header = 0;
++    if (!JpegCall(&cinfo, [&cinfo, &header] { header = jpeg_read_header(&cinfo, TRUE); }) ||
++        header != JPEG_HEADER_OK) break;
++    if (cinfo.image_width > static_cast<JDIMENSION>(std::numeric_limits<int>::max()) ||
++        cinfo.image_height > static_cast<JDIMENSION>(std::numeric_limits<int>::max())) break;
++    imageWidth = static_cast<int>(cinfo.image_width);
++    imageHeight = static_cast<int>(cinfo.image_height);
++    if (!ImageInfo::IsValidSize(imageWidth, imageHeight)) break;
+     orientation = get_exif_orientation(&cinfo);
+     std::vector<uint8_t> iccProfileData;
+     if (ExtractICCProfile(&cinfo, iccProfileData)) {
+@@ -131,15 +203,15 @@ std::shared_ptr<ImageCodec> JpegCodec::MakeFromData(const std::string& filePath,
+     if (!cs) {
+       cs = ColorSpace::SRGB();
+     }
++    success = true;
+   } while (false);
+-  jpeg_destroy_decompress(&cinfo);
++  const auto destroyed = JpegCall(&cinfo, [&cinfo] { jpeg_destroy_decompress(&cinfo); });
+   if (infile) fclose(infile);
+-  if (cinfo.image_width == 0 || cinfo.image_height == 0) {
++  if (!success || !destroyed) {
+     return nullptr;
+   }
+   return std::shared_ptr<ImageCodec>(
+-      new JpegCodec(static_cast<int>(cinfo.image_width), static_cast<int>(cinfo.image_height),
+-                    orientation, filePath, std::move(byteData), std::move(cs)));
++      new JpegCodec(imageWidth, imageHeight, orientation, filePath, std::move(byteData), std::move(cs)));
+ }
+ 
+ static bool ConvertCMYKWithProfile(void* dst, const gfx::skcms_ICCProfile& cmykProfile,
+@@ -284,20 +356,24 @@ bool JpegCodec::readScaledPixels(ColorType colorType, AlphaType alphaType, size_
+     return false;
+   }
+   jpeg_decompress_struct cinfo = {};
+-  my_error_mgr jerr = {};
+-  cinfo.err = jpeg_std_error(&jerr.pub);
++  jpeg_error_mgr jerr = {};
++  cinfo.err = jpeg_std_error(&jerr);
+   bool result = false;
+   do {
+-    if (setjmp(jerr.setjmp_buffer)) break;
+-    jpeg_create_decompress(&cinfo);
++    if (!JpegCall(&cinfo, [&cinfo] { jpeg_create_decompress(&cinfo); })) break;
+     if (infile) {
+-      jpeg_stdio_src(&cinfo, infile);
++      if (!JpegCall(&cinfo, [&cinfo, infile] { jpeg_stdio_src(&cinfo, infile); })) break;
+     } else {
+-      jpeg_mem_src(&cinfo, fileData->bytes(), fileData->size());
++      const auto* bytes = fileData->bytes();
++      const auto size = fileData->size();
++      if (size > std::numeric_limits<unsigned long>::max()) break;
++      if (!JpegCall(&cinfo, [&cinfo, bytes, size] { jpeg_mem_src(&cinfo, bytes, size); })) break;
+     }
+-    jpeg_save_markers(&cinfo, JPEG_APP0 + 1, 0xFFFF);
+-    jpeg_save_markers(&cinfo, JPEG_APP0 + 2, 0xFFFF);
+-    if (jpeg_read_header(&cinfo, TRUE) != JPEG_HEADER_OK) {
++    if (!JpegCall(&cinfo, [&cinfo] { jpeg_save_markers(&cinfo, JPEG_APP0 + 1, 0xFFFF); })) break;
++    if (!JpegCall(&cinfo, [&cinfo] { jpeg_save_markers(&cinfo, JPEG_APP0 + 2, 0xFFFF); })) break;
++    int header = 0;
++    if (!JpegCall(&cinfo, [&cinfo, &header] { header = jpeg_read_header(&cinfo, TRUE); }) ||
++        header != JPEG_HEADER_OK) {
+       break;
+     }
+     cinfo.scale_num = scaleNum;
+@@ -305,8 +381,13 @@ bool JpegCodec::readScaledPixels(ColorType colorType, AlphaType alphaType, size_
+     cinfo.out_color_space = out_color_space;
+     if (cinfo.jpeg_color_space == JCS_CMYK || cinfo.jpeg_color_space == JCS_YCCK) {
+       cinfo.out_color_space = JCS_CMYK;
++      // CMYK scanlines always contain four bytes per pixel. Convert through a
++      // real native bitmap when the caller requested Gray/RGB565/F16/etc.
++      needsBitmapConversion = colorType != ColorType::RGBA_8888 && colorType != ColorType::BGRA_8888;
+     }
+-    if (!jpeg_start_decompress(&cinfo)) {
++    boolean started = FALSE;
++    if (!JpegCall(&cinfo, [&cinfo, &started] { started = jpeg_start_decompress(&cinfo); }) ||
++        !started) {
+       break;
+     }
+ #ifdef DEBUG
+@@ -321,6 +402,10 @@ bool JpegCodec::readScaledPixels(ColorType colorType, AlphaType alphaType, size_
+     auto dstHeight = static_cast<int>(cinfo.output_height);
+     auto dstInfo =
+         ImageInfo::Make(dstWidth, dstHeight, colorType, alphaType, dstRowBytes, dstColorSpace);
++    if (dstInfo.isEmpty() ||
++        dstInfo.rowBytes() > std::numeric_limits<size_t>::max() / static_cast<size_t>(dstHeight)) {
++      break;
++    }
+     auto outPixels = dstPixels;
+     auto outRowBytes = dstRowBytes;
+     Bitmap bitmap = {};
+@@ -334,40 +419,50 @@ bool JpegCodec::readScaledPixels(ColorType colorType, AlphaType alphaType, size_
+       outPixels = pixmap.writablePixels();
+       outRowBytes = pixmap.rowBytes();
+     }
+-    JSAMPROW pRow[1];
++    bool scanlinesComplete = true;
+     while (cinfo.output_scanline < cinfo.output_height) {
+-      pRow[0] = static_cast<JSAMPROW>(static_cast<unsigned char*>(outPixels) +
+-                                      outRowBytes * static_cast<size_t>(cinfo.output_scanline));
+-      jpeg_read_scanlines(&cinfo, pRow, 1);
++      auto* row = static_cast<unsigned char*>(outPixels) +
++                  outRowBytes * static_cast<size_t>(cinfo.output_scanline);
++      JDIMENSION read = 0;
++      if (!JpegCall(&cinfo, [&cinfo, &row, &read] { read = jpeg_read_scanlines(&cinfo, &row, 1); }) ||
++          read != 1) {
++        scanlinesComplete = false;
++        break;
++      }
+     }
++    if (!scanlinesComplete) break;
+     if (cinfo.out_color_space == JCS_CMYK) {
+       bool converted = false;
+       std::vector<uint8_t> iccProfileData;
++      const auto& cmykInfo = pixmap.isEmpty() ? dstInfo : pixmap.info();
+       if (ExtractICCProfile(&cinfo, iccProfileData)) {
+         gfx::skcms_ICCProfile cmykProfile;
+         if (ParseICCProfile(iccProfileData, &cmykProfile)) {
+-          converted = ConvertCMYKWithProfile(outPixels, cmykProfile, dstInfo);
++          converted = ConvertCMYKWithProfile(outPixels, cmykProfile, cmykInfo);
+         }
+       }
+       if (!converted) {
+-        ConvertCMYKToRGBWithFormula(outPixels, dstInfo);
++        ConvertCMYKToRGBWithFormula(outPixels, cmykInfo);
+       }
+     }
+-    result = jpeg_finish_decompress(&cinfo);
+-    if (result) {
+-      if (!pixmap.isEmpty()) {
+-        pixmap.readPixels(dstInfo, dstPixels);
+-      } else if (NeedConvertColorSpace(colorSpace(), dstColorSpace)) {
++    boolean finished = FALSE;
++    if (!JpegCall(&cinfo, [&cinfo, &finished] { finished = jpeg_finish_decompress(&cinfo); }) ||
++        !finished) break;
++    if (!pixmap.isEmpty()) {
++      result = pixmap.readPixels(dstInfo, dstPixels);
++    } else {
++      if (NeedConvertColorSpace(colorSpace(), dstColorSpace)) {
+         ConvertColorSpaceInPlace(dstWidth, dstHeight, colorType, alphaType, dstRowBytes,
+                                  colorSpace(), dstColorSpace, dstPixels);
+       }
++      result = true;
+     }
+   } while (false);
+-  jpeg_destroy_decompress(&cinfo);
++  const auto destroyed = JpegCall(&cinfo, [&cinfo] { jpeg_destroy_decompress(&cinfo); });
+   if (infile) {
+     fclose(infile);
+   }
+-  return result;
++  return result && destroyed;
+ }
+ 
+ std::shared_ptr<Data> JpegCodec::getEncodedData() const {
+@@ -381,64 +476,132 @@ std::shared_ptr<Data> JpegCodec::getEncodedData() const {
+ }
+ 
+ #ifdef TGFX_USE_JPEG_ENCODE
++// libjpeg's stock jpeg_mem_dest publishes its grown buffer only at finish.
++// A fatal error after a grow can therefore leave the caller with a stale
++// pointer. Keep the current allocation in caller-owned state on every grow.
++struct JpegOutput {
++  jpeg_destination_mgr pub;
++  unsigned char* bytes = nullptr;
++  size_t capacity = 0;
++  size_t length = 0;
++};
++
++extern "C" {
++static void InitJpegOutput(j_compress_ptr cinfo) {
++  auto* output = reinterpret_cast<JpegOutput*>(cinfo->dest);
++  if (output->bytes == nullptr) {
++    output->capacity = 4096;
++    output->bytes = static_cast<unsigned char*>(std::malloc(output->capacity));
++    if (output->bytes == nullptr) ERREXIT1(cinfo, JERR_OUT_OF_MEMORY, 10);
++  }
++  output->length = 0;
++  output->pub.next_output_byte = output->bytes;
++  output->pub.free_in_buffer = output->capacity;
++}
++
++static boolean GrowJpegOutput(j_compress_ptr cinfo) {
++  auto* output = reinterpret_cast<JpegOutput*>(cinfo->dest);
++  if (output->capacity > std::numeric_limits<size_t>::max() / 2) {
++    ERREXIT1(cinfo, JERR_OUT_OF_MEMORY, 10);
++  }
++  const auto nextCapacity = output->capacity * 2;
++  auto* bytes = static_cast<unsigned char*>(std::realloc(output->bytes, nextCapacity));
++  if (bytes == nullptr) ERREXIT1(cinfo, JERR_OUT_OF_MEMORY, 10);
++  output->bytes = bytes;
++  output->pub.next_output_byte = bytes + output->capacity;
++  output->pub.free_in_buffer = nextCapacity - output->capacity;
++  output->capacity = nextCapacity;
++  return TRUE;
++}
++
++static void FinishJpegOutput(j_compress_ptr cinfo) {
++  auto* output = reinterpret_cast<JpegOutput*>(cinfo->dest);
++  output->length = output->capacity - output->pub.free_in_buffer;
++}
++}
++
+ std::shared_ptr<Data> JpegCodec::Encode(const Pixmap& pixmap, int quality) {
++  if (pixmap.isEmpty() || pixmap.pixels() == nullptr) return nullptr;
+   auto srcPixels = static_cast<uint8_t*>(const_cast<void*>(pixmap.pixels()));
+-  int srcRowBytes = static_cast<int>(pixmap.rowBytes());
+-  jpeg_compress_struct cinfo = {};
+-  jpeg_error_mgr jerr = {};
+-  JSAMPROW row_pointer[1];
+-  cinfo.err = jpeg_std_error(&jerr);
+-  jpeg_create_compress(&cinfo);
+-  uint8_t* dstBuffer = nullptr;
+-  unsigned long dstBufferSize = 0;  // NOLINT
+-  jpeg_mem_dest(&cinfo, &dstBuffer, &dstBufferSize);
+-  cinfo.image_width = static_cast<JDIMENSION>(pixmap.width());
+-  cinfo.image_height = static_cast<JDIMENSION>(pixmap.height());
++  size_t srcRowBytes = pixmap.rowBytes();
+   Buffer buffer = {};
++  J_COLOR_SPACE inputColorSpace;
++  int inputComponents;
+   switch (pixmap.colorType()) {
+     case ColorType::RGBA_8888:
+-      cinfo.in_color_space = JCS_EXT_RGBA;
+-      cinfo.input_components = 4;
++      inputColorSpace = JCS_EXT_RGBA;
++      inputComponents = 4;
+       break;
+     case ColorType::BGRA_8888:
+-      cinfo.in_color_space = JCS_EXT_BGRA;
+-      cinfo.input_components = 4;
++      inputColorSpace = JCS_EXT_BGRA;
++      inputComponents = 4;
+       break;
+     case ColorType::Gray_8:
+-      cinfo.in_color_space = JCS_GRAYSCALE;
+-      cinfo.input_components = 1;
++      inputColorSpace = JCS_GRAYSCALE;
++      inputComponents = 1;
+       break;
+     default:
+       auto info = ImageInfo::Make(pixmap.width(), pixmap.height(), ColorType::RGBA_8888,
+                                   AlphaType::Premultiplied, 0, pixmap.colorSpace());
+-      buffer.alloc(info.byteSize());
+-      if (buffer.isEmpty()) {
++      if (info.isEmpty() || !buffer.alloc(info.byteSize())) {
+         return nullptr;
+       }
+       srcPixels = buffer.bytes();
+-      srcRowBytes = static_cast<int>(info.rowBytes());
+-      Pixmap(info, srcPixels).writePixels(pixmap.info(), pixmap.pixels());
+-      cinfo.in_color_space = JCS_EXT_RGBA;
+-      cinfo.input_components = 4;
++      srcRowBytes = info.rowBytes();
++      if (!Pixmap(info, srcPixels).writePixels(pixmap.info(), pixmap.pixels())) return nullptr;
++      inputColorSpace = JCS_EXT_RGBA;
++      inputComponents = 4;
+       break;
+   }
+-  jpeg_set_defaults(&cinfo);
+-  cinfo.optimize_coding = TRUE;
+-  jpeg_set_quality(&cinfo, quality, TRUE);
+-  jpeg_start_compress(&cinfo, TRUE);
++  std::shared_ptr<Data> iccData;
+   if (pixmap.colorSpace()) {
+-    auto iccData = pixmap.colorSpace()->toICCProfile();
+-    jpeg_write_icc_profile(&cinfo, iccData->bytes(), static_cast<uint32_t>(iccData->size()));
++    iccData = pixmap.colorSpace()->toICCProfile();
++    if (!iccData || iccData->size() > std::numeric_limits<uint32_t>::max()) return nullptr;
+   }
+-  while (cinfo.next_scanline < cinfo.image_height) {
+-    row_pointer[0] = &(srcPixels)[cinfo.next_scanline * static_cast<JDIMENSION>(srcRowBytes)];
+-    (void)jpeg_write_scanlines(&cinfo, row_pointer, 1);
++  jpeg_compress_struct cinfo = {};
++  jpeg_error_mgr jerr = {};
++  cinfo.err = jpeg_std_error(&jerr);
++  JpegOutput output = {};
++  output.pub.init_destination = InitJpegOutput;
++  output.pub.empty_output_buffer = GrowJpegOutput;
++  output.pub.term_destination = FinishJpegOutput;
++  bool success = false;
++  do {
++    if (!JpegCall(&cinfo, [&cinfo] { jpeg_create_compress(&cinfo); })) break;
++    cinfo.dest = &output.pub;
++    cinfo.image_width = static_cast<JDIMENSION>(pixmap.width());
++    cinfo.image_height = static_cast<JDIMENSION>(pixmap.height());
++    cinfo.in_color_space = inputColorSpace;
++    cinfo.input_components = inputComponents;
++    if (!JpegCall(&cinfo, [&cinfo] { jpeg_set_defaults(&cinfo); })) break;
++    cinfo.optimize_coding = TRUE;
++    if (!JpegCall(&cinfo, [&cinfo, quality] { jpeg_set_quality(&cinfo, quality, TRUE); })) break;
++    if (!JpegCall(&cinfo, [&cinfo] { jpeg_start_compress(&cinfo, TRUE); })) break;
++    if (iccData) {
++      const auto* bytes = iccData->bytes();
++      const auto size = static_cast<uint32_t>(iccData->size());
++      if (!JpegCall(&cinfo, [&cinfo, bytes, size] { jpeg_write_icc_profile(&cinfo, bytes, size); })) break;
++    }
++    bool scanlinesComplete = true;
++    while (cinfo.next_scanline < cinfo.image_height) {
++      auto* row = srcPixels + static_cast<size_t>(cinfo.next_scanline) * srcRowBytes;
++      JDIMENSION written = 0;
++      if (!JpegCall(&cinfo, [&cinfo, &row, &written] { written = jpeg_write_scanlines(&cinfo, &row, 1); }) ||
++          written != 1) {
++        scanlinesComplete = false;
++        break;
++      }
++    }
++    if (!scanlinesComplete) break;
++    if (!JpegCall(&cinfo, [&cinfo] { jpeg_finish_compress(&cinfo); })) break;
++    success = true;
++  } while (false);
++  const auto destroyed = JpegCall(&cinfo, [&cinfo] { jpeg_destroy_compress(&cinfo); });
++  if (!success || !destroyed) {
++    std::free(output.bytes);
++    return nullptr;
+   }
+-
+-  /* similar to read file, clean up after we're done compressing */
+-  jpeg_finish_compress(&cinfo);
+-  jpeg_destroy_compress(&cinfo);
+-  return Data::MakeAdopted(dstBuffer, dstBufferSize, Data::FreeProc);
++  return Data::MakeAdopted(output.bytes, output.length, Data::FreeProc);
+ }
+ #endif
+ 

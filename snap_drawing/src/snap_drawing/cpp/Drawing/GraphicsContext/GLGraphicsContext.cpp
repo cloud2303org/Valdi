@@ -1,3 +1,6 @@
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+#include "snap_drawing/cpp/Drawing/GraphicsContext/TGFXGLGraphicsContextImpl.hpp"
+#else
 //
 //  GLGraphicsContext.cpp
 //  snap_drawing
@@ -149,3 +152,5 @@ Ref<GLDrawableSurface> GLGraphicsContext::createSurfaceWrappingTexture(GrGLuint 
 } // namespace snap::drawing
 
 #endif
+
+#endif // SNAP_DRAWING_TGFX_EXPERIMENT

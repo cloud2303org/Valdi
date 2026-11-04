@@ -1,0 +1,16 @@
+steps:
+  - launch: io.valdiroutes.tgfxapp
+  - tool: await-ui-element
+    args:
+      condition: visible
+      selector:
+        identifier: tgfx-app-status
+      timeoutMs: 15000
+  - tool: await-ui-element
+    args:
+      condition: text
+      selector:
+        identifier: tgfx-app-status
+      expectedText: FAIL 9/9 root=native
+      textMatch: equals
+      timeoutMs: 5000

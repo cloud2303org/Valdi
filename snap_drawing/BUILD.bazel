@@ -9,6 +9,52 @@ COMPILER_FLAGS = [
     "-Wno-deprecated-this-capture",
 ]
 
+config_setting(
+    name = "tgfx_backend",
+    define_values = {"snap_drawing_backend": "tgfx"},
+    visibility = ["//visibility:public"],
+)
+
+# Keep every Skia library on this side of the switch, including codecs,
+# skottie/SVG, platform font managers, and Ganesh.
+cc_library(
+    name = "skia_backend",
+    deps = [
+        "@skia//:core",
+        "@skia//:gif_decode_codec",
+        "@skia//:jpeg_decode_codec",
+        "@skia//:jpeg_encode_codec",
+        "@skia//:png_decode_codec",
+        "@skia//:png_encode_codec",
+        "@skia//:skottie",
+        "@skia//:svg_renderer",
+        "@skia//:webp_decode_codec",
+        "@skia//:webp_encode_codec",
+    ] + select({
+        "//bzl/conditions:ios": [
+            "@skia//:fontmgr_coretext",
+            "@skia//:ganesh_metal",
+        ],
+        "//bzl/conditions:macos": [
+            "@skia//:fontmgr_coretext",
+            "@skia//:ganesh_metal",
+        ],
+        "//bzl/conditions:android_with_jni": [
+            "@skia//:fontmgr_android_freetype",
+            "@skia//:ganesh_egl_factory",
+            "@skia//:ganesh_gl",
+        ],
+        "@snap_platforms//conditions:android": [
+            "@skia//:fontmgr_android_freetype",
+            "@skia//:ganesh_egl_factory",
+            "@skia//:ganesh_gl",
+        ],
+        "//conditions:default": [
+            "@skia//:fontmgr_empty_freetype",
+        ],
+    }),
+)
+
 custom_selects.config_setting_inverse(
     name = "not_linux",
     inverse_of = "//bzl/conditions:linux",
@@ -45,7 +91,9 @@ cc_library(
     ),
     hdrs = glob(
         [
+            "src/snap_drawing/cpp/**/*.h",
             "src/snap_drawing/cpp/**/*.hpp",
+            "src/snap_drawing/cpp/**/*.inc",
         ],
         exclude = [
             "src/snap_drawing/android/**/*.hpp",
@@ -56,6 +104,15 @@ cc_library(
     defines = select({
         ":lottie_enabled": ["SNAP_DRAWING_LOTTIE_ENABLED"],
         "//conditions:default": [],
+    }) + select({
+        # Public headers change layout under this macro. `defines` (rather
+        # than local_defines/copts) exports it to valdi_snap_drawing and its
+        # downstream C++ and Objective-C++ consumers.
+        ":tgfx_backend": [
+            "SNAP_DRAWING_TGFX_EXPERIMENT",
+            "SNAP_DRAWING_TGFX_COMPLETE",
+        ],
+        "//conditions:default": [],
     }),
     linkstatic = False,
     strip_include_prefix = "src",
@@ -65,38 +122,13 @@ cc_library(
         "//valdi_core:valdi_core_cc",
         "@harfbuzz",
         "@icu",
-        "@skia//:core",
-        "@skia//:gif_decode_codec",
-        "@skia//:jpeg_decode_codec",
-        "@skia//:jpeg_encode_codec",
-        "@skia//:png_decode_codec",
-        "@skia//:png_encode_codec",
-        "@skia//:skottie",
-        "@skia//:svg_renderer",
-        "@skia//:webp_decode_codec",
-        "@skia//:webp_encode_codec",
     ] + select({
-        "//bzl/conditions:ios": [
-            "@skia//:fontmgr_coretext",
-            "@skia//:ganesh_metal",
+        ":tgfx_backend": [
+            "//third-party/tgfx:backend",
+            "@expat",
+            "@icu//:icu_data",
         ],
-        "//bzl/conditions:macos": [
-            "@skia//:fontmgr_coretext",
-            "@skia//:ganesh_metal",
-        ],
-        "//bzl/conditions:android_with_jni": [
-            "@skia//:fontmgr_android_freetype",
-            "@skia//:ganesh_egl_factory",
-            "@skia//:ganesh_gl",
-        ],
-        "@snap_platforms//conditions:android": [
-            "@skia//:fontmgr_android_freetype",
-            "@skia//:ganesh_egl_factory",
-            "@skia//:ganesh_gl",
-        ],
-        "//conditions:default": [
-            "@skia//:fontmgr_empty_freetype",
-        ],
+        "//conditions:default": [":skia_backend"],
     }),
     alwayslink = False,
 )
@@ -196,7 +228,10 @@ kt_android_library(
     ],
     deps = [
         "//valdi_core:valdi_core_java",
-    ],
+    ] + select({
+        ":tgfx_backend": ["@tgfx_android_mvn//:androidx_exifinterface_exifinterface"],
+        "//conditions:default": [],
+    }),
 )
 
 swift_interop_hint(
@@ -211,7 +246,13 @@ objc_library(
         "src/snap_drawing/apple/**/*.m",
         "src/snap_drawing/apple/**/*.mm",
         "src/snap_drawing/apple/**/*.cpp",
-    ]),
+    ]) + select({
+        # Platform font bridges may live beside their shared C++ interfaces.
+        # Compile actual Objective-C++ there using the Apple rule, never the
+        # cross-platform cc_library's C++ source glob.
+        ":tgfx_backend": glob(["src/snap_drawing/cpp/Text/**/*.mm"]),
+        "//conditions:default": [],
+    }),
     hdrs = glob([
         "src/snap_drawing/apple/**/*.h",
         "src/snap_drawing/apple/**/*.hpp",

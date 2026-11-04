@@ -1,0 +1,216 @@
+diff --git a/inc/thorvg.h b/inc/thorvg.h
+index c06ea98..0f2465d 100644
+--- a/inc/thorvg.h
++++ b/inc/thorvg.h
+@@ -1866,6 +1866,10 @@ struct TVG_API Picture : Paint
+      * @param[in] fallback If @c true, invoke the callback only after internal resolution fails.
+      *                     If @c false, invoke it first and attempt internal resolution only if it returns @c false.
+      *
++     * @param[in] strictSvgFonts If true, SVG text must use this resolver and fail loading when it
++     *                          cannot resolve a font. No named-cache or arbitrary-font fallback is used.
++     *                          The default preserves the original cache/fallback policy.
++     *
+      * @retval Result::InsufficientCondition If the picture is already loaded. The resolver is not changed.
+      *
+      * @warning This function must be called before @ref Picture::load().
+@@ -1877,7 +1881,7 @@ struct TVG_API Picture : Paint
+      *
+      * @note Experimental API
+      */
+-    Result resolver(std::function<bool(Paint* paint, const char* src, void* data)> func, void* data, bool fallback = true) noexcept;
++    Result resolver(std::function<bool(Paint* paint, const char* src, void* data)> func, void* data, bool fallback = true, bool strictSvgFonts = false) noexcept;
+ 
+     /**
+      * @brief Sets the image filtering method for rendering this picture.
+diff --git a/src/loaders/svg/tvgSvgBuilder.cpp b/src/loaders/svg/tvgSvgBuilder.cpp
+index 0ac3214..0d1a8ff 100644
+--- a/src/loaders/svg/tvgSvgBuilder.cpp
++++ b/src/loaders/svg/tvgSvgBuilder.cpp
+@@ -1051,7 +1051,7 @@ static void _applyTextBaseline(Text* text, SvgBaseline baseline, Matrix& transfo
+     text->transform(transform);
+ }
+ 
+-static Text* _buildText(const SvgTextNode* textNode, SvgXmlSpace xmlSpace, const Matrix* transform, SvgBaseline baseline)
++static Text* _buildText(SvgParserContext& ctx, const SvgTextNode* textNode, SvgXmlSpace xmlSpace, const Matrix* transform, SvgBaseline baseline)
+ {
+     if (!textNode->text) return nullptr;
+ 
+@@ -1059,8 +1059,26 @@ static Text* _buildText(const SvgTextNode* textNode, SvgXmlSpace xmlSpace, const
+ 
+     //TODO: handle def values of font and size as used in a system?
+     auto size = textNode->fontSize * 0.75f; //1 pt = 1/72; 1 in = 96 px; -> 72/96 = 0.75
+-    if (text->font(textNode->fontFamily) != Result::Success) {
+-        text->font(nullptr);         //fallback to any available font
++    auto resolver = ctx.resolver;
++    auto resolve = [&]() {
++        auto family = textNode->fontFamily ? textNode->fontFamily : "sans-serif";
++        auto source = string("name:") + family;
++        return resolver->func(text, source.c_str(), resolver->data);
++    };
++    bool resolved = false;
++    if (resolver && resolver->strictSvgFonts) {
++        // Asset-owned resolution must not inherit another Picture's cache.
++        resolved = resolve();
++        if (!resolved) {
++            ctx.fontResolutionFailed = true;
++            Paint::rel(text);
++            return nullptr;
++        }
++    } else {
++        resolved = resolver && !resolver->fallback && resolve();
++        if (!resolved) resolved = (text->font(textNode->fontFamily) == Result::Success);
++        if (!resolved && resolver && resolver->fallback) resolved = resolve();
++        if (!resolved) text->font(nullptr); // original available-font fallback
+     }
+     text->size(size);
+ 
+@@ -1163,7 +1181,7 @@ static void _buildTspanScene(SvgParserContext& ctx, const SvgNode* node, Scene*
+             if (textNode.x == FLT_MAX) textNode.x = textPos.x;
+             if (textNode.y == FLT_MAX) textNode.y = textPos.y;
+ 
+-            auto text = _buildText(&textNode, xmlSpace, nullptr, _effectiveBaseline(child->style));
++            auto text = _buildText(ctx, &textNode, xmlSpace, nullptr, _effectiveBaseline(child->style));
+             if (text) {
+                 text->align(child->style->textAnchor, 0.0f);
+                 auto spacingScale = _applySpacing(text, child->style->letterSpacing, child->style->wordSpacing);
+@@ -1190,7 +1208,7 @@ static Paint* _textBuildHelper(SvgParserContext& ctx, const SvgNode* node, const
+     if (xmlSpace == SvgXmlSpace::None) xmlSpace = SvgXmlSpace::Default;
+ 
+     if (!_hasPositionedTspan(node, 0)) {
+-        auto text = _buildText(textNode, xmlSpace, node->transform, _effectiveBaseline(node->style));
++        auto text = _buildText(ctx, textNode, xmlSpace, node->transform, _effectiveBaseline(node->style));
+         if (!text) return nullptr;
+         text->align(node->style->textAnchor, 0.0f);
+         _applySpacing(text, node->style->letterSpacing, node->style->wordSpacing);
+@@ -1205,7 +1223,7 @@ static Paint* _textBuildHelper(SvgParserContext& ctx, const SvgNode* node, const
+ 
+     Point textPos = {textNode->x, textNode->y};
+ 
+-    if (auto text = _buildText(textNode, xmlSpace, nullptr, _effectiveBaseline(node->style))) {
++    if (auto text = _buildText(ctx, textNode, xmlSpace, nullptr, _effectiveBaseline(node->style))) {
+         text->align(node->style->textAnchor, 0.0f);
+         auto spacingScale = _applySpacing(text, node->style->letterSpacing, node->style->wordSpacing);
+         _updatePos(text, *textNode, node->style->textAnchor, spacingScale, textPos);
+diff --git a/src/loaders/svg/tvgSvgCommon.h b/src/loaders/svg/tvgSvgCommon.h
+index 2f254f3..bb265f5 100644
+--- a/src/loaders/svg/tvgSvgCommon.h
++++ b/src/loaders/svg/tvgSvgCommon.h
+@@ -28,6 +28,7 @@
+ #include "tvgInlist.h"
+ #include "tvgColor.h"
+ #include "tvgAccessor.h"
++#include "tvgLoader.h"
+ 
+ #define STR_AS(A, B) !strcmp((A), (B))
+ 
+@@ -662,6 +663,8 @@ enum struct OpenedTagType : uint8_t
+ struct SvgParserContext
+ {
+     SvgParser* parser = nullptr;
++    const tvg::AssetResolver* resolver = nullptr; // owned by the Picture
++    bool fontResolutionFailed = false;
+     SvgNode* doc = nullptr;
+     SvgNode* def = nullptr; //also used to store nested graphic nodes
+     SvgNode* cssStyle = nullptr;
+diff --git a/src/loaders/svg/tvgSvgLoader.cpp b/src/loaders/svg/tvgSvgLoader.cpp
+index 64d6e57..e64f119 100644
+--- a/src/loaders/svg/tvgSvgLoader.cpp
++++ b/src/loaders/svg/tvgSvgLoader.cpp
+@@ -4072,6 +4072,10 @@ void SvgLoader::run(unsigned tid)
+                 if (defs) _updatePattern(defs, ctx.doc, defs);
+ 
+                 root = svgSceneBuild(ctx, vbox, w, h, align, meetOrSlice, svgPath, viewFlag);
++                if (ctx.fontResolutionFailed) {
++                    Paint::rel(root);
++                    root = nullptr;
++                }
+ 
+                 //In case no viewbox and width/height data is provided the completion of loading
+                 //has to be forced, in order to establish this data based on the whole picture.
+@@ -4213,6 +4217,8 @@ Result SvgLoader::open(const char* data, uint32_t size, const LoaderOps& ops)
+     this->size = size;
+     owner = ops.owner;
+     ctx.accessible = static_cast<const PictureOps*>(&ops)->accessible;
++    ctx.resolver = static_cast<const PictureOps*>(&ops)->resolver;
++    ctx.fontResolutionFailed = false;
+ 
+     return header();
+ }
+@@ -4224,6 +4230,8 @@ Result SvgLoader::open(const char* path, const LoaderOps& ops)
+ 
+     if ((content = Loader::open(path, size, true))) {
+         ctx.accessible = static_cast<const PictureOps*>(&ops)->accessible;
++        ctx.resolver = static_cast<const PictureOps*>(&ops)->resolver;
++        ctx.fontResolutionFailed = false;
+         owner = Ownership::Transfer;
+         return header();
+     }
+@@ -4251,10 +4259,17 @@ bool SvgLoader::read()
+ {
+     if (!content || size == 0) return false;
+ 
+-    if (!Loader::read() || root) return true;
++    if (!Loader::read() || root) return !ctx.fontResolutionFailed;
+ 
+     TaskScheduler::request(this);
+ 
++    // Strict asset-owned font resolution is a load contract, not a later
++    // empty-paint success. Synchronize the SVG builder so Picture::load can
++    // report rejection before the caller publishes the asset.
++    if (ctx.resolver && ctx.resolver->strictSvgFonts) {
++        this->done();
++        return root && !ctx.fontResolutionFailed;
++    }
+     return true;
+ }
+ 
+diff --git a/src/renderer/tvgLoader.h b/src/renderer/tvgLoader.h
+index d8ff5bb..8375ab7 100644
+--- a/src/renderer/tvgLoader.h
++++ b/src/renderer/tvgLoader.h
+@@ -38,6 +38,7 @@ struct AssetResolver
+     std::function<bool(Paint* paint, const char* src, void* data)> func;
+     void* data;
+     bool fallback;
++    bool strictSvgFonts = false;
+ };
+ 
+ // Specifying how ownership of supplied data is handled.
+diff --git a/src/renderer/tvgPicture.cpp b/src/renderer/tvgPicture.cpp
+index 1781e5f..9990a9f 100644
+--- a/src/renderer/tvgPicture.cpp
++++ b/src/renderer/tvgPicture.cpp
+@@ -56,9 +56,9 @@ Result Picture::load(const uint32_t* data, uint32_t w, uint32_t h, ColorSpace cs
+     return to<PictureImpl>(this)->load(data, w, h, cs, copy ? Ownership::Copy : Ownership::Borrow);
+ }
+ 
+-Result Picture::resolver(std::function<bool(Paint* paint, const char* src, void* data)> func, void* data, bool fallback) noexcept
++Result Picture::resolver(std::function<bool(Paint* paint, const char* src, void* data)> func, void* data, bool fallback, bool strictSvgFonts) noexcept
+ {
+-    return to<PictureImpl>(this)->set(std::move(func), data, fallback);
++    return to<PictureImpl>(this)->set(std::move(func), data, fallback, strictSvgFonts);
+ }
+ 
+ 
+diff --git a/src/renderer/tvgPicture.h b/src/renderer/tvgPicture.h
+index 66fa346..82040d7 100644
+--- a/src/renderer/tvgPicture.h
++++ b/src/renderer/tvgPicture.h
+@@ -162,7 +162,7 @@ struct PictureImpl : Picture
+         return loader ? load(loader) : Result::NonSupport;
+     }
+ 
+-    Result set(std::function<bool(Paint* paint, const char* src, void* data)> resolver, void* data, bool fallback)
++    Result set(std::function<bool(Paint* paint, const char* src, void* data)> resolver, void* data, bool fallback, bool strictSvgFonts)
+     {
+         if (loader) return Result::InsufficientCondition;
+ 
+@@ -173,7 +173,7 @@ struct PictureImpl : Picture
+         }
+ 
+         if (!this->resolver) this->resolver = new AssetResolver;
+-        *(this->resolver) = {resolver, data, fallback};
++        *(this->resolver) = {resolver, data, fallback, strictSvgFonts};
+         return Result::Success;
+     }
+ 

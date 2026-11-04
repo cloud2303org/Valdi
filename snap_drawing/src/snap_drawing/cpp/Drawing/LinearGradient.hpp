@@ -56,7 +56,11 @@ public:
     void draw(DrawingContext& drawingContext, const BorderRadius& borderRadius);
 
 private:
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+    std::shared_ptr<tgfx::Shader> _shader;
+#else
     sk_sp<SkShader> _shader;
+#endif
     std::vector<Scalar> _locations;
     std::vector<Color> _colors;
     LinearGradientOrientation _orientation = LinearGradientOrientationTopBottom;

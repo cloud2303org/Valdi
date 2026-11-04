@@ -40,7 +40,11 @@ struct ComputeDamageVisitor {
     }
 
     void visit(const Operations::DrawPicture& drawPicture) {
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+        addDamageIfNeeded(drawPicture.bounds);
+#else
         addDamageIfNeeded(fromSkValue<Rect>(drawPicture.picture->cullRect()));
+#endif
     }
 
     void visit(const Operations::DrawExternalSurface& drawExternalSurface) {

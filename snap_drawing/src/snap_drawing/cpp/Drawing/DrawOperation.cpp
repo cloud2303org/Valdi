@@ -74,7 +74,14 @@ Valdi::Result<snap::drawing::GraphicsContext*> DrawOperation::drawNext() {
                        scaleY,
                        /* shouldClearCanvas */ true);
 
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+    auto completed = drawableSurface->flushWithResult();
+    if (!completed) {
+        return completed.error().rethrow("Failed to complete drawing on GraphicsContext");
+    }
+#else
     drawableSurface->flush();
+#endif
 
     _surfacePresenterManager->onDrawableSurfacePresenterUpdated(surfacePresenter.getId());
 

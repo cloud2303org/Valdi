@@ -1,0 +1,53 @@
+{
+  "schema": 1,
+  "files": {
+    "performance/summary.json": {
+      "sha256": "27704b2b0adc04575f960cdb28c2fe9438b8f516e9ccadc45af92bf27d21a756",
+      "bytes": 80009
+    },
+    "performance/RESULTS-20261104.md": {
+      "sha256": "1c20112f5e6af8cd5b50fe63c7fc6d143732ab3b695e9c5384a2f9bcaea05a9e",
+      "bytes": 9865
+    },
+    "performance/evidence.zip": {
+      "sha256": "775c16006c7ba1a9007a2e87ba20d32c41e2d9c0e884909bfbfe85df5ee3a033",
+      "bytes": 1975152
+    },
+    "performance/final-review.json": {
+      "sha256": "b51dcde8bdb634861b601d796d669cef39504b113c65736e9c2f3c291d16ef0d",
+      "bytes": 694
+    },
+    "performance/manifest.json": {
+      "sha256": "9b4b07ba7c2c4b15bae4dd5fbc35ed77afe31a1d181aa63b99208a214de2124f",
+      "bytes": 374
+    },
+    "performance/final-native-artifact-bindings.json": {
+      "sha256": "51472c6bb00c36dc4df4e235f1cb04b5d4cf13b6bfe3895482e374bf93fbb758",
+      "bytes": 2650
+    },
+    "vendor/ios_sim_arm64-prepared-manifest.json": {
+      "sha256": "7f696e0ad3084ff2b95e3c43245c3a2815ba1cf84130003637043a3752cd6612",
+      "bytes": 221812
+    },
+    "vendor/tgfx-current.patch": {
+      "sha256": "7c83628e88ef61216a4daa74400cf07e6ef9cebc9fc71a1f1deca564ff517f7b",
+      "bytes": 117552
+    },
+    "vendor/manifest.json": {
+      "sha256": "031ece8df00f70566171f065deea2b4238c413bf9fb46ea0163fc9385c8ebae3",
+      "bytes": 7902
+    },
+    "vendor/android_arm64-prepared-manifest.json": {
+      "sha256": "eb4ce22fc8fd1f9935f42dc1158c3cfc856aa5464b99cb881d76cb34b4af1695",
+      "bytes": 215459
+    },
+    "vendor/thorvg-current.patch": {
+      "sha256": "243520849f9bccf3338c829e2061d6efd87fc1b22785b8a85f6f8cd7ba16dac7",
+      "bytes": 26339
+    },
+    "vendor/macos_arm64-prepared-manifest.json": {
+      "sha256": "9b4d3213e10470c54588b9b4a76096bd153d08450ffa7f7845de1d6fb75d5c11",
+      "bytes": 217145
+    }
+  }
+}

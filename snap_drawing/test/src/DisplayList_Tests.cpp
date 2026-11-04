@@ -83,9 +83,17 @@ TEST(DisplayList, retainAndReleaseRetainableObjects) {
     // after we release our own ref
     auto* rectanglePicturePtr = rectanglePicture.get();
 
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+    ASSERT_EQ(Rect(0, 0, 50, 500), Rect::fromTgfxValue(rectanglePicturePtr->getBounds()));
+#else
     ASSERT_EQ(Rect(0, 0, 50, 500), fromSkValue<Rect>(rectanglePicturePtr->cullRect()));
+#endif
     rectanglePicture = nullptr;
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+    ASSERT_EQ(Rect(0, 0, 50, 500), Rect::fromTgfxValue(rectanglePicturePtr->getBounds()));
+#else
     ASSERT_EQ(Rect(0, 0, 50, 500), fromSkValue<Rect>(rectanglePicturePtr->cullRect()));
+#endif
 
     displayList = nullptr;
 

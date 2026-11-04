@@ -18,7 +18,6 @@
 #include "hb-ot.h"
 #include "hb.h"
 
-#include "include/core/SkStream.h"
 #include "unicode/ubidi.h"
 #include "unicode/uchar.h"
 #include <algorithm>
@@ -324,7 +323,11 @@ size_t TextShaperHarfbuzz::shape(const Character* unicodeText,
     hb_font_get_scale(hbFont, &scaleX, &scaleY);
     auto fontSize = font.getSkValue().getSize();
     double textSizeY = fontSize / scaleY;
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+    double textSizeX = fontSize / scaleX;
+#else
     double textSizeX = fontSize / scaleX * font.getSkValue().getScaleX();
+#endif
     Scalar advanceOffset = isScriptOkForLetterspacing(hb_buffer_get_script(_buffer.get())) ? letterSpacing : 0.0f;
 
     auto glyphsLength = static_cast<size_t>(glyphCount);

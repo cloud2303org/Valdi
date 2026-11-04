@@ -18,7 +18,11 @@
 #include "valdi_core/cpp/Utils/Mutex.hpp"
 #include "valdi_core/cpp/Utils/Result.hpp"
 
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+#include "snap_drawing/cpp/Utils/ThorvgMedia.hpp"
+#else
 #include "modules/skottie/include/Skottie.h"
+#endif
 
 namespace snap::drawing {
 
@@ -28,7 +32,11 @@ class IFontManager;
 
 class LottieAnimatedImage : public AnimatedImage {
 public:
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+    explicit LottieAnimatedImage(std::shared_ptr<ThorvgMedia> media);
+#else
     explicit LottieAnimatedImage(const sk_sp<skottie::Animation>& animation);
+#endif
     ~LottieAnimatedImage() override;
 
     Duration getCurrentTime() const override;
@@ -48,14 +56,16 @@ public:
     VALDI_CLASS_HEADER(LottieAnimatedImage)
 
 protected:
-    void doDraw(SkCanvas* canvas,
+    void doDraw(NativeCanvas* canvas,
                 const Rect& drawBounds,
                 const Duration& time,
                 FittingSizeMode fittingSizeMode) override;
 
 private:
     mutable Valdi::Mutex _mutex;
-#ifdef SNAP_DRAWING_LOTTIE_ENABLED
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+    std::shared_ptr<ThorvgMedia> _media;
+#elif defined(SNAP_DRAWING_LOTTIE_ENABLED)
     sk_sp<skottie::Animation> _animation;
 #endif
     Duration _duration;

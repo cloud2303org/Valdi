@@ -1,0 +1,21 @@
+{
+  "commit": "739e06dc46ebb14cddd88b9768a6c1504d4677f6",
+  "files": [
+    {
+      "name": "RobotoFlex[GRAD,XOPQ,XTRA,YOPQ,YTAS,YTDE,YTFI,YTLC,YTUC,opsz,slnt,wdth,wght].ttf",
+      "path": "fonts/RobotoFlex[GRAD,XOPQ,XTRA,YOPQ,YTAS,YTDE,YTFI,YTLC,YTUC,opsz,slnt,wdth,wght].ttf",
+      "sha": "0abe2ee29292f1b39f59103d069feda87cde585e",
+      "size": 1775480,
+      "url": "https://api.github.com/repos/googlefonts/roboto-flex/contents/fonts/RobotoFlex[GRAD,XOPQ,XTRA,YOPQ,YTAS,YTDE,YTFI,YTLC,YTUC,opsz,slnt,wdth,wght].ttf?ref=739e06dc46ebb14cddd88b9768a6c1504d4677f6",
+      "html_url": "https://github.com/googlefonts/roboto-flex/blob/739e06dc46ebb14cddd88b9768a6c1504d4677f6/fonts/RobotoFlex[GRAD,XOPQ,XTRA,YOPQ,YTAS,YTDE,YTFI,YTLC,YTUC,opsz,slnt,wdth,wght].ttf",
+      "git_url": "https://api.github.com/repos/googlefonts/roboto-flex/git/blobs/0abe2ee29292f1b39f59103d069feda87cde585e",
+      "download_url": "https://raw.githubusercontent.com/googlefonts/roboto-flex/739e06dc46ebb14cddd88b9768a6c1504d4677f6/fonts/RobotoFlex%5BGRAD%2CXOPQ%2CXTRA%2CYOPQ%2CYTAS%2CYTDE%2CYTFI%2CYTLC%2CYTUC%2Copsz%2Cslnt%2Cwdth%2Cwght%5D.ttf",
+      "type": "file",
+      "_links": {
+        "self": "https://api.github.com/repos/googlefonts/roboto-flex/contents/fonts/RobotoFlex[GRAD,XOPQ,XTRA,YOPQ,YTAS,YTDE,YTFI,YTLC,YTUC,opsz,slnt,wdth,wght].ttf?ref=739e06dc46ebb14cddd88b9768a6c1504d4677f6",
+        "git": "https://api.github.com/repos/googlefonts/roboto-flex/git/blobs/0abe2ee29292f1b39f59103d069feda87cde585e",
+        "html": "https://github.com/googlefonts/roboto-flex/blob/739e06dc46ebb14cddd88b9768a6c1504d4677f6/fonts/RobotoFlex[GRAD,XOPQ,XTRA,YOPQ,YTAS,YTDE,YTFI,YTLC,YTUC,opsz,slnt,wdth,wght].ttf"
+      }
+    }
+  ]
+}

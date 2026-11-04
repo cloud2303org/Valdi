@@ -9,8 +9,7 @@
 
 #include "snap_drawing/cpp/Utils/Aliases.hpp"
 #include "snap_drawing/cpp/Utils/Geometry.hpp"
-
-class SkCanvas;
+#include "snap_drawing/cpp/Utils/DrawingBackend.hpp"
 
 namespace snap::drawing {
 
@@ -29,14 +28,14 @@ public:
     /**
      Prepare the canvas for applying the mask.
      */
-    virtual void prepare(SkCanvas* canvas) = 0;
+    virtual void prepare(NativeCanvas* canvas) = 0;
 
     /**
      Apply the mask, which should have been previously prepared through the prepare() call.
      The content drawn between the prepare and apply call should be masked after
      the apply call is made.
      */
-    virtual void apply(SkCanvas* canvas) = 0;
+    virtual void apply(NativeCanvas* canvas) = 0;
 
     /**
      Return a description best matching the mask and its configured values.

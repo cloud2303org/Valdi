@@ -1,0 +1,15 @@
+{
+  "status": "bounded_clean",
+  "findingsP1P2": 0,
+  "methodologyTask": "tgfx-native-perf-final-text-fit-methodology-review2-20261104-1",
+  "evidenceTask": "tgfx-performance-final-measurement-evidence-review-20261104-1",
+  "reviewMode": "Read-only source, report and artifact hash inspection; no benchmark reruns",
+  "unmeasured": [
+    "presented FPS",
+    "phone power",
+    "iOS device shipping size"
+  ],
+  "reviewedSummarySha256": "27704b2b0adc04575f960cdb28c2fe9438b8f516e9ccadc45af92bf27d21a756",
+  "reviewedEvidenceZipSha256": "775c16006c7ba1a9007a2e87ba20d32c41e2d9c0e884909bfbfe85df5ee3a033",
+  "supplementSha256": "51472c6bb00c36dc4df4e235f1cb04b5d4cf13b6bfe3895482e374bf93fbb758"
+}

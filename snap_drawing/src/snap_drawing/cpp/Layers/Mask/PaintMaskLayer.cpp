@@ -34,7 +34,11 @@ Color PaintMaskLayer::getColor() const {
     return _color;
 }
 
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+void PaintMaskLayer::setBlendMode(tgfx::BlendMode blendMode) {
+#else
 void PaintMaskLayer::setBlendMode(SkBlendMode blendMode) {
+#endif
     _blendMode = blendMode;
 }
 

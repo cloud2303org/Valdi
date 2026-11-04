@@ -1,0 +1,35 @@
+{
+  "source_only": true,
+  "registered_cases": 98,
+  "previous_case_names_and_assertions_preserved": 97,
+  "new_cases": 1,
+  "new_case": "image.drawing-context-scaled-quadrants-and-outside-control",
+  "fixture_manifest_entries": 52,
+  "all_fixture_font_hashes_unchanged": true,
+  "pixel_tolerance_unchanged": 1,
+  "parent_run7_media": {
+    "passed": 91,
+    "failed": 6,
+    "total": 97
+  },
+  "production_change": "Physical image coordinates with canvas translate/scale + drawImage; clip only overflowing fits",
+  "reference_change": "Equivalent pixel-coordinate placement for independent hard-coded native rasters; no expected raster size or location changes",
+  "no_native_or_vendor_execution": true,
+  "no_vendor_edits": true,
+  "consumer_rebuild_required": true,
+  "vendor_archive_rebuild_required_by_this_change": false,
+  "old_setup": "before-density-pixel-placement/freeze.json",
+  "new_runtime_result": null,
+  "observed_tgfx_source_evidence": {
+    "src/gpu/OpsCompositor.cpp": "999cf062df895fe0b899845e857748199a1a3a00f77f9dd50a4114bed64446ce",
+    "src/gpu/RectsVertexProvider.cpp": "c34cac988a78fd23015b5cbf328add340975628ebfc7149a371323898e1e13d7",
+    "src/core/PictureContext.cpp": "b949cbe0b805ee6e6d4f67ff1069d2f75f62ce5c328a16a5ea5aa89372915b37"
+  },
+  "files": {
+    "snap_drawing/src/snap_drawing/cpp/Utils/ThorvgMedia.cpp": "eb62fc22656f307d268efbef2f5059b54b55eaa948afe7e8a0178a9ac60721f4",
+    "snap_drawing/experimental/tgfx/full/tests/media_checks.cpp": "39d97e2d99e0f532543cb9313864535a1448e2a3ff009547e59955200aa544a3",
+    "snap_drawing/experimental/tgfx/README.md": "9cc90294dbf448c349cc014e371708e489bcedefbc41907ae69c03903be447b1",
+    "snap_drawing/experimental/tgfx/full/tests/media-data/PROVENANCE.md": "8490e604a9981ef1e46aee22062b5a501baff2cbe27af142b4827202f362446e"
+  },
+  "fixture_manifest_sha256": "83312a8fd70d753d4aeea26de32f077f80cca1479f4cedcf1e3e014577a9e2f6"
+}

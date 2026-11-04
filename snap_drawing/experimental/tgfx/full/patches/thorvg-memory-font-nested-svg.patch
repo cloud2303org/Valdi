@@ -1,0 +1,233 @@
+diff --git a/inc/thorvg.h b/inc/thorvg.h
+--- a/inc/thorvg.h
++++ b/inc/thorvg.h
+@@ -2393,6 +2393,10 @@
+      * @warning It's the user responsibility to release the @p data memory.
+      *
+      * @note To unload the font data loaded using this API, pass the proper @p name and @c nullptr as @p data.
++     * @note Unloading removes the memory-font registration immediately. New font lookups cannot
++     *       select it, but Text objects already using it retain the data until they release it.
++     *       With @p copy false, the caller must keep the bytes alive for those Text objects.
++     *       Repeated loads of an owned registration do not add registration references.
+      * @note If you are unsure about the MIME type, you can provide an empty value like @c nullptr, and thorvg will attempt to figure it out.
+      * @see Text::font(const char* name, float size, const char* style)
+      *
+@@ -2409,7 +2413,9 @@
+      *
+      * @retval Result::InsufficientCondition Fails if the loader is not initialized.
+      *
+-     * @note If the font data is currently in use, it will not be immediately unloaded.
++     * @note This API removes a filename registration, not a memory-font name.
++     *       New lookups cannot select the removed registration. Text objects already using it
++     *       remain usable and keep its data alive until their last reference is released.
+      * @see Text::load(const char* filename)
+      * 
+      * @since 0.15
+diff --git a/src/renderer/tvgLoaderMgr.cpp b/src/renderer/tvgLoaderMgr.cpp
+--- a/src/renderer/tvgLoaderMgr.cpp
++++ b/src/renderer/tvgLoaderMgr.cpp
+@@ -213,6 +213,19 @@
+ {
+     if (!loader) return false;
+ 
++    // Font lookup, unregister and the last paint release share the same lock.
++    // Delete outside it: other loader destructors can release nested loaders.
++    if (loader->type == FileType::Sfnt) {
++        bool dispose;
++        {
++            ScopedLock lock(_key);
++            dispose = loader->close();
++            if (dispose && loader->cached) _activeLoaders.remove(loader);
++        }
++        if (dispose) delete loader;
++        return true;
++    }
++
+     if (loader->close()) {
+         if (loader->cached) _activeLoaders.remove(loader);
+         delete (loader);
+@@ -225,7 +238,11 @@
+ #ifdef THORVG_FILE_IO_SUPPORT
+     if (!filename) return nullptr;
+ 
+-    if (auto loader = _findFromCache(filename)) return loader;
++    if (auto loader = _findFromCache(filename)) {
++        // Text::load registers a font; it does not retain a paint reference.
++        if (ops.caller == Type::Text && loader->type == FileType::Sfnt) retrieve(loader);
++        return loader;
++    }
+ 
+     ret = Result::InvalidArguments;
+ 
+@@ -264,9 +281,29 @@
+     return nullptr;
+ }
+ 
+-bool LoaderMgr::retrieve(const char* filename)
+-{
+-    return retrieve(_findFromCache(filename));
++bool LoaderMgr::unregisterFont(const char* identifier, bool memory)
++{
++    if (!identifier) return false;
++    Loader* removed = nullptr;
++    bool dispose = false;
++    {
++        ScopedLock lock(_key);
++        INLIST_FOREACH(_activeLoaders, loader) {
++            if (!loader->cached || loader->type != FileType::Sfnt) continue;
++            const char* key = memory ? static_cast<FontLoader*>(loader)->name : loader->hashpath;
++            if (memory && loader->hashpath) continue;
++            if (!key || strcmp(key, identifier)) continue;
++            _activeLoaders.remove(loader);
++            loader->cached = false;
++            // Drop the registry's reference, without acquiring a lookup ref.
++            // Live Text paints retain the detached loader until their release.
++            dispose = loader->close();
++            removed = loader;
++            break;
++        }
++    }
++    if (dispose) delete removed;
++    return removed != nullptr;
+ }
+ 
+ tvg::Loader* LoaderMgr::loader(const char* data, uint32_t size, const char* mimeType, LoaderOps& ops, Result& ret)
+@@ -341,13 +378,28 @@
+ tvg::Loader* LoaderMgr::loader(const char* name, const char* data, uint32_t size, TVG_UNUSED const char* mimeType, const LoaderOps& ops)
+ {
+ #ifdef THORVG_SFNT_LOADER_SUPPORT
+-    if (auto loader = font(name)) {
+-        // user owned memory can be freed anytime.
+-        if (loader->owner != Ownership::Borrow) {
+-            if (ops.owner == Ownership::Transfer) tvg::free((char*)data);
+-            return loader;
+-        }
+-    }
++    Loader* replaced = nullptr;
++    bool dispose = false;
++    {
++        ScopedLock lock(_key);
++        INLIST_FOREACH(_activeLoaders, loader) {
++            if (!loader->cached || loader->type != FileType::Sfnt || loader->hashpath) continue;
++            if (!tvg::equal(name, static_cast<FontLoader*>(loader)->name)) continue;
++            // Repeated registration is idempotent, not another paint retain.
++            if (loader->owner != Ownership::Borrow) {
++                if (ops.owner == Ownership::Transfer) tvg::free((char*)data);
++                return loader;
++            }
++            // Borrowed bytes may change between registrations. Detach the old
++            // registration while preserving any Text paints still using it.
++            _activeLoaders.remove(loader);
++            loader->cached = false;
++            dispose = loader->close();
++            replaced = loader;
++            break;
++        }
++    }
++    if (dispose) delete replaced;
+ 
+     // function is dedicated for SFNT-based font loading
+     auto loader = new SfntLoader;
+diff --git a/src/renderer/tvgLoaderMgr.h b/src/renderer/tvgLoaderMgr.h
+--- a/src/renderer/tvgLoaderMgr.h
++++ b/src/renderer/tvgLoaderMgr.h
+@@ -38,7 +38,7 @@
+     static Loader* loader(const char* name, const char* data, uint32_t size, const char* mimeType, const LoaderOps& ops);
+     static Loader* font(const char* name);
+     static Loader* anyfont();
+-    static bool retrieve(const char* filename);
++    static bool unregisterFont(const char* identifier, bool memory);
+     static bool retrieve(Loader* loader);
+ };
+ 
+diff --git a/src/renderer/tvgText.cpp b/src/renderer/tvgText.cpp
+--- a/src/renderer/tvgText.cpp
++++ b/src/renderer/tvgText.cpp
+@@ -61,7 +61,7 @@
+ Result Text::unload(const char* filename) noexcept
+ {
+     if (!filename) return Result::InvalidArguments;
+-    if (LoaderMgr::retrieve(filename)) return Result::Success;
++    if (LoaderMgr::unregisterFont(filename, false)) return Result::Success;
+     return Result::InsufficientCondition;
+ }
+ 
+diff --git a/src/renderer/tvgText.h b/src/renderer/tvgText.h
+--- a/src/renderer/tvgText.h
++++ b/src/renderer/tvgText.h
+@@ -252,7 +252,7 @@
+ 
+         // unload font
+         if (!data) {
+-            if (LoaderMgr::retrieve(LoaderMgr::font(name))) return Result::Success;
++            if (LoaderMgr::unregisterFont(name, true)) return Result::Success;
+             return Result::InsufficientCondition;
+         }
+ 
+diff --git a/src/loaders/svg/tvgSvgCommon.h b/src/loaders/svg/tvgSvgCommon.h
+--- a/src/loaders/svg/tvgSvgCommon.h
++++ b/src/loaders/svg/tvgSvgCommon.h
+@@ -651,6 +651,7 @@
+     char* src = nullptr;
+     size_t srcLen = 0;
+     char* decoded = nullptr;
++    bool registered = false;
+ };
+ 
+ enum struct OpenedTagType : uint8_t
+diff --git a/src/loaders/svg/tvgSvgLoader.cpp b/src/loaders/svg/tvgSvgLoader.cpp
+--- a/src/loaders/svg/tvgSvgLoader.cpp
++++ b/src/loaders/svg/tvgSvgLoader.cpp
+@@ -4119,7 +4119,9 @@
+         tvg::free(*p);
+     }
+     ARRAY_FOREACH(p, fonts) {
+-        Text::unload(p->name);
++        if (p->registered && Text::load(p->name, nullptr, 0) != Result::Success) {
++            TVGERR("SVG", "Failed to unregister memory font \"%s\".", p->name);
++        }
+         tvg::free(p->decoded);
+         tvg::free(p->name);
+     }
+diff --git a/src/loaders/svg/tvgSvgBuilder.cpp b/src/loaders/svg/tvgSvgBuilder.cpp
+--- a/src/loaders/svg/tvgSvgBuilder.cpp
++++ b/src/loaders/svg/tvgSvgBuilder.cpp
+@@ -765,6 +765,15 @@
+     if (!node->node.image.href || !strlen(node->node.image.href)) return nullptr;
+ 
+     auto picture = Picture::gen();
++    if (ctx.resolver) {
++        const auto resolver = ctx.resolver;
++        if (picture->resolver(resolver->func, resolver->data, resolver->fallback,
++                              resolver->strictSvgFonts) != Result::Success) {
++            if (resolver->strictSvgFonts) ctx.fontResolutionFailed = true;
++            Paint::rel(picture);
++            return nullptr;
++        }
++    }
+ 
+     const char* href = node->node.image.href;
+     if (!strncmp(href, "data:", sizeof("data:") - 1)) {
+@@ -778,6 +787,12 @@
+         char *decoded = nullptr;
+         auto size = (encoding == imageMimeTypeEncoding::base64) ? b64Decode(href, strlen(href), &decoded) : svgUtilURLDecode(href, &decoded);
+         if (picture->load(decoded, size, mimetype) != Result::Success) {
++            // A nested strict SVG load synchronously resolves its own children.
++            // Propagate failure all the way to the outer Picture::load caller.
++            if (ctx.resolver && ctx.resolver->strictSvgFonts &&
++                (!strcmp(mimetype, "svg+xml") || !strcmp(mimetype, "svg"))) {
++                ctx.fontResolutionFailed = true;
++            }
+             Paint::rel(picture);
+             tvg::free(decoded);
+             return nullptr;
+@@ -1471,7 +1486,8 @@
+         }
+         if (type) {
+             auto size = b64Decode(p->src + shift, p->srcLen - shift, &p->decoded);
+-            Text::load(p->name, p->decoded, size, type);
++            // A duplicated/live Text may outlast the parser's decoded buffer.
++            p->registered = Text::load(p->name, p->decoded, size, type, true) == Result::Success;
+         }
+     }
+ }

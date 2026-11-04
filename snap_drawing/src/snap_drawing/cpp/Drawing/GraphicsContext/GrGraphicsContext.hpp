@@ -1,3 +1,8 @@
+#pragma once
+
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+#include "snap_drawing/cpp/Drawing/GraphicsContext/TGFXGrGraphicsContext.hpp"
+#else
 //
 //  GrGraphicsContext.hpp
 //  snap_drawing-macos
@@ -58,3 +63,5 @@ private:
 };
 
 } // namespace snap::drawing
+
+#endif // SNAP_DRAWING_TGFX_EXPERIMENT

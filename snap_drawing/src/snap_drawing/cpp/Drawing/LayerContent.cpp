@@ -10,7 +10,18 @@
 namespace snap::drawing {
 
 #ifdef SNAP_DRAWING_TGFX_EXPERIMENT
-LayerContent::LayerContent(const std::shared_ptr<tgfx::Picture>& picture) : picture(picture) {}
+LayerContent::LayerContent(const std::shared_ptr<tgfx::Picture>& picture) : picture(picture) {
+    if (picture) {
+        bounds = Rect::fromTgfxValue(picture->getBounds());
+    }
+}
+#ifdef SNAP_DRAWING_TGFX_COMPLETE
+LayerContent::LayerContent(const std::shared_ptr<tgfx::Picture>& picture,
+                           const Ref<ExternalSurfaceSnapshot>& externalSurface)
+    : LayerContent(picture) {
+    this->externalSurface = externalSurface;
+}
+#endif
 #else
 LayerContent::LayerContent(const sk_sp<SkPicture>& picture, const Ref<ExternalSurfaceSnapshot>& externalSurface)
     : picture(picture), externalSurface(externalSurface) {}
@@ -19,7 +30,7 @@ LayerContent::LayerContent() = default;
 LayerContent::~LayerContent() = default;
 
 bool LayerContent::isEmpty() const {
-#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+#if defined(SNAP_DRAWING_TGFX_EXPERIMENT) && !defined(SNAP_DRAWING_TGFX_COMPLETE)
     return picture == nullptr;
 #else
     return picture == nullptr && externalSurface == nullptr;
@@ -28,7 +39,7 @@ bool LayerContent::isEmpty() const {
 
 void LayerContent::clear() {
     picture = nullptr;
-#ifndef SNAP_DRAWING_TGFX_EXPERIMENT
+#if !defined(SNAP_DRAWING_TGFX_EXPERIMENT) || defined(SNAP_DRAWING_TGFX_COMPLETE)
     externalSurface = nullptr;
 #endif
 }

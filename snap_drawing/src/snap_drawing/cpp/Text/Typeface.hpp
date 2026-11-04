@@ -17,7 +17,7 @@
 #include "valdi_core/cpp/Utils/FlatMap.hpp"
 #include "valdi_core/cpp/Utils/Mutex.hpp"
 
-#include "include/core/SkTypeface.h"
+#include "snap_drawing/cpp/Utils/DrawingBackend.hpp"
 
 namespace Valdi {
 class CharacterSet;
@@ -27,12 +27,12 @@ namespace snap::drawing {
 
 class Typeface : public Valdi::SimpleRefCountable {
 public:
-    Typeface(sk_sp<SkTypeface>&& typeface, const String& familyName, bool isCustom);
+    Typeface(NativeTypeface&& typeface, const String& familyName, bool isCustom);
     ~Typeface() override;
 
     uint32_t getId() const;
 
-    const sk_sp<SkTypeface>& getSkValue() const;
+    const NativeTypeface& getSkValue() const;
 
     const String& familyName() const;
     const FontStyle& fontStyle() const;
@@ -45,6 +45,10 @@ public:
 
     bool supportsCharacter(Character character);
 
+    // TGFX exports the selected face as a standalone SFNT for consumers such
+    // as ThorVG, which cannot load a TTC container. Standalone source streams
+    // keep their original bytes. Variable design coordinates are not baked
+    // into outlines by this table export.
     Valdi::BytesView makeFontData();
 
     const HBFace& getHBFace() const;
@@ -54,12 +58,21 @@ public:
 
 private:
     mutable Valdi::Mutex _mutex;
-    sk_sp<SkTypeface> _typeface;
+#if defined(SNAP_DRAWING_TGFX_EXPERIMENT) && defined(__APPLE__)
+    // The descriptor-adjusted CTTypeface has no TGFX backing stream. Keep the
+    // original face alive through _typeface destruction to retain custom bytes
+    // and export the original data.
+    NativeTypeface _fontDataTypeface;
+#endif
+    NativeTypeface _typeface;
     Ref<Valdi::CharacterSet> _characterSet;
     String _familyName;
     FontStyle _fontStyle;
     bool _isCustom;
     bool _isEmoji;
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+    bool _hasSpaceInLigaturesOrKerning = false;
+#endif
     HBFace _hbFace;
     HBFont _hbFont;
     Valdi::FlatMap<double, FontMetrics> _fontMetricsBySize;

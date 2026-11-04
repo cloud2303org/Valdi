@@ -1,3 +1,8 @@
+#pragma once
+
+#ifdef SNAP_DRAWING_TGFX_EXPERIMENT
+#include "snap_drawing/cpp/Drawing/GraphicsContext/TGFXMetalGraphicsContext.hpp"
+#else
 //
 //  MetalGraphicsContext.hpp
 //  snap_drawing
@@ -81,3 +86,5 @@ private:
 };
 
 } // namespace snap::drawing
+
+#endif // SNAP_DRAWING_TGFX_EXPERIMENT

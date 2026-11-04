@@ -7,8 +7,7 @@
 
 #include "snap_drawing/cpp/Drawing/BoxShadow.hpp"
 
-#include "include/core/SkBlurTypes.h"
-#include "include/core/SkMaskFilter.h"
+#include "snap_drawing/cpp/Drawing/MaskFilter.hpp"
 #include "snap_drawing/cpp/Utils/BorderRadius.hpp"
 
 namespace snap::drawing {
@@ -25,9 +24,9 @@ void BoxShadow::setBlurAmount(Scalar blurAmount) {
     if (_blurAmount != blurAmount) {
         _blurAmount = blurAmount;
         if (blurAmount == 0) {
-            _paint.getSkValue().setMaskFilter(nullptr);
+            _paint.setMaskFilter(MaskFilter());
         } else {
-            _paint.getSkValue().setMaskFilter(SkMaskFilter::MakeBlur(SkBlurStyle::kNormal_SkBlurStyle, blurAmount * 2));
+            _paint.setMaskFilter(MaskFilter::makeBlur(BlurStyleNormal, blurAmount * 2));
         }
     }
 }

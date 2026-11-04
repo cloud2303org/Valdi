@@ -17,7 +17,7 @@
 #include "snap_drawing/cpp/Text/Harfbuzz.hpp"
 #include "snap_drawing/cpp/Utils/Geometry.hpp"
 
-#include "include/core/SkFont.h"
+#include "snap_drawing/cpp/Utils/DrawingBackend.hpp"
 
 namespace snap::drawing {
 
@@ -39,7 +39,7 @@ public:
         Ref<FontResolver>&& fontResolver, Ref<Typeface>&& typeface, Scalar size, double scale, bool respectDynamicType);
     ~Font() override;
 
-    const SkFont& getSkValue() const;
+    const NativeFont& getSkValue() const;
     const FontStyle& style() const;
     const Ref<Typeface>& typeface() const;
 
@@ -69,7 +69,7 @@ private:
     Ref<Typeface> _typeface;
     Ref<Valdi::RefCountable> _textShaperRepr;
     HBFont _hbFont;
-    SkFont _font;
+    NativeFont _font;
     Scalar _size;
     double _scale;
     bool _respectDynamicType;
