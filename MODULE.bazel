@@ -6,7 +6,7 @@ module(
 http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
 bazel_dep(name = "toolchains_llvm", version = "1.7.0")
-bazel_dep(name = "apple_support", version = "1.22.1", repo_name = "build_bazel_apple_support")
+bazel_dep(name = "apple_support", version = "1.24.1", repo_name = "build_bazel_apple_support")
 bazel_dep(name = "protobuf", version = "29.3", repo_name = "protobuf_cpp")
 single_version_override(
     module_name = "protobuf",
@@ -40,7 +40,13 @@ python.single_version_platform_override(
 
 bazel_dep(name = "bazel_skylib", version = "1.9.2")
 bazel_dep(name = "rules_java", version = "8.14.0")
-bazel_dep(name = "rules_rust", version = "0.64.0")
+bazel_dep(name = "rules_rust", version = "0.75.0")
+single_version_override(
+    module_name = "rules_rust",
+    version = "0.75.0",
+    patches = ["@valdi//bzl/patches/rules_rust/0.75.0:producer_lockfile_patches.patch"],
+    patch_strip = 1,
+)
 bazel_dep(name = "rules_android", version = "0.6.5")
 bazel_dep(name = "rules_shell", version = "0.8.0")
 bazel_dep(name = "rules_android_ndk", version = "0.1.3")
@@ -325,10 +331,6 @@ http_archive(
 rust = use_extension("@rules_rust//rust:extensions.bzl", "rust")
 rust.toolchain(
     edition = "2024",
-    # macOS 27 dyld rejects proc-macro dylibs that rustc < 1.98 strips with
-    # -Cstrip=debuginfo (misaligned LINKEDIT string table, rust-lang/rust#157750)
-    # when linked against the Xcode 27 SDK. Drop once the toolchain is >= 1.98.
-    extra_exec_rustc_flags = ["-Cstrip=none"],
     extra_target_triples = [
         "aarch64-apple-ios",
         "aarch64-apple-ios-sim",
@@ -337,7 +339,7 @@ rust.toolchain(
         "x86_64-apple-ios",
         "x86_64-linux-android",
     ],
-    versions = ["1.87.0"],
+    versions = ["1.99.1"],
 )
 use_repo(rust, "rust_toolchains")
 
@@ -475,6 +477,7 @@ nsh_web_crate.from_cargo(
     name = "nsh_web_crates",
     manifests = ["//third-party/nsh_web:Cargo.toml"],
     cargo_lockfile = "//third-party/nsh_web:Cargo.lock",
+    lockfile = "//third-party/nsh_web:cargo-bazel-lock.json",
     supported_platform_triples = [
         "aarch64-apple-darwin",
         "x86_64-apple-darwin",
@@ -532,6 +535,7 @@ pngquant_crate.render_config(
 pngquant_crate.from_specs(
     name = "pngquant_crates",
     cargo_lockfile = "//third-party/pngquant:Cargo.lock",
+    lockfile = "//third-party/pngquant:cargo-bazel-lock.json",
     host_tools = "@rust_host_tools_nightly",
     supported_platform_triples = [
         "aarch64-apple-darwin",

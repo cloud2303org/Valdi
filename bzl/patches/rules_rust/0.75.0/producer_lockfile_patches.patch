@@ -1,0 +1,34 @@
+--- a/crate_universe/extensions.bzl
++++ b/crate_universe/extensions.bzl
+@@ -528,6 +528,13 @@
+         config = json.decode(generate_splicing_config())
+ 
+     return config
++
++def _lockfile_patches(repository, lockfile):
++    # Root labels in a stored lock belong to its producer, not the consuming workspace.
++    return [
++        lockfile.relative(patch[2:]) if lockfile and patch.startswith("@@//") else patch
++        for patch in repository.get("patches", [])
++    ]
+ 
+ def _generate_hub_and_spokes(
+         *,
+@@ -753,7 +760,7 @@
+                 name = crate_repo_name,
+                 patch_args = repo.get("patch_args", None),
+                 patch_tool = repo.get("patch_tool", None),
+-                patches = repo.get("patches", None),
++                patches = _lockfile_patches(repo, cfg.lockfile),
+                 remote_patch_strip = 1,
+                 sha256 = repo.get("sha256", None),
+                 type = "tar.gz",
+@@ -776,7 +783,7 @@
+                 init_submodules = True,
+                 patch_args = repo.get("patch_args", None),
+                 patch_tool = repo.get("patch_tool", None),
+-                patches = repo.get("patches", None),
++                patches = _lockfile_patches(repo, cfg.lockfile),
+                 shallow_since = repo.get("shallow_since", None),
+                 remote = repo["remote"],
+                 build_file_content = build_file_content,

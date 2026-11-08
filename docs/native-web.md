@@ -85,14 +85,26 @@ selects the transport's Java source and shrinker rules. The guarded startup in
 transport does not provide a second `JNI_OnLoad`. The host still owns Android
 Internet permission, cleartext/network security policy, and iOS ATS policy.
 
-The Bazel module setup uses Rust **1.87.0**, edition 2024, and
-`rules_rust` **crate-universe**. `MODULE.bazel` resolves `nsh_web_crates` from
+The Bazel module setup uses Rust **1.99.1**, edition 2024, and
+`rules_rust` **0.75.0** with **crate-universe**. `MODULE.bazel` resolves `nsh_web_crates` from
 `third-party/nsh_web/Cargo.toml` and its lockfile. That dependency graph is
 separate from the sibling crates' standalone Cargo lockfiles. The port includes
-mechanical syntax backports and URL/IDNA dependency constraints for Rust 1.87.
+mechanical syntax backports and URL/IDNA dependency constraints for its Rust 1.87
+minimum supported version; that minimum is separate from the selected Bazel compiler.
 Preserve the consuming Bazel lock/configuration when resolving these inputs;
 do not assume a newer standalone Cargo resolution is interchangeable. The
 native link uses the Rust `web_static` target and its transport dependency.
+The fork also ships crate-universe `cargo-bazel-lock.json` files for its Rust
+repositories. Regenerate these from the fork root when upgrading `rules_rust`;
+consuming applications use the committed resolutions without repinning them.
+The root module also applies
+`bzl/patches/rules_rust/0.75.0/producer_lockfile_patches.patch`.
+It interprets `@@//` patch labels in these producer-generated locks relative to
+the module owning the lockfile. This preserves PNG's build-script patch when
+Valdi is consumed by another project. Bazel overrides do not propagate from
+dependencies: consuming roots must copy this patch into their own repository
+and apply the same `single_version_override` for `rules_rust`, as the
+ValdiNativeRoutes template does in both Bazel workspaces.
 
 ## Imports, entry point, and installation timing
 

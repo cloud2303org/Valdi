@@ -1,7 +1,7 @@
 load("@rules_rust//rust:defs.bzl", "rust_library", "rust_static_library", "rust_test")
 load(":test_assets.bzl", "runtime_test_assets")
 
-exports_files(["Cargo.toml", "Cargo.lock"])
+exports_files(["Cargo.toml", "Cargo.lock", "cargo-bazel-lock.json"])
 
 rust_library(
     name = "transport",
