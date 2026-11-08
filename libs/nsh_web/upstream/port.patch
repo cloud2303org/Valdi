@@ -1,0 +1,2451 @@
+--- a/upstream/web/blob.rs
++++ b/src/web/blob.rs
+@@ -5,7 +5,6 @@
+ 
+ use std::{
+     hash::{BuildHasher, Hasher},
+-    sync::Arc,
+ };
+ 
+ use super::{
+@@ -21,7 +20,7 @@
+ /// holds the bytes Rust has.
+ #[derive(Clone)]
+ pub(crate) struct Blob {
+-    bytes: nsh_core::ImageData,
++    bytes: crate::support::SharedBytes,
+     start: usize,
+     end: usize,
+     pub(crate) mime: String,
+@@ -37,11 +36,11 @@
+ 
+ impl Blob {
+     pub(crate) fn new(bytes: Vec<u8>, mime: String) -> Blob {
+-        Blob::shared(nsh_core::ImageData::new(bytes), mime)
++        Blob::shared(crate::support::SharedBytes::new(bytes), mime)
+     }
+ 
+     /// A blob of the bytes `bytes` holds, shared (not copied).
+-    pub(crate) fn shared(bytes: nsh_core::ImageData, mime: String) -> Blob {
++    pub(crate) fn shared(bytes: crate::support::SharedBytes, mime: String) -> Blob {
+         let end = bytes.len();
+         Blob {
+             bytes,
+@@ -61,11 +60,11 @@
+ 
+     /// The blob's bytes for an image source: shared with the blob, not
+     /// copied, so revoking its URL or collecting it leaves the image whole.
+-    pub(crate) fn image_data(&self) -> nsh_core::ImageData {
++    pub(crate) fn image_data(&self) -> crate::support::SharedBytes {
+         if self.start == 0 && self.end == self.bytes.len() {
+             return self.bytes.clone();
+         }
+-        nsh_core::ImageData::new(BlobBytes(self.clone()))
++        crate::support::SharedBytes::new(BlobBytes(self.clone()))
+     }
+ 
+     /// `slice(start, end)` with relative (negative) positions.
+@@ -194,7 +193,7 @@
+ 
+ /// Milliseconds since the epoch.
+ pub(crate) fn now_ms() -> f64 {
+-    nsh_core::time::unix_ms().trunc()
++    crate::support::unix_ms().trunc()
+ }
+ 
+ /// A new `Blob` object.
+@@ -350,10 +349,7 @@
+ struct BlobUrl {
+     url: String,
+     blob: Blob,
+-    /// The key and bytes an image source of this URL shows, made once: a
+-    /// URL set again hashes nothing, and its sources share their bytes, so
+-    /// they compare equal and send nothing new.
+-    image: Option<(Arc<str>, nsh_core::ImageData)>,
++
+ }
+ 
+ fn find_blob_url<'a>(cx: Ctx, url: &str) -> Option<&'a mut BlobUrl> {
+@@ -369,42 +365,6 @@
+ /// The blob `url` names (`blob:…`), if registered.
+ pub(crate) fn resolve_blob_url(cx: Ctx, url: &str) -> Option<Blob> {
+     find_blob_url(cx, url).map(|e| e.blob.clone())
+-}
+-
+-/// Gives the image source of `prop` its blob's bytes when it is a `blob:`
+-/// URL ([`resolve_image_url`]). One revoked or never created keeps its URL
+-/// and gets no bytes: the image fails.
+-pub(crate) fn resolve_image_source(cx: Ctx, prop: &mut nsh_core::Prop) {
+-    use nsh_core::{ImageProp, Prop};
+-    let source = match prop {
+-        Prop::Source(Some(source)) | Prop::Image(ImageProp::Placeholder(Some(source))) => source,
+-        _ => return,
+-    };
+-    if source.data.is_some() {
+-        return;
+-    }
+-    if let Some((uri, data)) = resolve_image_url(cx, &source.uri) {
+-        source.uri = uri;
+-        source.data = Some(data);
+-    }
+-}
+-
+-/// The key and bytes of the image `blob:` URL `url` names: a source of it
+-/// goes by a digest of them, as a `data:` URI's does. Made once per URL,
+-/// so every source of it (a host `<Image>`'s, a Rust component's image
+-/// prop, `JsHost::image_blob`) shares them and compares equal. `None` for
+-/// any other URL, or one no blob has.
+-pub(crate) fn resolve_image_url(cx: Ctx, url: &str) -> Option<(Arc<str>, nsh_core::ImageData)> {
+-    if !url.starts_with("blob:") {
+-        return None;
+-    }
+-    let entry = find_blob_url(cx, url)?;
+-    let (uri, data) = entry.image.get_or_insert_with(|| {
+-        let data = entry.blob.image_data();
+-        let made = nsh_core::ImageSource::default().with_bytes(&entry.blob.mime, data.clone());
+-        (made.uri, data)
+-    });
+-    Some((uri.clone(), data.clone()))
+ }
+ 
+ native!(
+@@ -415,7 +375,6 @@
+         blob_urls(cx).map.push(BlobUrl {
+             url: url.clone(),
+             blob: b,
+-            image: None,
+         });
+         js::string(cx, &url)
+     }
+@@ -925,3 +884,5 @@
+ 
+ type FormDataEntryValue = File | string;
+ "#;
++
++#[cfg(test)] mod port_tests { use super::*; include!("../../tests/blob.rs"); }
+--- a/upstream/web/encoding.rs
++++ b/src/web/encoding.rs
+@@ -125,11 +125,11 @@
+         let mut end = bytes.len();
+         if stream {
+             // A sequence cut at the end waits for the next chunk.
+-            if let Err(e) = std::str::from_utf8(bytes)
+-                && e.error_len().is_none()
+-            {
+-                end = e.valid_up_to();
+-                self.pending = bytes[end..].to_vec();
++            if let Err(e) = std::str::from_utf8(bytes) {
++                if e.error_len().is_none() {
++                    end = e.valid_up_to();
++                    self.pending = bytes[end..].to_vec();
++                }
+             }
+         }
+         let bytes = &bytes[..end];
+@@ -155,12 +155,10 @@
+         let mut codes: Vec<u16> = (0..units).map(unit).collect();
+         let mut cut = bytes.len() % 2;
+         // A high surrogate at the end may pair with the next chunk.
+-        if stream
+-            && let Some(&last) = codes.last()
+-            && (0xD800..0xDC00).contains(&last)
+-        {
+-            codes.pop();
+-            cut += 2;
++        if stream {
++            if let Some(&last) = codes.last() {
++                if (0xD800..0xDC00).contains(&last) { codes.pop(); cut += 2; }
++            }
+         }
+         if stream {
+             self.pending = bytes[bytes.len() - cut..].to_vec();
+@@ -224,8 +222,8 @@
+         // cast does nothing.
+         #[allow(clippy::unnecessary_cast)]
+         // SAFETY: a typed array's kind, read inline.
+-        if unsafe { rquickjs::qjs::JS_GetTypedArrayType(dest) }
+-            != rquickjs::qjs::JSTypedArrayEnum_JS_TYPED_ARRAY_UINT8 as i32
++        if js::view(cx, dest).and_then(|v| v.kind).unwrap_or(-1)
++            != crate::engine::UINT8 as i32
+         {
+             return Err(js::type_error(cx, "encodeInto needs a Uint8Array"));
+         }
+@@ -406,3 +404,5 @@
+         );
+     }
+ }
++
++#[cfg(test)] mod port_tests { use super::*; include!("../../tests/encoding.rs"); }
+--- a/upstream/web/event.rs
++++ b/src/web/event.rs
+@@ -357,10 +357,8 @@
+         if !js::is_object(callback) {
+             return Err(js::type_error(cx, "the listener is not an object"));
+         }
+-        if let Some(s) = &signal
+-            && aborted(cx, s.raw())?
+-        {
+-            return Ok(V::undefined());
++        if let Some(s) = &signal {
++            if aborted(cx, s.raw())? { return Ok(V::undefined()); }
+         }
+         {
+             let mut t = target(cx, this)?;
+--- a/upstream/web/fetch.rs
++++ b/src/web/fetch.rs
+@@ -543,9 +543,7 @@
+                     let len = text.len();
+                     text.push(0);
+                     // SAFETY: a NUL-terminated buffer of `len` bytes.
+-                    V::checked(cx, unsafe {
+-                        rquickjs::qjs::JS_ParseJSON(cx, text.as_ptr().cast(), len as _, c"<json>".as_ptr())
+-                    })
++                    V::checked(cx, crate::engine::parse_json(cx, &text[..len]))
+                 },
+                 Vec::new(),
+             )
+@@ -889,8 +887,7 @@
+             }
+         }
+         b
+-    } else if init_body.is_undefined()
+-        && let Some(b) = &base
++    } else if let Some(b) = base.as_ref().filter(|_|init_body.is_undefined())
+     {
+         if body_used(cx, b.raw())? {
+             return Err(js::type_error(cx, "the input request's body was used"));
+@@ -1111,10 +1108,10 @@
+             ));
+         }
+         let (b, mime) = extract_body(cx, body_init)?;
+-        if let Some(mime) = mime
+-            && !headers(cx, h.raw())?.has("content-type")
+-        {
+-            headers(cx, h.raw())?.append(cx, "content-type", &mime)?;
++        if let Some(mime) = mime {
++            if !headers(cx, h.raw())?.has("content-type") {
++                headers(cx, h.raw())?.append(cx, "content-type", &mime)?;
++            }
+         }
+         b
+     };
+@@ -1320,10 +1317,10 @@
+ 
+ impl Drop for DropGuard {
+     fn drop(&mut self) {
+-        if !self.done.get()
+-            && let Ok(mut dropped) = self.shared.dropped_fetches.try_borrow_mut()
+-        {
+-            dropped.push(self.id);
++        if !self.done.get() {
++            if let Ok(mut dropped) = self.shared.dropped_fetches.try_borrow_mut() {
++                dropped.push(self.id);
++            }
+         }
+     }
+ }
+@@ -1663,7 +1660,7 @@
+     }
+     let e = network_error(cx, message);
+     for (key, value) in [
+-        ("code", nsh_core::element::codes::ACCESS_DENIED),
++        ("code", "ERR_ACCESS_DENIED"),
+         ("permission", "network"),
+         ("resource", url),
+     ] {
+@@ -1799,6 +1796,19 @@
+ }
+ 
+ fn on_data(cx: Ctx, id: RequestId, bytes: &[u8]) -> R<()> {
++    on_data_with(cx, id, |cx, c| readable::enqueue_bytes(cx, c, bytes))
++}
++
++/// A host-rooted Uint8Array, consumed by the ordinary byte-stream transfer and
++/// queue algorithms. No borrowed Rust payload slice crosses JS callbacks.
++pub(crate) fn data_buffer(cx: Ctx, id: RequestId, view: Raw) -> R<()> {
++    forget_dropped(cx);
++    on_data_with(cx, id, |cx, c| readable::bc_enqueue(cx, c, view))
++}
++
++fn on_data_with(
++    cx: Ctx, id: RequestId, enqueue: impl FnOnce(Ctx, Raw) -> R<()>,
++) -> R<()> {
+     let entry_controller = {
+         let Some(e) = web(cx).fetches.get(&id) else {
+             return Ok(());
+@@ -1815,15 +1825,13 @@
+         }
+         return Ok(());
+     };
+-    readable::enqueue_bytes(cx, c.raw(), bytes)?;
++    enqueue(cx, c.raw())?;
+     // Too much waits unread: pause until the next pull.
+     let queued = -readable::desired_size(cx, c.raw())?.unwrap_or(0.0);
+-    if queued > QUEUE_LIMIT
+-        && let Some(e) = web(cx).fetches.get_mut(&id)
+-        && !e.paused
+-    {
+-        e.paused = true;
+-        push_op(cx, id, FetchOp::Pause(true));
++    if queued > QUEUE_LIMIT {
++        if let Some(e) = web(cx).fetches.get_mut(&id) {
++            if !e.paused { e.paused = true; push_op(cx, id, FetchOp::Pause(true)); }
++        }
+     }
+     Ok(())
+ }
+@@ -2047,10 +2055,10 @@
+     name: c"fetch",
+     native: fetch,
+     length: 1,
+-    doc: nsh_core::decl!(
++    doc: crate::decl!(
+         "HTTP through the platform's network stack (NSURLSession,\nHttpURLConnection), streaming both ways; `data:` and `blob:` URLs are\nanswered locally, and `asset:/` URLs with the app's bundled files."
+     ),
+-    signature: nsh_core::decl!(
++    signature: crate::decl!(
+         "(input: string | URL | Request, init?: RequestInit): Promise<Response>"
+     ),
+ }];
+@@ -2116,3 +2124,5 @@
+         assert_eq!(m, "text/plain;charset=utf-8");
+     }
+ }
++
++#[cfg(test)] mod port_tests { use super::*; include!("../../tests/fetch.rs"); }
+--- a/upstream/web/js.rs
++++ b/src/web/js.rs
+@@ -1,152 +1,123 @@
+ //! The toolkit the web APIs are written with: owned values, errors as
+-//! `Result`, natives, closures, promises and byte access over QuickJS's C
+-//! API.
++//! `Result`, natives, closures, promises and byte access over the Valdi engine-neutral C ABI.
+ //!
+ //! Rules: a [`V`] owns one reference and frees it when dropped (through the
+ //! runtime, so values held by objects are freed by their finalizers); a
+ //! native returns `R<V>`, `Err(Throw)` meaning a JS exception is pending.
+ 
++use crate::engine::{self, Op};
+ use std::{
+-    ffi::{CStr, CString, c_int, c_void},
++    ffi::{CStr, c_int},
+     ptr,
+ };
+-
+-use rquickjs::qjs;
+-
+-pub(crate) type Ctx = *mut qjs::JSContext;
+-pub(crate) type Raw = qjs::JSValue;
++pub(crate) type Ctx = *mut crate::NshWebContext;
++pub(crate) type Raw = engine::Value;
+ pub(crate) type Native = unsafe extern "C" fn(Ctx, Raw, c_int, *mut Raw) -> Raw;
+-
+-pub(crate) const UNDEFINED: Raw = qjs::JS_UNDEFINED;
+-pub(crate) const NULL: Raw = qjs::JS_NULL;
+-
+-/// A JS exception is pending.
++pub(crate) const UNDEFINED: Raw = Raw::UNDEFINED;
++pub(crate) const NULL: Raw = Raw::NULL;
+ #[derive(Debug, Clone, Copy)]
+ pub(crate) struct Throw;
+-
+-/// The result of web API code: `Err` means the exception is pending.
+ pub(crate) type R<T> = Result<T, Throw>;
+ 
+-/// An owned JS value (one reference), freed when dropped.
++/// Owns one host handle and one entry in the Rust ownership census. Handle
++/// references preserve ID lifetime; the census and Trace provide GC roots/edges.
+ pub(crate) struct V {
+-    rt: *mut qjs::JSRuntime,
++    cx: Ctx,
+     raw: Raw,
+ }
+-
+ impl Drop for V {
+     fn drop(&mut self) {
+-        // SAFETY: one owned reference; values without one need no runtime.
+-        unsafe { qjs::JS_FreeValueRT(self.rt, self.raw) };
+-    }
+-}
+-
++        if self.raw.heap() {
++            unsafe {
++                (*self.cx).untrack(self.raw);
++            }
++            engine::release(self.cx, self.raw);
++        }
++    }
++}
+ impl V {
+-    /// Takes ownership of `raw` (a value the caller owns).
+     pub(crate) fn own(cx: Ctx, raw: Raw) -> V {
+-        // SAFETY: a live context.
+-        V {
+-            rt: unsafe { qjs::JS_GetRuntime(cx) },
+-            raw,
+-        }
+-    }
+-
+-    /// A new reference to `raw` (borrowed).
++        if raw.heap() {
++            unsafe {
++                (*cx).track(raw);
++            }
++        }
++        V { cx, raw }
++    }
+     pub(crate) fn dup(cx: Ctx, raw: Raw) -> V {
+-        // SAFETY: a live value.
+-        V::own(cx, unsafe { qjs::JS_DupValue(cx, raw) })
+-    }
+-
+-    /// `raw` (owned), or the pending exception as `Err`.
++        engine::retain(cx, raw);
++        Self::own(cx, raw)
++    }
+     pub(crate) fn checked(cx: Ctx, raw: Raw) -> R<V> {
+-        // SAFETY: an inline tag check.
+-        if unsafe { qjs::JS_IsException(raw) } {
++        if raw.tag == 8 {
+             Err(Throw)
+         } else {
+-            Ok(V::own(cx, raw))
+-        }
+-    }
+-
++            Ok(Self::own(cx, raw))
++        }
++    }
+     pub(crate) const fn undefined() -> V {
+         V {
+-            rt: ptr::null_mut(),
++            cx: ptr::null_mut(),
+             raw: UNDEFINED,
+         }
+     }
+-
+     pub(crate) const fn null() -> V {
+         V {
+-            rt: ptr::null_mut(),
++            cx: ptr::null_mut(),
+             raw: NULL,
+         }
+     }
+-
+     pub(crate) fn bool(b: bool) -> V {
+         V {
+-            rt: ptr::null_mut(),
+-            raw: if b { qjs::JS_TRUE } else { qjs::JS_FALSE },
+-        }
+-    }
+-
++            cx: ptr::null_mut(),
++            raw: Raw::boolean(b),
++        }
++    }
+     pub(crate) fn num(n: f64) -> V {
+         V {
+-            rt: ptr::null_mut(),
+-            raw: qjs::JS_NewFloat64(n),
+-        }
+-    }
+-
+-    /// The borrowed value.
+-    #[inline]
++            cx: ptr::null_mut(),
++            raw: Raw::number(n),
++        }
++    }
+     pub(crate) fn raw(&self) -> Raw {
+         self.raw
+     }
+-
+-    /// The owned reference, for the caller to hand on.
+     pub(crate) fn take(self) -> Raw {
++        if self.raw.heap() {
++            unsafe {
++                (*self.cx).untrack(self.raw);
++            }
++        }
+         let raw = self.raw;
+         std::mem::forget(self);
+         raw
+     }
+-
+-    /// Another reference.
+     pub(crate) fn clone_ref(&self) -> V {
+-        // SAFETY: a live value; the new reference shares the runtime.
+-        V {
+-            rt: self.rt,
+-            raw: unsafe { qjs::JS_DupValueRT(self.rt_or_any(), self.raw) },
+-        }
+-    }
+-
+-    fn rt_or_any(&self) -> *mut qjs::JSRuntime {
+-        self.rt
+-    }
+-
+-    /// Moves the value out, leaving `undefined`.
++        Self::dup(self.cx, self.raw)
++    }
+     pub(crate) fn take_out(&mut self) -> V {
+         std::mem::take(self)
+     }
+-
+     pub(crate) fn is_undefined(&self) -> bool {
+         is_undefined(self.raw)
+     }
+-
+     pub(crate) fn is_nullish(&self) -> bool {
+         is_nullish(self.raw)
+     }
+ }
+-
+ impl Default for V {
+     fn default() -> V {
+         V::undefined()
+     }
+ }
+-
+ impl std::fmt::Debug for V {
+     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+-        // SAFETY: reading the tag.
+-        write!(f, "V(tag {})", unsafe { qjs::JS_VALUE_GET_TAG(self.raw) })
+-    }
+-}
+-
++        self.raw.fmt(f)
++    }
++}
++fn operation(cx: Ctx, op: Op, receiver: Raw, args: &[Raw], text: &[u8], aux: i64) -> R<V> {
++    V::checked(cx, engine::op(cx, op, receiver, args, text, aux))
++}
+ /// What values an object owns, for the cycle collector (every owned [`V`]
+ /// must be reported exactly once; one forgotten only keeps cycles alive).
+ pub(crate) trait Trace {
+@@ -226,75 +197,52 @@
+ 
+ #[inline]
+ pub(crate) fn is_undefined(v: Raw) -> bool {
+-    // SAFETY: an inline tag check.
+-    unsafe { qjs::JS_IsUndefined(v) }
++    v.tag == 0
+ }
+ 
+ #[inline]
+ pub(crate) fn is_nullish(v: Raw) -> bool {
+-    // SAFETY: inline tag checks.
+-    unsafe { qjs::JS_IsUndefined(v) || qjs::JS_IsNull(v) }
++    v.tag <= 1
+ }
+ 
+ #[inline]
+ pub(crate) fn is_object(v: Raw) -> bool {
+-    // SAFETY: an inline tag check.
+-    unsafe { qjs::JS_IsObject(v) }
++    v.tag == 5
+ }
+ 
+ pub(crate) fn is_function(cx: Ctx, v: Raw) -> bool {
+-    // SAFETY: a live value.
+-    unsafe { qjs::JS_IsFunction(cx, v) }
++    engine::op(cx, Op::IsFunction, v, &[], &[], 0).payload == 1
+ }
+ 
+ pub(crate) fn same(a: Raw, b: Raw) -> bool {
+-    // SAFETY: SameValue of live values (no side effects).
+-    unsafe { qjs::JS_IsSameValue(ptr::null_mut(), a, b) }
++    if a.tag == 3 && b.tag == 3 {
++        let (a, b) = (a.as_number(), b.as_number());
++        return (a.is_nan() && b.is_nan()) || (a == b && (a != 0.0 || a.to_bits() == b.to_bits()));
++    }
++    a == b
+ }
+ 
+ /// A new string.
+ pub(crate) fn string(cx: Ctx, s: &str) -> R<V> {
+-    // SAFETY: a new string from valid UTF-8.
+-    V::checked(cx, unsafe {
+-        qjs::JS_NewStringLen(cx, s.as_ptr().cast(), s.len() as _)
+-    })
++    operation(cx, Op::StringNew, UNDEFINED, &[], s.as_bytes(), 0)
+ }
+ 
+ /// `ToString(v)` as a USVString (throws for symbols): lone surrogates,
+ /// which QuickJS hands out as 3-byte WTF-8 sequences, become one U+FFFD
+ /// each.
+ pub(crate) fn to_string(cx: Ctx, v: Raw) -> R<String> {
+-    // SAFETY: a live value; the C string is freed below.
+-    unsafe {
+-        let mut len = 0usize;
+-        let p = qjs::JS_ToCStringLen(cx, &mut len, v);
+-        if p.is_null() {
+-            return Err(Throw);
+-        }
+-        let bytes = std::slice::from_raw_parts(p.cast::<u8>(), len);
+-        let s = match std::str::from_utf8(bytes) {
+-            Ok(s) => s.to_owned(),
+-            Err(_) => from_wtf8(bytes),
+-        };
+-        qjs::JS_FreeCString(cx, p);
+-        Ok(s)
+-    }
++    Ok(from_wtf8(&to_wtf8(cx, v)?))
+ }
+ 
+ /// `ToString(v)` as WTF-8: UTF-8 with lone surrogates as 3-byte
+ /// sequences (for code that pairs surrogates across strings).
+ pub(crate) fn to_wtf8(cx: Ctx, v: Raw) -> R<Vec<u8>> {
+-    // SAFETY: a live value; the C string is freed below.
+-    unsafe {
+-        let mut len = 0usize;
+-        let p = qjs::JS_ToCStringLen(cx, &mut len, v);
+-        if p.is_null() {
+-            return Err(Throw);
+-        }
+-        let bytes = std::slice::from_raw_parts(p.cast::<u8>(), len).to_vec();
+-        qjs::JS_FreeCString(cx, p);
+-        Ok(bytes)
+-    }
++    let e = unsafe { (*cx).engine };
++    let mut b = engine::Bytes::default();
++    if unsafe { (e.bytes)(e.user, cx, v, 1, &mut b) } < 1 {
++        return Err(Throw);
++    }
++    Ok(unsafe { b.slice() }.to_vec())
+ }
+ 
+ /// WTF-8 (UTF-8 with encoded surrogates) as UTF-8, a U+FFFD for each
+@@ -329,18 +277,12 @@
+ 
+ /// `ToNumber(v)`.
+ pub(crate) fn to_number(cx: Ctx, v: Raw) -> R<f64> {
+-    let mut n = 0f64;
+-    // SAFETY: converting a live value.
+-    if unsafe { qjs::JS_ToFloat64(cx, &mut n, v) } < 0 {
+-        return Err(Throw);
+-    }
+-    Ok(n)
++    operation(cx, Op::ToNumber, v, &[], &[], 0).map(|n| n.raw().as_number())
+ }
+ 
+ /// `ToBoolean(v)`.
+ pub(crate) fn to_bool(cx: Ctx, v: Raw) -> bool {
+-    // SAFETY: converting a live value (never throws).
+-    unsafe { qjs::JS_ToBool(cx, v) == 1 }
++    engine::op(cx, Op::ToBool, v, &[], &[], 0).payload == 1
+ }
+ 
+ /// WebIDL `unsigned long long` (enforce range off): a non-negative integer.
+@@ -354,62 +296,34 @@
+ }
+ 
+ pub(crate) fn new_object(cx: Ctx) -> R<V> {
+-    // SAFETY: a new object.
+-    V::checked(cx, unsafe { qjs::JS_NewObject(cx) })
++    operation(cx, Op::ObjectNew, UNDEFINED, &[], &[], 0)
+ }
+ 
+ pub(crate) fn new_array(cx: Ctx, items: Vec<V>) -> R<V> {
+-    let mut raws: Vec<Raw> = items.into_iter().map(V::take).collect();
+-    // SAFETY: the array takes the items.
+-    V::checked(cx, unsafe {
+-        qjs::JS_NewArrayFrom(cx, raws.len() as c_int, raws.as_mut_ptr())
+-    })
++    let raws: Vec<_> = items.iter().map(V::raw).collect();
++    operation(cx, Op::ArrayNew, UNDEFINED, &raws, &[], 0)
+ }
+ 
+ pub(crate) fn global(cx: Ctx) -> V {
+-    // SAFETY: a new reference to the global object.
+-    V::own(cx, unsafe { qjs::JS_GetGlobalObject(cx) })
+-}
+-
+-fn cstr(key: &str) -> CString {
+-    CString::new(key).unwrap_or_default()
++    V::own(cx, engine::op(cx, Op::Global, UNDEFINED, &[], &[], 0))
+ }
+ 
+ /// `obj[key]`.
+ pub(crate) fn get(cx: Ctx, obj: Raw, key: &str) -> R<V> {
+-    // The atom from the key's bytes, not a C string: decoding a long list
+-    // of objects reads their fields this way, an allocation each.
+-    // SAFETY: QuickJS copies the bytes.
+-    let atom = unsafe { qjs::JS_NewAtomLen(cx, key.as_ptr().cast(), key.len() as _) };
+-    if atom == qjs::JS_ATOM_NULL {
+-        return Err(Throw);
+-    }
+-    // SAFETY: a live object (getters may run JS); the atom is ours to free.
+-    unsafe {
+-        let value = qjs::JS_GetProperty(cx, obj, atom);
+-        qjs::JS_FreeAtom(cx, atom);
+-        V::checked(cx, value)
+-    }
++    operation(cx, Op::Get, obj, &[], key.as_bytes(), 0)
+ }
+ 
+ /// `obj[atom]`.
+-pub(crate) fn get_atom(cx: Ctx, obj: Raw, atom: qjs::JSAtom) -> R<V> {
+-    // SAFETY: a live object (getters may run JS).
+-    V::checked(cx, unsafe { qjs::JS_GetProperty(cx, obj, atom) })
++pub(crate) fn get_atom(cx: Ctx, obj: Raw, atom: u32) -> R<V> {
++    operation(cx, Op::GetSymbol, obj, &[], &[], atom as i64)
+ }
+ 
+ /// Defines data property `key` (writable, configurable; `enumerable`).
+ pub(crate) fn define(cx: Ctx, obj: Raw, key: &str, value: V, enumerable: bool) -> R<()> {
+-    let k = cstr(key);
+-    let mut flags = qjs::JS_PROP_WRITABLE | qjs::JS_PROP_CONFIGURABLE;
+-    if enumerable {
+-        flags |= qjs::JS_PROP_ENUMERABLE;
+-    }
+-    // SAFETY: the property takes the value.
+-    let r = unsafe {
+-        qjs::JS_DefinePropertyValueStr(cx, obj, k.as_ptr(), value.take(), flags as c_int)
+-    };
+-    if r < 0 { Err(Throw) } else { Ok(()) }
++    define_flags(cx, obj, key, value, 5 | if enumerable { 2 } else { 0 })
++}
++pub(crate) fn define_flags(cx: Ctx, obj: Raw, key: &str, value: V, flags: i64) -> R<()> {
++    operation(cx, Op::Define, obj, &[value.raw()], key.as_bytes(), flags).map(drop)
+ }
+ 
+ /// `{ value, done }`.
+@@ -422,11 +336,10 @@
+ 
+ /// `f.call(this, ...args)`.
+ pub(crate) fn call(cx: Ctx, f: Raw, this: Raw, args: &[Raw]) -> R<V> {
+-    let mut args = args.to_vec();
+-    // SAFETY: borrowed arguments; the result is owned.
+-    V::checked(cx, unsafe {
+-        qjs::JS_Call(cx, f, this, args.len() as c_int, args.as_mut_ptr())
+-    })
++    let mut a = Vec::with_capacity(args.len() + 1);
++    a.push(this);
++    a.extend_from_slice(args);
++    operation(cx, Op::Call, f, &a, &[], 0)
+ }
+ 
+ /// `obj[name](...args)`.
+@@ -437,11 +350,7 @@
+ 
+ /// `new f(...args)`.
+ pub(crate) fn construct(cx: Ctx, f: Raw, args: &[Raw]) -> R<V> {
+-    let mut args = args.to_vec();
+-    // SAFETY: borrowed arguments; the result is owned.
+-    V::checked(cx, unsafe {
+-        qjs::JS_CallConstructor(cx, f, args.len() as c_int, args.as_mut_ptr())
+-    })
++    operation(cx, Op::Construct, f, args, &[], 0)
+ }
+ 
+ /// `GetMethod(obj, name)`: the function, `None` when undefined or null;
+@@ -460,38 +369,33 @@
+ // --- Errors ---------------------------------------------------------------
+ 
+ pub(crate) fn type_error(cx: Ctx, message: &str) -> Throw {
+-    let m = cstr(message);
+-    // SAFETY: throws on a live context; `%s` keeps the message literal.
+-    unsafe { qjs::JS_ThrowTypeError(cx, c"%s".as_ptr(), m.as_ptr()) };
++    engine::op(cx, Op::Error, UNDEFINED, &[], message.as_bytes(), 0);
+     Throw
+ }
+ 
+ pub(crate) fn range_error(cx: Ctx, message: &str) -> Throw {
+-    let m = cstr(message);
+-    // SAFETY: as above.
+-    unsafe { qjs::JS_ThrowRangeError(cx, c"%s".as_ptr(), m.as_ptr()) };
++    engine::op(cx, Op::Error, UNDEFINED, &[], message.as_bytes(), 1);
+     Throw
+ }
+ 
+ #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+ pub(crate) fn syntax_error(cx: Ctx, message: &str) -> Throw {
+-    let m = cstr(message);
+-    // SAFETY: as above.
+-    unsafe { qjs::JS_ThrowSyntaxError(cx, c"%s".as_ptr(), m.as_ptr()) };
++    engine::op(cx, Op::Error, UNDEFINED, &[], message.as_bytes(), 2);
+     Throw
+ }
+ 
+ /// Throws `value`.
+ pub(crate) fn throw(cx: Ctx, value: V) -> Throw {
+-    // SAFETY: the exception takes the value.
+-    unsafe { qjs::JS_Throw(cx, value.take()) };
++    engine::op(cx, Op::Throw, value.raw(), &[], &[], 0);
+     Throw
+ }
+ 
+ /// The pending exception, cleared.
+ pub(crate) fn take_exception(cx: Ctx) -> V {
+-    // SAFETY: an owned value (the exception, or uninitialized when none).
+-    V::own(cx, unsafe { qjs::JS_GetException(cx) })
++    V::own(
++        cx,
++        engine::op(cx, Op::TakeException, UNDEFINED, &[], &[], 0),
++    )
+ }
+ 
+ /// A new `DOMException(message, name)`.
+@@ -510,20 +414,10 @@
+     }
+ }
+ 
+-unsafe extern "C" fn rethrow(cx: Ctx, argc: c_int, argv: *mut Raw) -> Raw {
+-    // SAFETY: the job's one argument, dup'd for the throw.
+-    unsafe {
+-        let e = Args::new(argc, argv).get(0);
+-        qjs::JS_Throw(cx, qjs::JS_DupValue(cx, e))
+-    }
+-}
+-
+ /// Reports `error` as uncaught without interrupting the caller (the
+ /// specs' "report an exception": a listener that threw, ...).
+ pub(crate) fn report(cx: Ctx, error: V) {
+-    let mut args = [error.raw()];
+-    // SAFETY: the job keeps its own reference to the argument.
+-    unsafe { qjs::JS_EnqueueJob(cx, Some(rethrow), 1, args.as_mut_ptr()) };
++    let _ = operation(cx, Op::Report, error.raw(), &[], &[], 0);
+ }
+ 
+ /// Reports the pending exception.
+@@ -583,11 +477,12 @@
+                 $this: $crate::web::js::Raw,
+                 $args: $crate::web::js::Args<'_>,
+             ) -> $crate::web::js::R<$crate::web::js::V> $body
+-            // SAFETY: QuickJS passes `argc` live arguments.
++            // SAFETY: The engine passes `argc` live arguments.
+             let args = unsafe { $crate::web::js::Args::new(argc, argv) };
+-            match body(cx, this, args) {
+-                Ok(v) => v.take(),
+-                Err(_) => rquickjs::qjs::JS_EXCEPTION,
++            match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| body(cx,this,args))) {
++                Ok(Ok(v)) => v.take(),
++                Ok(Err(_)) => $crate::engine::Value::EXCEPTION,
++                Err(_) => { $crate::web::js::type_error(cx,"Rust native panicked"); $crate::engine::Value::EXCEPTION }
+             }
+         }
+     };
+@@ -596,17 +491,7 @@
+ 
+ /// A plain function `name`.
+ pub(crate) fn function(cx: Ctx, name: &CStr, f: Native, length: c_int) -> R<V> {
+-    // SAFETY: a plain C function.
+-    V::checked(cx, unsafe {
+-        qjs::JS_NewCFunction2(
+-            cx,
+-            Some(f),
+-            name.as_ptr(),
+-            length,
+-            qjs::JSCFunctionEnum_JS_CFUNC_generic,
+-            0,
+-        )
+-    })
++    super::new_function(cx, name, f, length)
+ }
+ 
+ // --- Closures -------------------------------------------------------------
+@@ -645,6 +530,7 @@
+     pub(crate) promise: V,
+     pub(crate) resolve: V,
+     pub(crate) reject: V,
++    pending: std::rc::Rc<std::cell::Cell<bool>>,
+ }
+ 
+ trace!(Deferred {
+@@ -655,25 +541,46 @@
+ 
+ impl Deferred {
+     pub(crate) fn new(cx: Ctx) -> R<Deferred> {
+-        let mut funcs = [UNDEFINED; 2];
+-        // SAFETY: a new promise; the functions are owned.
+-        let promise = V::checked(cx, unsafe {
+-            qjs::JS_NewPromiseCapability(cx, funcs.as_mut_ptr())
+-        })?;
++        let parts = operation(cx, Op::PromiseNew, UNDEFINED, &[], &[], 0)?;
+         Ok(Deferred {
++            promise: get(cx, parts.raw(), "0")?,
++            resolve: get(cx, parts.raw(), "1")?,
++            reject: get(cx, parts.raw(), "2")?,
++            pending: std::rc::Rc::new(std::cell::Cell::new(true)),
++        })
++    }
++
++    pub(crate) fn from_parts(promise: V, resolve: V, reject: V) -> Self {
++        Self {
+             promise,
+-            resolve: V::own(cx, funcs[0]),
+-            reject: V::own(cx, funcs[1]),
+-        })
++            resolve,
++            reject,
++            pending: std::rc::Rc::new(std::cell::Cell::new(true)),
++        }
++    }
++    pub(crate) fn clone_ref(&self) -> Self {
++        Self {
++            promise: self.promise.clone_ref(),
++            resolve: self.resolve.clone_ref(),
++            reject: self.reject.clone_ref(),
++            pending: self.pending.clone(),
++        }
++    }
++
++    /// Used only for ready/closed capabilities settled with undefined or rejection.
++    pub(crate) fn is_pending(&self) -> bool {
++        self.pending.get()
+     }
+ 
+     /// Resolves with `value` (later calls do nothing).
+     pub(crate) fn resolve(&self, cx: Ctx, value: Raw) {
++        self.pending.set(false);
+         let _ = call(cx, self.resolve.raw(), UNDEFINED, &[value]);
+     }
+ 
+     /// Rejects with `reason`.
+     pub(crate) fn reject(&self, cx: Ctx, reason: Raw) {
++        self.pending.set(false);
+         let _ = call(cx, self.reject.raw(), UNDEFINED, &[reason]);
+     }
+ }
+@@ -703,19 +610,17 @@
+ /// call returning a promise does; an uncatchable one (an interrupt) stays
+ /// thrown.
+ pub(crate) fn rejecting(cx: Ctx, r: Raw) -> Raw {
+-    // SAFETY: a check of a live value.
+-    if !unsafe { qjs::JS_IsException(r) } {
++    if r.tag != 8 {
+         return r;
+     }
+     let e = take_exception(cx);
+-    // SAFETY: a check of a live value.
+-    if unsafe { qjs::JS_IsUncatchableError(e.raw()) } {
+-        let _ = throw(cx, e);
+-        return qjs::JS_EXCEPTION;
++    if engine::op(cx, Op::IsUncatchable, e.raw(), &[], &[], 0).payload == 1 {
++        throw(cx, e);
++        return Raw::EXCEPTION;
+     }
+     match rejected(cx, e.raw()) {
+         Ok(p) => p.take(),
+-        Err(Throw) => qjs::JS_EXCEPTION,
++        Err(_) => Raw::EXCEPTION,
+     }
+ }
+ 
+@@ -730,20 +635,13 @@
+ 
+ /// Marks `promise` handled (no unhandled-rejection report).
+ pub(crate) fn mark_handled(cx: Ctx, promise: Raw) {
+-    // SAFETY: a live promise (no-op for other values).
+-    unsafe { qjs::JS_PromiseMarkAsHandled(cx, promise) };
++    let _ = operation(cx, Op::PromiseHandled, promise, &[], &[], 0);
+ }
+ 
+ /// `promise.then(on_ok, on_err)`, through the intrinsic `then` (as the
+ /// specs' "react to" does, unaffected by an overridden `then`).
+ pub(crate) fn then(cx: Ctx, promise: Raw, on_ok: Raw, on_err: Raw) -> R<V> {
+-    let p = if unsafe { qjs::JS_IsPromise(promise) } {
+-        V::dup(cx, promise)
+-    } else {
+-        resolved(cx, promise)?
+-    };
+-    let then = super::intrinsic_then(cx)?;
+-    call(cx, then.raw(), p.raw(), &[on_ok, on_err])
++    operation(cx, Op::PromiseThen, promise, &[on_ok, on_err], &[], 0)
+ }
+ 
+ /// Reacts to `promise` with Rust code (its result discarded and handled).
+@@ -775,7 +673,7 @@
+ 
+ /// Calls `f` with each value `iterable` yields (sync iteration protocol).
+ pub(crate) fn for_each(cx: Ctx, iterable: Raw, mut f: impl FnMut(V) -> R<()>) -> R<()> {
+-    let method = get_atom(cx, iterable, qjs::JS_ATOM_Symbol_iterator as _)?;
++    let method = get_atom(cx, iterable, engine::ITERATOR)?;
+     if !is_function(cx, method.raw()) {
+         return Err(type_error(cx, "value is not iterable"));
+     }
+@@ -812,38 +710,26 @@
+     if !is_object(v) {
+         return Ok(false);
+     }
+-    let m = get_atom(cx, v, qjs::JS_ATOM_Symbol_iterator as _)?;
++    let m = get_atom(cx, v, engine::ITERATOR)?;
+     Ok(is_function(cx, m.raw()))
+ }
+ 
+ /// The own enumerable string keys of `obj`, with their values (a WebIDL
+ /// record).
+ pub(crate) fn record(cx: Ctx, obj: Raw) -> R<Vec<(String, V)>> {
+-    let mut tab: *mut qjs::JSPropertyEnum = ptr::null_mut();
+-    let mut len: u32 = 0;
+-    let flags = qjs::JS_GPN_STRING_MASK | qjs::JS_GPN_ENUM_ONLY;
+-    // SAFETY: enumerating a live object; the table is freed below.
+-    if unsafe { qjs::JS_GetOwnPropertyNames(cx, &mut tab, &mut len, obj, flags as c_int) } < 0 {
+-        return Err(Throw);
+-    }
+-    let mut out = Vec::with_capacity(len as usize);
+-    let mut result = Ok(());
+-    for i in 0..len as usize {
+-        // SAFETY: `len` entries.
+-        let atom = unsafe { (*tab.add(i)).atom };
+-        let key = V::own(cx, unsafe { qjs::JS_AtomToString(cx, atom) });
+-        let value = get_atom(cx, obj, atom);
+-        match (to_string(cx, key.raw()), value) {
+-            (Ok(k), Ok(v)) => out.push((k, v)),
+-            _ => {
+-                result = Err(Throw);
+-                break;
+-            }
+-        }
+-    }
+-    // SAFETY: the table from above.
+-    unsafe { qjs::JS_FreePropertyEnum(cx, tab, len) };
+-    result.map(|()| out)
++    let keys = operation(cx, Op::Keys, obj, &[], &[], 0)?;
++    let len = to_number(cx, get(cx, keys.raw(), "length")?.raw())? as usize;
++    let mut out = Vec::with_capacity(len);
++    let getter = super::intrinsic_get(cx)?;
++    for i in 0..len {
++        // Lookup must use the original JS key: converting to USVString first
++        // changes lone surrogates and can select a different property/getter.
++        let key = get(cx, keys.raw(), &i.to_string())?;
++        let value = call(cx, getter.raw(), UNDEFINED, &[obj, key.raw()])?;
++        let name = to_string(cx, key.raw())?;
++        out.push((name, value));
++    }
++    Ok(out)
+ }
+ 
+ // --- Bytes ----------------------------------------------------------------
+@@ -855,31 +741,12 @@
+ /// The slice is valid until the buffer is detached, resized or freed: use
+ /// it before running any JS.
+ pub(crate) unsafe fn bytes_of<'a>(cx: Ctx, v: Raw) -> Option<&'a [u8]> {
+-    // SAFETY: reads of a live value; per the contract for the slice.
+-    unsafe {
+-        if qjs::JS_IsArrayBuffer(v) {
+-            let mut len: qjs::size_t = 0;
+-            let p = qjs::JS_GetArrayBuffer(cx, &mut len, v);
+-            if p.is_null() {
+-                let _ = take_exception(cx);
+-                return Some(&[]);
+-            }
+-            return Some(std::slice::from_raw_parts(p, len as usize));
+-        }
+-        let view = view(cx, v)?;
+-        let mut len: qjs::size_t = 0;
+-        let p = qjs::JS_GetArrayBuffer(cx, &mut len, view.buffer.raw());
+-        if p.is_null() {
+-            let _ = take_exception(cx);
+-            return Some(&[]);
+-        }
+-        let len = len as usize;
+-        let end = view.offset.saturating_add(view.length).min(len);
+-        Some(std::slice::from_raw_parts(
+-            p.add(view.offset.min(end)),
+-            end - view.offset.min(end),
+-        ))
+-    }
++    let e = unsafe { (*cx).engine };
++    let mut b = engine::Bytes::default();
++    if unsafe { (e.bytes)(e.user, cx, v, 0, &mut b) } != 1 {
++        return None;
++    }
++    Some(unsafe { b.slice() })
+ }
+ 
+ /// The bytes of an ArrayBuffer or a view, writable.
+@@ -912,62 +779,34 @@
+ 
+ /// `v` as an ArrayBufferView.
+ pub(crate) fn view(cx: Ctx, v: Raw) -> Option<View> {
+-    if !is_object(v) {
++    let e = unsafe { (*cx).engine };
++    let mut info = engine::View {
++        buffer: UNDEFINED,
++        offset: 0,
++        length: 0,
++        element: 0,
++        kind: -1,
++    };
++    if unsafe { (e.view)(e.user, cx, v, &mut info) } != 1 {
+         return None;
+     }
+-    // SAFETY: inline checks and reads of a live value.
+-    unsafe {
+-        let kind = qjs::JS_GetTypedArrayType(v);
+-        if kind >= 0 {
+-            let (mut offset, mut length, mut element): (qjs::size_t, qjs::size_t, qjs::size_t) =
+-                (0, 0, 0);
+-            let buffer = qjs::JS_GetTypedArrayBuffer(cx, v, &mut offset, &mut length, &mut element);
+-            if qjs::JS_IsException(buffer) {
+-                let _ = take_exception(cx);
+-                return None;
+-            }
+-            return Some(View {
+-                buffer: V::own(cx, buffer),
+-                offset: offset as usize,
+-                length: length as usize,
+-                element: element as usize,
+-                kind: Some(kind),
+-            });
+-        }
+-    }
+-    // A DataView: by its getters.
+-    let g = global(cx);
+-    let data_view = get(cx, g.raw(), "DataView").ok()?;
+-    // SAFETY: a live object and constructor.
+-    if unsafe { qjs::JS_IsInstanceOf(cx, v, data_view.raw()) } != 1 {
+-        return None;
+-    }
+-    let buffer = get(cx, v, "buffer").ok()?;
+-    let offset = get(cx, v, "byteOffset").ok()?;
+-    let length = get(cx, v, "byteLength").ok()?;
+     Some(View {
+-        buffer,
+-        offset: to_number(cx, offset.raw()).ok()? as usize,
+-        length: to_number(cx, length.raw()).ok()? as usize,
+-        element: 1,
+-        kind: None,
++        buffer: V::own(cx, info.buffer),
++        offset: info.offset,
++        length: info.length,
++        element: info.element,
++        kind: if info.kind < 0 { None } else { Some(info.kind) },
+     })
+ }
+ 
+ /// A new ArrayBuffer holding `bytes`.
+ pub(crate) fn array_buffer(cx: Ctx, bytes: &[u8]) -> R<V> {
+-    // SAFETY: a copy into a new buffer.
+-    V::checked(cx, unsafe {
+-        qjs::JS_NewArrayBufferCopy(cx, bytes.as_ptr(), bytes.len() as _)
+-    })
++    operation(cx, Op::ArrayBufferNew, UNDEFINED, &[], bytes, 0)
+ }
+ 
+ /// A new Uint8Array holding `bytes`.
+ pub(crate) fn uint8_array(cx: Ctx, bytes: &[u8]) -> R<V> {
+-    // SAFETY: a copy into a new array.
+-    V::checked(cx, unsafe {
+-        qjs::JS_NewUint8ArrayCopy(cx, bytes.as_ptr(), bytes.len() as _)
+-    })
++    operation(cx, Op::Uint8ArrayNew, UNDEFINED, &[], bytes, 0)
+ }
+ 
+ /// A new typed array of `kind` over `buffer[offset..]` with `length`
+@@ -979,47 +818,25 @@
+     offset: usize,
+     length: usize,
+ ) -> R<V> {
+-    let (o, l) = (V::num(offset as f64), V::num(length as f64));
+-    match kind {
+-        Some(kind) => {
+-            let mut args = [buffer, o.raw(), l.raw()];
+-            // SAFETY: borrowed arguments; a new view.
+-            V::checked(cx, unsafe {
+-                qjs::JS_NewTypedArray(cx, 3, args.as_mut_ptr(), kind as qjs::JSTypedArrayEnum)
+-            })
+-        }
+-        None => {
+-            let g = global(cx);
+-            let data_view = get(cx, g.raw(), "DataView")?;
+-            construct(cx, data_view.raw(), &[buffer, o.raw(), l.raw()])
+-        }
+-    }
++    operation(
++        cx,
++        Op::ViewNew,
++        buffer,
++        &[Raw::number(offset as f64), Raw::number(length as f64)],
++        &[],
++        kind.unwrap_or(-1) as i64,
++    )
+ }
+ 
+ /// Moves `buffer`'s bytes to a new ArrayBuffer and detaches it (the
+ /// specs' TransferArrayBuffer).
+ pub(crate) fn transfer(cx: Ctx, buffer: Raw) -> R<V> {
+-    // SAFETY: copied before detaching; nothing else runs in between.
+-    let bytes = unsafe { bytes_of(cx, buffer) }
+-        .ok_or_else(|| type_error(cx, "not an ArrayBuffer"))?
+-        .to_vec();
+-    if is_detached(cx, buffer) {
+-        return Err(type_error(cx, "the ArrayBuffer is detached"));
+-    }
+-    // SAFETY: a live ArrayBuffer.
+-    unsafe { qjs::JS_DetachArrayBuffer(cx, buffer) };
+-    array_buffer(cx, &bytes)
++    // The engine moves the backing store and detaches every old view. Never
++    // borrow payload bytes across this operation or snapshot through a Vec.
++    operation(cx, Op::ArrayBufferTransfer, buffer, &[], &[], 0)
+ }
+ 
+ /// Whether ArrayBuffer `buffer` is detached.
+ pub(crate) fn is_detached(cx: Ctx, buffer: Raw) -> bool {
+-    get(cx, buffer, "detached")
+-        .map(|d| to_bool(cx, d.raw()))
+-        .unwrap_or(false)
+-}
+-
+-/// Raw pointer to an object's opaque data, of either web class.
+-pub(crate) fn opaque(v: Raw, class: qjs::JSClassID) -> *mut c_void {
+-    // SAFETY: reading the opaque of a live value (null for other classes).
+-    unsafe { qjs::JS_GetOpaque(v, class) }
+-}
++    engine::op(cx, Op::IsDetached, buffer, &[], &[], 0).payload == 1
++}
+--- a/upstream/web/mod.rs
++++ b/src/web/mod.rs
+@@ -1,25 +1,9 @@
+-//! The web platform APIs of TS apps, natively: events and abort signals,
+-//! URLs, text encoding, blobs and form data, streams, and `fetch` with its
+-//! `Headers`, `Request` and `Response`; and ECMAScript's `Intl`, which
+-//! QuickJS lacks (`intl/`). They are JS globals only: Rust code uses
+-//! crates of its choice.
+-//!
+-//! Every object of these classes is one QuickJS class (functions made in
+-//! Rust, [`js::closure`], another, callable one) whose opaque is the Rust
+-//! data of its interface ([`Object`]) in a `RefCell`: code borrows it
+-//! briefly and never across a call into JS, so a re-entrant call throws
+-//! instead of aliasing. Constructors honor `new.target`, so the classes can
+-//! be subclassed (`class Channel extends EventTarget`). The classes are
+-//! made when an app first reads one of the globals. The objects of Rust's
+-//! `#[class]` classes (`classes.rs`) are of the same QuickJS class.
+-
+ pub(crate) mod js;
+ 
+ pub(crate) mod blob;
+ mod encoding;
+ mod event;
+ mod fetch;
+-mod intl;
+ mod iterator;
+ mod streams;
+ mod url;
+@@ -32,8 +16,8 @@
+     ptr,
+ };
+ 
++use crate::engine;
+ use js::{Args, Closure, Ctx, Native, R, Raw, Throw, Trace, UNDEFINED, V};
+-use rquickjs::qjs;
+ 
+ /// The Rust data of an object of a web class.
+ pub(crate) trait Object: Trace + Any {
+@@ -91,11 +75,9 @@
+     Request,
+     Response,
+     WebSocket,
+-    NumberFormat,
+-    DateTimeFormat,
+-}
+-
+-const CLASS_COUNT: usize = Class::DateTimeFormat as usize + 1;
++}
++
++const CLASS_COUNT: usize = Class::WebSocket as usize + 1;
+ 
+ /// A method key: a name or a well-known symbol.
+ pub(crate) enum Key {
+@@ -150,11 +132,7 @@
+     /// declarations (`nsh_core::element::DECLARATIONS`): the text is then not in
+     /// the binary.
+     pub(crate) const fn declared(self) -> ClassTs {
+-        if nsh_core::element::DECLARATIONS {
+-            self
+-        } else {
+-            ClassTs::NONE
+-        }
++        if true { self } else { ClassTs::NONE }
+     }
+ }
+ 
+@@ -167,7 +145,6 @@
+         blob::SPECS,
+         fetch::SPECS,
+         websocket::SPECS,
+-        intl::SPECS,
+     ]
+     .into_iter()
+     .flatten()
+@@ -214,249 +191,117 @@
+     websocket::TYPES,
+ ];
+ 
+-/// The per-context state: the classes and the prototypes.
++/// Engine-independent per-context Web state.
+ #[derive(Default)]
+ pub(crate) struct Web {
+-    object_class: qjs::JSClassID,
+-    closure_class: qjs::JSClassID,
+     built: bool,
+-    /// By [`Class`]: prototype and constructor.
+     protos: Vec<V>,
+     ctors: Vec<V>,
+-    /// The intrinsic `Promise.prototype.then`.
+-    then: V,
++    cached: Vec<V>,
++    function_proto: V,
++    reflect_get: V,
+     pub(crate) blob_urls: blob::BlobUrls,
+-    /// Functions that are one per context (the strategies' `size`).
+-    cached: Vec<V>,
+-    /// The requests in flight.
+     pub(crate) fetches: rustc_hash::FxHashMap<crate::net::RequestId, fetch::Inflight>,
+     pub(crate) next_fetch: crate::net::RequestId,
+-    /// What relative request URLs resolve against ([`crate::HostOptions`]
+-    /// `base_url`).
+     pub(crate) base_url: Option<::url::Url>,
+-    /// The intrinsic `Date`, under a manual clock (`crate::clock`).
+-    pub(crate) date: V,
+-    /// When `performance.now()` is 0 under a manual clock.
+-    pub(crate) clock_origin: Option<nsh_core::time::Instant>,
+-}
+-
+-impl Web {
+-    /// Frees the values held (the state is unregistered).
+-    pub(crate) fn free_all(&mut self) {
+-        self.protos.clear();
+-        self.ctors.clear();
+-        self.then = V::undefined();
+-        self.blob_urls = Default::default();
+-        self.cached.clear();
+-        self.fetches.clear();
+-        self.date = V::undefined();
+-    }
+-}
+-
++}
+ pub(crate) fn web<'a>(cx: Ctx) -> &'a mut Web {
+-    // SAFETY: a projection of the state's field; callers hold it briefly
+-    // and never across JS.
+-    unsafe { &mut (*crate::state::state(cx)).web }
+-}
+-
+-/// What an object's opaque points to.
++    unsafe { &mut (*cx).web }
++}
+ struct Slot(RefCell<Box<dyn Object>>);
+ 
+-thread_local! {
+-    /// The finalizers running on this thread: in a collection, or freeing
+-    /// an object whose last reference went (any release of a JS value may
+-    /// run one). No JS may run and no op be made until they return.
+-    static FINALIZING: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+-}
+-
+-/// Raised while a finalizer of this thread drops Rust values (a Rust
+-/// class's value, a closure's captures): their drops are the app's code,
+-/// and what they do with JS waits ([`finalizing`]).
+-pub(crate) struct Finalizing(());
+-
+-impl Finalizing {
+-    pub(crate) fn enter() -> Self {
+-        FINALIZING.with(|f| f.set(f.get() + 1));
+-        Finalizing(())
+-    }
+-}
+-
+-impl Drop for Finalizing {
+-    fn drop(&mut self) {
+-        FINALIZING.with(|f| f.set(f.get() - 1));
+-    }
+-}
+-
+-/// Whether a finalizer of this thread is dropping Rust values: a callback
+-/// must not run JS now (QuickJS is collecting garbage), and a post must
+-/// not make an op.
+-pub(crate) fn finalizing() -> bool {
+-    FINALIZING.with(|f| f.get() > 0)
+-}
+-
+-unsafe extern "C" fn finalize(_rt: *mut qjs::JSRuntime, obj: Raw) {
+-    let _finalizing = Finalizing::enter();
+-    // SAFETY: the opaque of these classes is a boxed slot; its values free
+-    // themselves through the runtime.
+-    let slot = unsafe {
+-        let p = qjs::JS_GetAnyOpaque(obj, &mut 0);
+-        (!p.is_null()).then(|| Box::from_raw(p as *mut Slot))
++unsafe extern "C" fn finalize_slot(cx: Ctx, p: *mut c_void) {
++    unsafe {
++        (*cx).natives.borrow_mut().remove(&(p as usize));
++    }
++    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
++        drop(Box::from_raw(p as *mut Slot))
++    }));
++}
++unsafe extern "C" fn trace_slot(p: *mut c_void, visit: engine::Visit, user: *mut c_void) -> i32 {
++    let slot = unsafe { &*(p as *const Slot) };
++    let Ok(data) = slot.0.try_borrow() else {
++        return -1;
+     };
+-    // A Rust class's value drops here: a panic in the app's drop must not
+-    // unwind into the collector.
+-    if let Some(slot) = slot
+-        && std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(slot))).is_err()
+-    {
+-        log::error!(target: "js", "a value of a Rust class panicked while it was dropped");
+-    }
+-}
+-
+-unsafe extern "C" fn mark(rt: *mut qjs::JSRuntime, obj: Raw, mark: qjs::JS_MarkFunc) {
+-    // SAFETY: as in the finalizer. A slot borrowed while the collector runs
+-    // (code allocating mid-borrow) is skipped for the whole run: unmarked
+-    // values only stay alive.
++    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
++        data.trace(&mut |v| unsafe { visit(user, v) });
++    })) {
++        Ok(()) => 0,
++        Err(_) => -1,
++    }
++}
++unsafe extern "C" fn finalize_closure(cx: Ctx, p: *mut c_void) {
+     unsafe {
+-        let p = qjs::JS_GetAnyOpaque(obj, &mut 0) as *const Slot;
+-        if let Some(slot) = p.as_ref()
+-            && let Ok(data) = slot.0.try_borrow()
+-        {
+-            // A Rust class's tracing is the app's code: a panic must not
+-            // unwind into the collector (what it did not mark stays alive).
+-            let traced = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+-                data.trace(&mut |v| qjs::JS_MarkValue(rt, v, mark));
+-            }));
+-            if traced.is_err() {
+-                log::error!(target: "js", "a value of a Rust class panicked while it was traced");
+-            }
++        (*cx).natives.borrow_mut().remove(&(p as usize));
++    }
++    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
++        drop(Box::from_raw(p as *mut Closure))
++    }));
++}
++unsafe extern "C" fn trace_closure(p: *mut c_void, visit: engine::Visit, user: *mut c_void) -> i32 {
++    let c = unsafe { &*(p as *const Closure) };
++    c.trace(&mut |v| unsafe { visit(user, v) });
++    0
++}
++unsafe extern "C" fn call_closure(cx: Ctx, func: Raw, argc: c_int, argv: *mut Raw) -> Raw {
++    let p = engine::native_get(cx, func, 2) as *const Closure;
++    let Some(c) = (unsafe { p.as_ref() }) else {
++        js::type_error(cx, "Invalid native closure");
++        return Raw::EXCEPTION;
++    };
++    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
++        (c.f)(cx, &c.captures, unsafe { Args::new(argc, argv) })
++    })) {
++        Ok(Ok(v)) => v.take(),
++        Ok(Err(_)) => Raw::EXCEPTION,
++        Err(_) => {
++            js::type_error(cx, "Rust closure panicked");
++            Raw::EXCEPTION
+         }
+     }
+ }
+-
+-unsafe extern "C" fn finalize_closure(_rt: *mut qjs::JSRuntime, obj: Raw) {
+-    let _finalizing = Finalizing::enter();
+-    // SAFETY: the opaque of closures is a boxed closure.
+-    let closure = unsafe {
+-        let p = qjs::JS_GetAnyOpaque(obj, &mut 0);
+-        (!p.is_null()).then(|| Box::from_raw(p as *mut Closure))
++pub(crate) fn new_closure(cx: Ctx, closure: Closure) -> R<V> {
++    let proto = web(cx).function_proto.clone_ref();
++    let p = Box::into_raw(Box::new(closure)).cast();
++    let e = unsafe { (*cx).engine };
++    let raw = unsafe {
++        (e.native_new)(
++            e.user,
++            cx,
++            proto.raw(),
++            2,
++            p,
++            finalize_closure,
++            trace_closure,
++            Some(call_closure),
++        )
+     };
+-    // Its captures may hold the app's values (a call's reply): a panic in
+-    // their drop must not unwind into the collector.
+-    if let Some(closure) = closure
+-        && std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(closure))).is_err()
+-    {
+-        log::error!(target: "js", "a Rust value a JS function held panicked while it was dropped");
+-    }
+-}
+-
+-unsafe extern "C" fn mark_closure(rt: *mut qjs::JSRuntime, obj: Raw, mark: qjs::JS_MarkFunc) {
+-    // SAFETY: as in the finalizer.
++    if raw.tag == 8 {
++        unsafe { drop(Box::from_raw(p as *mut Closure)) };
++        return Err(Throw);
++    }
+     unsafe {
+-        let p = qjs::JS_GetAnyOpaque(obj, &mut 0) as *const Closure;
+-        if let Some(c) = p.as_ref() {
+-            c.trace(&mut |v| qjs::JS_MarkValue(rt, v, mark));
+-        }
+-    }
+-}
+-
+-unsafe extern "C" fn call_closure(
+-    cx: Ctx,
+-    func: Raw,
+-    _this: Raw,
+-    argc: c_int,
+-    argv: *mut Raw,
+-    _flags: c_int,
+-) -> Raw {
+-    // SAFETY: the opaque of closures; the closure object is alive for the
+-    // call (the caller holds it), and the code only reads it.
+-    unsafe {
+-        let p = qjs::JS_GetAnyOpaque(func, &mut 0) as *const Closure;
+-        let Some(c) = p.as_ref() else {
+-            return qjs::JS_UNDEFINED;
+-        };
+-        // Rust code (a callback's reply converts the app's values): a panic
+-        // throws instead of unwinding into QuickJS.
+-        let args = Args::new(argc, argv);
+-        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+-            (c.f)(cx, &c.captures, args)
+-        })) {
+-            Ok(Ok(v)) => v.take(),
+-            Ok(Err(Throw)) => qjs::JS_EXCEPTION,
+-            Err(_) => {
+-                let e = qjs::JS_NewError(cx);
+-                if let Ok(m) = js::string(cx, "a Rust function panicked") {
+-                    qjs::JS_SetPropertyStr(cx, e, c"message".as_ptr(), m.take());
+-                }
+-                qjs::JS_Throw(cx, e)
+-            }
+-        }
+-    }
+-}
+-
+-/// Registers the two classes (once per context).
+-fn register(cx: Ctx) {
+-    let w = web(cx);
+-    if w.object_class != 0 {
+-        return;
+-    }
+-    // SAFETY: registering classes on the context's runtime.
+-    unsafe {
+-        let rt = qjs::JS_GetRuntime(cx);
+-        let class = |name: &'static CStr, finalizer, gc_mark, call| {
+-            let mut id: qjs::JSClassID = 0;
+-            qjs::JS_NewClassID(rt, &mut id);
+-            let def = qjs::JSClassDef {
+-                class_name: name.as_ptr(),
+-                finalizer: Some(finalizer),
+-                gc_mark: Some(gc_mark),
+-                call,
+-                exotic: ptr::null_mut(),
+-            };
+-            qjs::JS_NewClass(rt, id, &def);
+-            id
+-        };
+-        w.object_class = class(c"WebObject", finalize, mark, None);
+-        w.closure_class = class(
+-            c"WebFunction",
+-            finalize_closure,
+-            mark_closure,
+-            Some(call_closure),
+-        );
+-    }
+-}
+-
+-/// A function object running `closure`.
+-pub(crate) fn new_closure(cx: Ctx, closure: Closure) -> R<V> {
+-    register(cx);
+-    let class = web(cx).closure_class;
+-    // SAFETY: a function prototype for the callable object; it owns the
+-    // closure.
+-    unsafe {
+-        let proto = qjs::JS_GetFunctionProto(cx);
+-        let obj = V::checked(cx, qjs::JS_NewObjectProtoClass(cx, proto, class))?;
+-        qjs::JS_FreeValue(cx, proto);
+-        qjs::JS_SetOpaque(obj.raw(), Box::into_raw(Box::new(closure)) as *mut c_void);
+-        Ok(obj)
+-    }
+-}
+-
+-/// A new `AbortSignal` (owned): a resource's load gets one, aborted when the
+-/// load no longer counts.
+-pub(crate) fn new_abort_signal(cx: Ctx) -> R<Raw> {
+-    event::new_signal(cx).map(V::take)
+-}
+-
+-/// Aborts `signal` with an `AbortError` (nothing when it is aborted).
+-pub(crate) fn abort_signal(cx: Ctx, signal: Raw) -> R<()> {
+-    event::abort(cx, signal, UNDEFINED)
+-}
+-
+-/// The intrinsic `Promise.prototype.then`.
+-pub(crate) fn intrinsic_then(cx: Ctx) -> R<V> {
++        (*cx).natives.borrow_mut().insert(p as usize, trace_closure);
++    }
++    V::checked(cx, raw)
++}
++pub(crate) fn new_function(cx: Ctx, name: &CStr, f: Native, length: c_int) -> R<V> {
++    let func = js::closure(cx, Vec::new(), move |cx, _, args| {
++        let mut raws: Vec<_> = (0..args.len()).map(|i| args.get(i)).collect();
++        V::checked(cx, unsafe {
++            f(cx, UNDEFINED, raws.len() as c_int, raws.as_mut_ptr())
++        })
++    })?;
++    let name = js::string(cx, &name.to_string_lossy())?;
++    js::define_flags(cx, func.raw(), "name", name, 4)?;
++    js::define_flags(cx, func.raw(), "length", V::num(length as f64), 4)?;
++    Ok(func)
++}
++/// Property lookup with the original JS key, unaffected by global overrides.
++pub(crate) fn intrinsic_get(cx: Ctx) -> R<V> {
+     build(cx)?;
+-    Ok(web(cx).then.clone_ref())
+-}
+-
+-/// The function cached at `index` (made on first use).
++    Ok(web(cx).reflect_get.clone_ref())
++}
+ pub(crate) fn cached_function(cx: Ctx, index: usize, name: &CStr, f: Native) -> R<V> {
+     if let Some(v) = web(cx).cached.get(index).filter(|v| !v.is_undefined()) {
+         return Ok(v.clone_ref());
+@@ -469,21 +314,14 @@
+     w.cached[index] = func.clone_ref();
+     Ok(func)
+ }
+-
+-/// The prototype of `class`.
+ pub(crate) fn proto(cx: Ctx, class: Class) -> R<V> {
+     build(cx)?;
+     Ok(web(cx).protos[class as usize].clone_ref())
+ }
+-
+-/// The constructor of `class`.
+ pub(crate) fn constructor(cx: Ctx, class: Class) -> R<V> {
+     build(cx)?;
+     Ok(web(cx).ctors[class as usize].clone_ref())
+ }
+-
+-/// A new object of `class` holding `data`: with `new_target`'s prototype
+-/// when constructed (`undefined`: made internally).
+ pub(crate) fn instance(cx: Ctx, new_target: Raw, class: Class, data: impl Object) -> R<V> {
+     let proto = if js::is_object(new_target) {
+         let p = js::get(cx, new_target, "prototype")?;
+@@ -497,31 +335,22 @@
+     };
+     instance_of_proto(cx, proto.raw(), data)
+ }
+-
+-/// A new object holding `data` with prototype `proto` (the classes of
+-/// Rust's `#[class]`, `classes.rs`, whose prototypes are made at run time).
+ pub(crate) fn instance_of_proto(cx: Ctx, proto: Raw, data: impl Object) -> R<V> {
+-    register(cx);
+-    let id = web(cx).object_class;
+-    // SAFETY: an object of the web class owning its slot.
++    let p = Box::into_raw(Box::new(Slot(RefCell::new(Box::new(data))))).cast();
++    let e = unsafe { (*cx).engine };
++    let raw = unsafe { (e.native_new)(e.user, cx, proto, 1, p, finalize_slot, trace_slot, None) };
++    if raw.tag == 8 {
++        unsafe { drop(Box::from_raw(p as *mut Slot)) };
++        return Err(Throw);
++    }
+     unsafe {
+-        let obj = V::checked(cx, qjs::JS_NewObjectProtoClass(cx, proto, id))?;
+-        let slot: Box<Slot> = Box::new(Slot(RefCell::new(Box::new(data))));
+-        qjs::JS_SetOpaque(obj.raw(), Box::into_raw(slot) as *mut c_void);
+-        Ok(obj)
+-    }
+-}
+-
++        (*cx).natives.borrow_mut().insert(p as usize, trace_slot);
++    }
++    V::checked(cx, raw)
++}
+ fn slot<'a>(cx: Ctx, v: Raw) -> Option<&'a Slot> {
+-    let id = web(cx).object_class;
+-    if id == 0 {
+-        return None;
+-    }
+-    // SAFETY: the opaque of the web class (null for other values); the
+-    // object outlives the borrow (callers hold `v`).
+-    unsafe { (js::opaque(v, id) as *const Slot).as_ref() }
+-}
+-
++    unsafe { (engine::native_get(cx, v, 1) as *const Slot).as_ref() }
++}
+ /// The data of `v` as a `T`, borrowed (`TypeError` for other values, and
+ /// for a re-entrant use).
+ pub(crate) fn data<'a, T: Object>(cx: Ctx, v: Raw, what: &str) -> R<RefMut<'a, T>> {
+@@ -567,332 +396,159 @@
+     RefMut::filter_map(b, |d| f(d.as_mut())).map_err(|_| illegal(cx))
+ }
+ 
+-native!(
+-    /// The constructor of a class made only internally.
+-    fn illegal_constructor(cx, this, args) {
+-        Err(js::type_error(cx, "Illegal constructor"))
+-    }
+-);
+-use js::native;
+-
+-/// Makes the classes and functions (once per context).
+ fn build(cx: Ctx) -> R<()> {
+-    register(cx);
+     if web(cx).built {
+         return Ok(());
+     }
+-    web(cx).built = true;
++    // Build in local vectors and publish only after success. Re-entrant host
++    // registration must not call Rust Web constructors during installation.
++    let global = js::global(cx);
++    let function = js::get(cx, global.raw(), "Function")?;
++    let function_proto = js::get(cx, function.raw(), "prototype")?;
++    let reflect = js::get(cx, global.raw(), "Reflect")?;
++    let reflect_get = js::get(cx, reflect.raw(), "get")?;
++    let mut protos: Vec<V> = (0..CLASS_COUNT).map(|_| V::undefined()).collect();
++    let mut ctors: Vec<V> = (0..CLASS_COUNT).map(|_| V::undefined()).collect();
++    for spec in specs() {
++        let methods: Vec<_> = spec
++            .methods
++            .iter()
++            .map(|(k, f, n)| {
++                let (name, symbol) = match k {
++                    Key::Name(n) => (n.as_ptr(), 0),
++                    Key::Iterator => (ptr::null(), 1),
++                    Key::AsyncIterator => (ptr::null(), 2),
++                };
++                engine::Method {
++                    name,
++                    symbol,
++                    call: *f,
++                    length: *n,
++                }
++            })
++            .collect();
++        let accessors: Vec<_> = spec
++            .accessors
++            .iter()
++            .map(|(n, g, s)| engine::Accessor {
++                name: n.as_ptr(),
++                get: *g,
++                set: *s,
++            })
++            .collect();
++        let statics: Vec<_> = spec
++            .statics
++            .iter()
++            .map(|(n, f, l)| engine::Method {
++                name: n.as_ptr(),
++                symbol: 0,
++                call: *f,
++                length: *l,
++            })
++            .collect();
++        let constants: Vec<_> = spec
++            .constants
++            .iter()
++            .map(|(n, v)| engine::Constant {
++                name: n.as_ptr(),
++                value: *v,
++            })
++            .collect();
++        let (f, length) = spec
++            .constructor
++            .map(|(f, l)| (Some(f), l))
++            .unwrap_or((None, 0));
++        let abi = engine::ClassSpec {
++            id: spec.class as u32,
++            name: spec.name.as_ptr(),
++            parent_id: spec.parent.map(|p| p as i32).unwrap_or(-1),
++            constructor: f,
++            length,
++            methods: methods.as_ptr(),
++            methods_len: methods.len(),
++            accessors: accessors.as_ptr(),
++            accessors_len: accessors.len(),
++            statics: statics.as_ptr(),
++            statics_len: statics.len(),
++            constants: constants.as_ptr(),
++            constants_len: constants.len(),
++            global: spec.global as u32,
++        };
++        let (pp, pc) = spec
++            .parent
++            .map(|p| (protos[p as usize].raw(), ctors[p as usize].raw()))
++            .unwrap_or((UNDEFINED, UNDEFINED));
++        let (mut p, mut c) = (UNDEFINED, UNDEFINED);
++        let e = unsafe { (*cx).engine };
++        if unsafe { (e.register_class)(e.user, cx, &abi, pp, pc, &mut p, &mut c) } < 0 {
++            return Err(Throw);
++        }
++        protos[spec.class as usize] = V::own(cx, p);
++        ctors[spec.class as usize] = V::own(cx, c);
++    }
++    // Match NSH's iterator helper inheritance, without any engine-private atom.
++    let array = js::new_array(cx, Vec::new())?;
++    let iterator = js::invoke(cx, array.raw(), "values", &[])?;
++    let parent = V::checked(
++        cx,
++        engine::op(cx, engine::Op::GetPrototype, iterator.raw(), &[], &[], 0),
++    )?;
++    let parent = V::checked(
++        cx,
++        engine::op(cx, engine::Op::GetPrototype, parent.raw(), &[], &[], 0),
++    )?;
++    V::checked(
++        cx,
++        engine::op(
++            cx,
++            engine::Op::SetPrototype,
++            protos[Class::Iterator as usize].raw(),
++            &[parent.raw()],
++            &[],
++            0,
++        ),
++    )?;
++    let w = web(cx);
++    w.protos = protos;
++    w.ctors = ctors;
++    w.function_proto = function_proto;
++    w.reflect_get = reflect_get;
++    w.built = true;
++    Ok(())
++}
++pub(crate) fn install(cx: Ctx) -> R<()> {
++    build(cx)?;
+     let g = js::global(cx);
+-    let promise = js::get(cx, g.raw(), "Promise")?;
+-    let promise_proto = js::get(cx, promise.raw(), "prototype")?;
+-    let then = js::get(cx, promise_proto.raw(), "then")?;
+-    let mut protos: Vec<Option<V>> = (0..CLASS_COUNT).map(|_| None).collect();
+-    let mut ctors: Vec<Option<V>> = (0..CLASS_COUNT).map(|_| None).collect();
+-    for spec in specs() {
+-        let (proto, ctor) = make_class(cx, spec, &protos, &ctors)?;
+-        protos[spec.class as usize] = Some(proto);
+-        ctors[spec.class as usize] = Some(ctor);
+-    }
+-    // The iterators inherit `%IteratorPrototype%`'s helpers.
+-    let array = js::new_array(cx, Vec::new())?;
+-    let array_iterator = js::invoke(cx, array.raw(), "values", &[])?;
+-    // SAFETY: live objects; the prototypes are borrowed.
+-    unsafe {
+-        let array_iterator_proto = V::own(cx, qjs::JS_GetPrototype(cx, array_iterator.raw()));
+-        let iterator_proto = V::own(cx, qjs::JS_GetPrototype(cx, array_iterator_proto.raw()));
+-        if let Some(p) = &protos[Class::Iterator as usize] {
+-            qjs::JS_SetPrototype(cx, p.raw(), iterator_proto.raw());
+-        }
+-    }
+-    let w = web(cx);
+-    w.protos = protos.into_iter().map(Option::unwrap_or_default).collect();
+-    w.ctors = ctors.into_iter().map(Option::unwrap_or_default).collect();
+-    w.then = then;
++    for spec in declared_specs() {
++        js::define(
++            cx,
++            g.raw(),
++            &spec.name.to_string_lossy(),
++            constructor(cx, spec.class)?,
++            false,
++        )?;
++    }
++    for f in functions() {
++        js::define(
++            cx,
++            g.raw(),
++            &f.name.to_string_lossy(),
++            js::function(cx, f.name, f.native, f.length)?,
++            false,
++        )?;
++    }
+     Ok(())
+ }
+-
+-fn make_class(cx: Ctx, spec: &Spec, protos: &[Option<V>], ctors: &[Option<V>]) -> R<(V, V)> {
+-    let parent = spec.parent.map(|p| p as usize);
+-    let proto = js::new_object(cx)?;
+-    if let Some(p) = parent.and_then(|p| protos[p].as_ref()) {
+-        // SAFETY: live objects.
+-        unsafe { qjs::JS_SetPrototype(cx, proto.raw(), p.raw()) };
+-    }
+-    let (f, length) = spec.constructor.unwrap_or((illegal_constructor, 0));
+-    // SAFETY: a constructor-only C function (`this` is `new.target`).
+-    let ctor = V::checked(cx, unsafe {
+-        qjs::JS_NewCFunction2(
+-            cx,
+-            Some(f),
+-            spec.name.as_ptr(),
+-            length,
+-            qjs::JSCFunctionEnum_JS_CFUNC_constructor,
+-            0,
+-        )
+-    })?;
+-    // SAFETY: links `prototype` / `constructor` both ways.
+-    unsafe { qjs::JS_SetConstructor(cx, ctor.raw(), proto.raw()) };
+-    if let Some(c) = parent.and_then(|p| ctors[p].as_ref()) {
+-        // SAFETY: static members are inherited too.
+-        unsafe { qjs::JS_SetPrototype(cx, ctor.raw(), c.raw()) };
+-    }
+-    for (key, f, length) in spec.methods {
+-        let (name, atom) = match key {
+-            Key::Name(n) => (*n, None),
+-            Key::Iterator => (c"[Symbol.iterator]", Some(qjs::JS_ATOM_Symbol_iterator)),
+-            Key::AsyncIterator => (
+-                c"[Symbol.asyncIterator]",
+-                Some(qjs::JS_ATOM_Symbol_asyncIterator),
+-            ),
+-        };
+-        let func = js::function(cx, name, *f, *length)?;
+-        let flags = (qjs::JS_PROP_WRITABLE | qjs::JS_PROP_CONFIGURABLE) as c_int;
+-        // SAFETY: the property takes the function.
+-        unsafe {
+-            match atom {
+-                Some(atom) => {
+-                    qjs::JS_DefinePropertyValue(cx, proto.raw(), atom as _, func.take(), flags);
+-                }
+-                None => {
+-                    qjs::JS_DefinePropertyValueStr(
+-                        cx,
+-                        proto.raw(),
+-                        name.as_ptr(),
+-                        func.take(),
+-                        flags,
+-                    );
+-                }
+-            }
+-        }
+-    }
+-    for (name, getter, setter) in spec.accessors {
+-        let get = js::function(cx, name, *getter, 0)?;
+-        let set = match setter {
+-            Some(s) => js::function(cx, name, *s, 1)?,
+-            None => V::undefined(),
+-        };
+-        // SAFETY: the property takes the functions.
+-        unsafe {
+-            let atom = qjs::JS_NewAtom(cx, name.as_ptr());
+-            qjs::JS_DefinePropertyGetSet(
+-                cx,
+-                proto.raw(),
+-                atom,
+-                get.take(),
+-                set.take(),
+-                (qjs::JS_PROP_CONFIGURABLE | qjs::JS_PROP_ENUMERABLE) as c_int,
+-            );
+-            qjs::JS_FreeAtom(cx, atom);
+-        }
+-    }
+-    for (name, f, length) in spec.statics {
+-        let func = js::function(cx, name, *f, *length)?;
+-        // SAFETY: the property takes the function.
+-        unsafe {
+-            qjs::JS_DefinePropertyValueStr(
+-                cx,
+-                ctor.raw(),
+-                name.as_ptr(),
+-                func.take(),
+-                (qjs::JS_PROP_WRITABLE | qjs::JS_PROP_CONFIGURABLE) as c_int,
+-            );
+-        }
+-    }
+-    for (name, value) in spec.constants {
+-        for target in [ctor.raw(), proto.raw()] {
+-            // SAFETY: a read-only, enumerable number.
+-            unsafe {
+-                qjs::JS_DefinePropertyValueStr(
+-                    cx,
+-                    target,
+-                    name.as_ptr(),
+-                    qjs::JS_NewFloat64(*value),
+-                    qjs::JS_PROP_ENUMERABLE as c_int,
+-                );
+-            }
+-        }
+-    }
+-    // `Object.prototype.toString` gives `[object Name]`, as in browsers
+-    // (libraries test kinds this way).
+-    let tag = js::string(cx, &spec.name.to_string_lossy())?;
+-    // SAFETY: the property takes the string.
+-    unsafe {
+-        qjs::JS_DefinePropertyValue(
+-            cx,
+-            proto.raw(),
+-            qjs::JS_ATOM_Symbol_toStringTag as _,
+-            tag.take(),
+-            qjs::JS_PROP_CONFIGURABLE as c_int,
+-        );
+-    }
+-    Ok((proto, ctor))
+-}
+-
+-/// The value of global `name` (a class or a function).
+-fn global_value(cx: Ctx, name: &CStr) -> R<V> {
+-    build(cx)?;
+-    if name == INTL {
+-        return intl::namespace(cx);
+-    }
+-    if let Some(spec) = specs().find(|s| s.global && s.name == name) {
+-        return constructor(cx, spec.class);
+-    }
+-    let f = functions()
+-        .find(|f| f.name == name)
+-        .ok_or_else(|| js::type_error(cx, "unknown global"))?;
+-    js::function(cx, f.name, f.native, f.length)
+-}
+-
+-/// `Intl`: a namespace, not a class.
+-const INTL: &CStr = c"Intl";
+-
+-/// The globals TypeScript's ECMAScript library declares (`globals.d.ts`
+-/// does not).
+-#[cfg(test)]
+-pub(crate) const ECMASCRIPT_GLOBALS: &[&str] = &["Intl"];
+-
+-fn global_names() -> impl Iterator<Item = &'static CStr> {
+-    specs()
+-        .filter(|s| s.global)
+-        .map(|s| s.name)
+-        .chain(functions().map(|f| f.name))
+-        .chain([INTL])
+-}
+-
+-/// Replaces the lazy accessors still in place with the values.
+-fn materialize(cx: Ctx) -> R<()> {
+-    let g = js::global(cx);
+-    for name in global_names() {
+-        // SAFETY: reading an own property's descriptor of the global.
+-        let accessor = unsafe {
+-            let atom = qjs::JS_NewAtom(cx, name.as_ptr());
+-            let mut desc = std::mem::zeroed::<qjs::JSPropertyDescriptor>();
+-            let r = qjs::JS_GetOwnProperty(cx, &mut desc, g.raw(), atom);
+-            qjs::JS_FreeAtom(cx, atom);
+-            if r < 0 {
+-                return Err(Throw);
+-            }
+-            let accessor = r == 1 && (desc.flags & qjs::JS_PROP_GETSET as c_int) != 0;
+-            if r == 1 {
+-                qjs::JS_FreeValue(cx, desc.value);
+-                qjs::JS_FreeValue(cx, desc.getter);
+-                qjs::JS_FreeValue(cx, desc.setter);
+-            }
+-            accessor
+-        };
+-        if accessor {
+-            let value = global_value(cx, name)?;
+-            js::define(cx, g.raw(), &name.to_string_lossy(), value, false)?;
+-        }
+-    }
+-    Ok(())
+-}
+-
+-/// The lazy accessor of the globals: makes everything, then returns
+-/// global `magic`.
+-unsafe extern "C" fn lazy_get(
+-    cx: Ctx,
+-    _this: Raw,
+-    _argc: c_int,
+-    _argv: *mut Raw,
+-    magic: c_int,
+-    _data: *mut Raw,
+-) -> Raw {
+-    let Some(name) = global_names().nth(magic as usize) else {
+-        return UNDEFINED;
+-    };
+-    let result = (|| {
+-        materialize(cx)?;
+-        let g = js::global(cx);
+-        js::get(cx, g.raw(), &name.to_string_lossy())
+-    })();
+-    match result {
+-        Ok(v) => v.take(),
+-        Err(Throw) => qjs::JS_EXCEPTION,
+-    }
+-}
+-
+-/// An app assigning a global before reading it: its value wins.
+-unsafe extern "C" fn lazy_set(
+-    cx: Ctx,
+-    _this: Raw,
+-    argc: c_int,
+-    argv: *mut Raw,
+-    magic: c_int,
+-    _data: *mut Raw,
+-) -> Raw {
+-    let Some(name) = global_names().nth(magic as usize) else {
+-        return UNDEFINED;
+-    };
+-    // SAFETY: QuickJS passes `argc` live arguments.
+-    let value = unsafe { Args::new(argc, argv) }.get(0);
+-    let g = js::global(cx);
+-    match js::define(
+-        cx,
+-        g.raw(),
+-        &name.to_string_lossy(),
+-        V::dup(cx, value),
+-        false,
+-    ) {
+-        Ok(()) => UNDEFINED,
+-        Err(Throw) => qjs::JS_EXCEPTION,
+-    }
+-}
+-
+-/// Delivers an event of request `id` (from the network stack).
+ pub(crate) fn fetch_event(
+     cx: Ctx,
+     id: crate::net::RequestId,
+     event: crate::net::FetchEvent,
+ ) -> R<()> {
+-    // Events of requests made before the classes were (none) need nothing.
+-    if !web(cx).built {
+-        return Ok(());
+-    }
+     fetch::event(cx, id, event)
+ }
+-
+-/// Fails request `id`, which the app's capabilities do not grant
+-/// (`fetch` rejects with a `TypeError` whose `code` is
+-/// `ERR_ACCESS_DENIED`).
+-pub(crate) fn fetch_refused(cx: Ctx, id: crate::net::RequestId, message: &str, url: &str) -> R<()> {
+-    if !web(cx).built {
+-        return Ok(());
+-    }
+-    fetch::refused(cx, id, message, url)
+-}
+-
+-/// Cancels the requests whose response bodies were collected unread.
++pub(crate) fn http_data_buffer(cx: Ctx, id: crate::net::RequestId, view: Raw) -> R<()> {
++    fetch::data_buffer(cx, id, view)
++}
+ pub(crate) fn forget_dropped_fetches(cx: Ctx) {
+     fetch::forget_dropped(cx);
+ }
+-
+-/// Defines the globals as accessors that make the classes on first use
+-/// (an app that uses none pays nothing).
+-pub(crate) fn install(cx: Ctx) -> rquickjs::Result<()> {
+-    intl::install(cx).map_err(|Throw| rquickjs::Error::Exception)?;
+-    let g = js::global(cx);
+-    for (i, name) in global_names().enumerate() {
+-        // SAFETY: new functions the property takes.
+-        unsafe {
+-            let get =
+-                qjs::JS_NewCFunctionData(cx, Some(lazy_get), 0, i as c_int, 0, ptr::null_mut());
+-            let set =
+-                qjs::JS_NewCFunctionData(cx, Some(lazy_set), 1, i as c_int, 0, ptr::null_mut());
+-            let atom = qjs::JS_NewAtom(cx, name.as_ptr());
+-            let r = qjs::JS_DefinePropertyGetSet(
+-                cx,
+-                g.raw(),
+-                atom,
+-                get,
+-                set,
+-                qjs::JS_PROP_CONFIGURABLE as c_int,
+-            );
+-            qjs::JS_FreeAtom(cx, atom);
+-            if r < 0 {
+-                return Err(rquickjs::Error::Exception);
+-            }
+-        }
+-    }
+-    Ok(())
+-}
+--- a/upstream/web/streams/mod.rs
++++ b/src/web/streams/mod.rs
+@@ -249,10 +249,8 @@
+     let bytes = std::rc::Rc::new(std::cell::RefCell::new(Some(bytes)));
+     let pull = js::closure(cx, Vec::new(), move |cx, _, args| {
+         let controller = args.get(0);
+-        if let Some(b) = bytes.borrow_mut().take()
+-            && !b.is_empty()
+-        {
+-            readable::enqueue_bytes(cx, controller, &b)?;
++        if let Some(b) = bytes.borrow_mut().take() {
++            if !b.is_empty() { readable::enqueue_bytes(cx, controller, &b)?; }
+         }
+         readable::close_controller(cx, controller)?;
+         Ok(V::undefined())
+--- a/upstream/web/streams/readable.rs
++++ b/src/web/streams/readable.rs
+@@ -902,10 +902,8 @@
+         .pending
+         .front()
+         .map(|p| (p.buffer.clone_ref(), p.offset, p.filled));
+-    if let Some((buffer, offset, filled)) = first
+-        && filled > 0
+-    {
+-        bc_enqueue_cloned_chunk(cx, c, buffer.raw(), offset, filled)?;
++    if let Some((buffer, offset, filled)) = first {
++        if filled > 0 { bc_enqueue_cloned_chunk(cx, c, buffer.raw(), offset, filled)?; }
+     }
+     bc_shift_pending(cx, c)?;
+     Ok(())
+@@ -995,7 +993,7 @@
+     bc_handle_queue_drain(cx, c)?;
+     let view = js::new_view(
+         cx,
+-        Some(rquickjs::qjs::JSTypedArrayEnum_JS_TYPED_ARRAY_UINT8 as c_int),
++        Some(crate::engine::UINT8 as c_int),
+         entry.buffer.raw(),
+         entry.offset,
+         entry.len,
+@@ -1086,7 +1084,7 @@
+             }
+             let view = js::new_view(
+                 cx,
+-                Some(rquickjs::qjs::JSTypedArrayEnum_JS_TYPED_ARRAY_UINT8 as c_int),
++                Some(crate::engine::UINT8 as c_int),
+                 transferred.raw(),
+                 offset,
+                 len,
+@@ -1123,7 +1121,7 @@
+     };
+     let view = js::new_view(
+         cx,
+-        Some(rquickjs::qjs::JSTypedArrayEnum_JS_TYPED_ARRAY_UINT8 as c_int),
++        Some(crate::engine::UINT8 as c_int),
+         buffer.raw(),
+         offset,
+         len,
+@@ -1336,7 +1334,7 @@
+             filled: 0,
+             min: 1,
+             element: 1,
+-            kind: Some(rquickjs::qjs::JSTypedArrayEnum_JS_TYPED_ARRAY_UINT8 as c_int),
++            kind: Some(crate::engine::UINT8 as c_int),
+             reader: ReaderType::Default,
+         });
+     }
+@@ -1890,10 +1888,10 @@
+         if controller.is_undefined() {
+             return Err(js::type_error(cx, "the request was already answered"));
+         }
+-        if let Some(v) = js::view(cx, view.raw())
+-            && js::is_detached(cx, v.buffer.raw())
+-        {
+-            return Err(js::type_error(cx, "the view's buffer is detached"));
++        if let Some(v) = js::view(cx, view.raw()) {
++            if js::is_detached(cx, v.buffer.raw()) {
++                return Err(js::type_error(cx, "the view's buffer is detached"));
++            }
+         }
+         bc_respond(cx, controller.raw(), written)?;
+         Ok(V::undefined())
+@@ -3210,9 +3208,9 @@
+         if js::is_nullish(iterable) {
+             return Err(js::type_error(cx, "ReadableStream.from needs an iterable"));
+         }
+-        let async_method = js::get_atom(cx, iterable, rquickjs::qjs::JS_ATOM_Symbol_asyncIterator as _)?;
++        let async_method = js::get_atom(cx, iterable, crate::engine::ASYNC_ITERATOR as _)?;
+         let (method, sync) = if js::is_nullish(async_method.raw()) {
+-            let m = js::get_atom(cx, iterable, rquickjs::qjs::JS_ATOM_Symbol_iterator as _)?;
++            let m = js::get_atom(cx, iterable, crate::engine::ITERATOR as _)?;
+             if !js::is_function(cx, m.raw()) {
+                 return Err(js::type_error(cx, "the value is not iterable"));
+             }
+@@ -3327,11 +3325,7 @@
+                 return Ok(());
+             };
+             a1.borrow_mut().extend_from_slice(bytes);
+-            let d = Deferred {
+-                promise: c[1].clone_ref(),
+-                resolve: c[2].clone_ref(),
+-                reject: c[3].clone_ref(),
+-            };
++            let d = Deferred::from_parts(c[1].clone_ref(),c[2].clone_ref(),c[3].clone_ref());
+             read_all_step(cx, c[0].clone_ref(), d, a1.clone())
+         },
+         move |cx, c, _| {
+--- a/upstream/web/streams/text.rs
++++ b/src/web/streams/text.rs
+@@ -61,12 +61,12 @@
+             _ => out.extend_from_slice("\u{FFFD}".as_bytes()),
+         }
+     }
+-    if bytes.len() >= 3
+-        && let Some(last) = surrogate(&bytes[bytes.len() - 3..])
+-        && (0xD800..0xDC00).contains(&last)
+-    {
+-        *pending = Some(last);
+-        bytes = &bytes[..bytes.len() - 3];
++    if bytes.len() >= 3 {
++        if let Some(last) = surrogate(&bytes[bytes.len() - 3..]) {
++            if (0xD800..0xDC00).contains(&last) {
++                *pending = Some(last); bytes = &bytes[..bytes.len() - 3];
++            }
++        }
+     }
+     out.extend_from_slice(js::from_wtf8(bytes).as_bytes());
+     out
+--- a/upstream/web/streams/transform.rs
++++ b/src/web/streams/transform.rs
+@@ -180,8 +180,7 @@
+             st.controller.clone_ref(),
+         )
+     };
+-    if backpressure == Some(true)
+-        && let Some(change) = change
++    if let Some(change) = change.filter(|_|backpressure == Some(true))
+     {
+         let then = js::closure(
+             cx,
+@@ -218,11 +217,7 @@
+     let algo = {
+         let mut ct = controller(cx, c)?;
+         let a = run(&ct);
+-        ct.finish = Some(Deferred {
+-            promise: d.promise.clone_ref(),
+-            resolve: d.resolve.clone_ref(),
+-            reject: d.reject.clone_ref(),
+-        });
++        ct.finish = Some(d.clone_ref());
+         a
+     };
+     let p = algo.promise(cx, args)?;
+--- a/upstream/web/streams/writable.rs
++++ b/src/web/streams/writable.rs
+@@ -151,12 +151,9 @@
+     Ok(d)
+ }
+ 
+-fn is_pending(cx: Ctx, d: &Deferred) -> bool {
++fn is_pending(_cx: Ctx, d: &Deferred) -> bool {
+     // SAFETY: a live promise.
+-    unsafe {
+-        rquickjs::qjs::JS_PromiseState(cx, d.promise.raw())
+-            == rquickjs::qjs::JSPromiseStateEnum_JS_PROMISE_PENDING
+-    }
++    d.is_pending()
+ }
+ 
+ fn new_stream(cx: Ctx, new_target: Raw) -> R<V> {
+@@ -243,8 +240,8 @@
+         )
+     };
+     if !w.is_undefined() && backpressure && state == WState::Writable {
+-        let resolve = writer(cx, w.raw())?.ready.resolve.clone_ref();
+-        js::call(cx, resolve.raw(), js::UNDEFINED, &[js::UNDEFINED])?;
++        let capability = writer(cx, w.raw())?.ready.clone_ref();
++        capability.resolve(cx, js::UNDEFINED);
+     }
+     controller_close(cx, c.raw())?;
+     Ok(result)
+@@ -358,8 +355,8 @@
+         a.promise.resolve(cx, js::UNDEFINED);
+     }
+     if !w.is_undefined() {
+-        let resolve = writer(cx, w.raw())?.closed.resolve.clone_ref();
+-        js::call(cx, resolve.raw(), js::UNDEFINED, &[js::UNDEFINED])?;
++        let capability = writer(cx, w.raw())?.closed.clone_ref();
++        capability.resolve(cx, js::UNDEFINED);
+     }
+     Ok(())
+ }
+@@ -392,12 +389,9 @@
+         d.reject(cx, err.raw());
+     }
+     if !w.is_undefined() {
+-        let closed = {
+-            let wr = writer(cx, w.raw())?;
+-            (wr.closed.reject.clone_ref(), wr.closed.promise.clone_ref())
+-        };
+-        js::call(cx, closed.0.raw(), js::UNDEFINED, &[err.raw()])?;
+-        js::mark_handled(cx, closed.1.raw());
++        let closed = writer(cx, w.raw())?.closed.clone_ref();
++        closed.reject(cx, err.raw());
++        js::mark_handled(cx, closed.promise.raw());
+     }
+     Ok(())
+ }
+@@ -414,8 +408,8 @@
+             let old = std::mem::replace(&mut writer(cx, w.raw())?.ready, d);
+             drop(old);
+         } else {
+-            let resolve = writer(cx, w.raw())?.ready.resolve.clone_ref();
+-            js::call(cx, resolve.raw(), js::UNDEFINED, &[js::UNDEFINED])?;
++            let capability = writer(cx, w.raw())?.ready.clone_ref();
++            capability.resolve(cx, js::UNDEFINED);
+         }
+     }
+     stream(cx, s)?.backpressure = backpressure;
+@@ -486,12 +480,9 @@
+ fn ensure_ready_rejected(cx: Ctx, w: Raw, e: Raw) -> R<()> {
+     let pending = is_pending(cx, &writer(cx, w)?.ready);
+     if pending {
+-        let (reject, promise) = {
+-            let wr = writer(cx, w)?;
+-            (wr.ready.reject.clone_ref(), wr.ready.promise.clone_ref())
+-        };
+-        js::call(cx, reject.raw(), js::UNDEFINED, &[e])?;
+-        js::mark_handled(cx, promise.raw());
++        let capability = writer(cx, w)?.ready.clone_ref();
++        capability.reject(cx, e);
++        js::mark_handled(cx, capability.promise.raw());
+     } else {
+         let d = rejected_deferred(cx, e)?;
+         let old = std::mem::replace(&mut writer(cx, w)?.ready, d);
+@@ -503,12 +494,9 @@
+ fn ensure_closed_rejected(cx: Ctx, w: Raw, e: Raw) -> R<()> {
+     let pending = is_pending(cx, &writer(cx, w)?.closed);
+     if pending {
+-        let (reject, promise) = {
+-            let wr = writer(cx, w)?;
+-            (wr.closed.reject.clone_ref(), wr.closed.promise.clone_ref())
+-        };
+-        js::call(cx, reject.raw(), js::UNDEFINED, &[e])?;
+-        js::mark_handled(cx, promise.raw());
++        let capability = writer(cx, w)?.closed.clone_ref();
++        capability.reject(cx, e);
++        js::mark_handled(cx, capability.promise.raw());
+     } else {
+         let d = rejected_deferred(cx, e)?;
+         let old = std::mem::replace(&mut writer(cx, w)?.closed, d);
+--- a/upstream/web/url.rs
++++ b/src/web/url.rs
+@@ -554,3 +554,5 @@
+         .declared(),
+     },
+ ];
++
++#[cfg(test)] mod port_tests { use super::*; include!("../../tests/url.rs"); }
+--- a/upstream/web/websocket.rs
++++ b/src/web/websocket.rs
+@@ -5,7 +5,6 @@
+ 
+ use std::ffi::c_int;
+ 
+-use rquickjs::qjs;
+ 
+ use super::{
+     Class, Object, Spec, data,
+@@ -110,8 +109,7 @@
+ /// Defines `key` on event `e` as the browser's events have it: read-only.
+ fn define_readonly(cx: Ctx, e: Raw, key: &std::ffi::CStr, value: V) -> R<()> {
+     // SAFETY: the property takes the value.
+-    let r = unsafe { qjs::JS_DefinePropertyValueStr(cx, e, key.as_ptr(), value.take(), 0) };
+-    if r < 0 { Err(js::Throw) } else { Ok(()) }
++    js::define_flags(cx, e, &key.to_string_lossy(), value, 0)
+ }
+ 
+ /// The transport's event `kind` with its `data`, dispatched at `obj`.
+@@ -145,11 +143,16 @@
+     let e = event::trusted(cx, kind)?;
+     match kind {
+         "message" => {
+-            let value = match js::buffer_source(cx, data) {
+-                Some(bytes) if !array_buffers => {
+-                    super::blob::new_blob(cx, super::blob::Blob::new(bytes, String::new()))?
++            let value = if array_buffers {
++                V::dup(cx, data)
++            } else {
++                // Blob owns a snapshot; ArrayBuffer delivery keeps the original
++                // engine backing without creating an unused Rust Vec.
++                match js::buffer_source(cx, data) {
++                    Some(bytes) => super::blob::new_blob(
++                        cx, super::blob::Blob::new(bytes, String::new()))?,
++                    None => V::dup(cx, data),
+                 }
+-                _ => V::dup(cx, data),
+             };
+             define_readonly(cx, e.raw(), c"data", value)?;
+         }

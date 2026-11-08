@@ -118,7 +118,7 @@ def valdi_android_aar(
         deps = ANDROIDX_RUNTIME_LIBRARIES,
     )
 
-def valdi_test(name, srcs = [], hdrs = {}, deps = [], data = None, size = None):
+def valdi_test(name, srcs = [], hdrs = {}, deps = [], data = None, size = None, target_compatible_with = []):
     lib_name = "{}_lib".format(name)
     native.cc_library(
         name = lib_name,
@@ -131,11 +131,13 @@ def valdi_test(name, srcs = [], hdrs = {}, deps = [], data = None, size = None):
         deps = ([
             "@gtest//:gtest",
         ] + deps),
+        target_compatible_with = target_compatible_with,
     )
 
     kwargs = {
         "name": name,
         "linkstatic": True,
+        "target_compatible_with": target_compatible_with,
         "visibility": ["//visibility:public"],
         "deps": [
             ":{}".format(lib_name),

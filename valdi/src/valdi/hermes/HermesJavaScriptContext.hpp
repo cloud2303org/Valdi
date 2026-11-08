@@ -11,6 +11,7 @@
 #include "valdi/hermes/HermesDebuggerRegistry.hpp"
 #include "valdi/hermes/HermesUtils.hpp"
 #include "valdi/runtime/Interfaces/IJavaScriptContext.hpp"
+#include "valdi/runtime/Interfaces/IJavaScriptNativeWebSupport.hpp"
 
 #include <vector>
 
@@ -24,7 +25,7 @@ class ILogger;
 
 namespace Valdi::Hermes {
 
-class HermesJavaScriptContext : public IJavaScriptContext {
+class HermesJavaScriptContext : public IJavaScriptContext, public IJavaScriptNativeWebSupport {
 public:
     explicit HermesJavaScriptContext(JavaScriptTaskScheduler* taskScheduler, ILogger& logger);
     ~HermesJavaScriptContext() override;
@@ -52,6 +53,31 @@ public:
     JSValueRef newObject(JSExceptionTracker& exceptionTracker) final;
 
     JSValueRef newFunction(const Ref<JSFunction>& callable, JSExceptionTracker& exceptionTracker) final;
+
+    JSValueRef newWebConstructor(const Ref<JSFunction>& callback,
+                                const StringBox& name,
+                                int32_t length,
+                                JSExceptionTracker& exceptionTracker) final;
+
+    NativeWebValueKind getWebValueKind(const JSValue& value) final;
+
+    bool getWebBufferInfo(const JSValue& value,
+                          NativeWebBufferInfo& info,
+                          JSExceptionTracker& exceptionTracker) final;
+
+    JSValueRef newWebArrayBuffer(const uint8_t* bytes, size_t size, JSExceptionTracker& exceptionTracker) final;
+
+    JSValueRef newWebBufferView(const JSValue& buffer,
+                               size_t byteOffset,
+                               size_t elementCount,
+                               int32_t kind,
+                               JSExceptionTracker& exceptionTracker) final;
+
+    void detachWebArrayBuffer(const JSValue& buffer, JSExceptionTracker& exceptionTracker) final;
+
+    std::string valueToWebWTF8(const JSValue& value, JSExceptionTracker& exceptionTracker) final;
+
+    JSValueRef transferWebArrayBuffer(const JSValue& buffer, JSExceptionTracker& exceptionTracker) final;
 
     JSValueRef newStringUTF8(const std::string_view& str, JSExceptionTracker& exceptionTracker) final;
 

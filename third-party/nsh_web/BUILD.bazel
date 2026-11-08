@@ -1,0 +1,83 @@
+load("@rules_rust//rust:defs.bzl", "rust_library", "rust_static_library", "rust_test")
+load(":test_assets.bzl", "runtime_test_assets")
+
+exports_files(["Cargo.toml", "Cargo.lock"])
+
+rust_library(
+    name = "transport",
+    srcs = ["//libs/nsh_web_transport:sources"],
+    crate_name = "valdi_nsh_transport",
+    crate_root = "//libs/nsh_web_transport:src/lib.rs",
+    edition = "2024",
+    deps = [
+        "@nsh_web_crates//:futures-util",
+        "@nsh_web_crates//:rustls",
+        "@nsh_web_crates//:tokio",
+        "@nsh_web_crates//:tokio-tungstenite",
+        "@nsh_web_crates//:url",
+    ] + select({
+        "@platforms//os:android": [
+            "@nsh_web_crates//:jni",
+            "@nsh_web_crates//:rustc-hash",
+        ],
+        "@platforms//os:ios": [
+            "@nsh_web_crates//:block2",
+            "@nsh_web_crates//:objc2",
+            "@nsh_web_crates//:objc2-foundation",
+            "@nsh_web_crates//:rustc-hash",
+        ],
+        "//conditions:default": ["@nsh_web_crates//:ureq"],
+    }),
+)
+
+WEB_DEPS = [
+    ":transport",
+    "@nsh_web_crates//:percent-encoding",
+    "@nsh_web_crates//:rustc-hash",
+    "@nsh_web_crates//:url",
+]
+
+rust_library(
+    name = "web",
+    srcs = ["//libs/nsh_web:sources"],
+    crate_name = "valdi_nsh_web",
+    crate_root = "//libs/nsh_web:src/lib.rs",
+    edition = "2024",
+    deps = WEB_DEPS,
+)
+
+rust_static_library(
+    name = "web_static",
+    srcs = ["//libs/nsh_web:sources"],
+    crate_name = "valdi_nsh_web",
+    crate_root = "//libs/nsh_web:src/lib.rs",
+    edition = "2024",
+    deps = WEB_DEPS,
+)
+
+cc_library(
+    name = "native_web",
+    hdrs = [
+        "//libs/nsh_web:headers",
+        "//libs/nsh_web_transport:headers",
+    ],
+    includes = ["../.."],
+    visibility = ["//visibility:public"],
+    deps = [":web_static"],
+)
+
+rust_test(
+    name = "web_test",
+    crate = ":web",
+    compile_data = ["//libs/nsh_web:tests"],
+)
+
+runtime_test_assets(
+    name = "runtime_test_assets",
+    srcs = [
+        "//src/valdi_modules/src/valdi/%s:android.debug.valdimodule" % name
+        for name in ["coreutils", "drawing", "jasmine", "source_map", "valdi_core", "valdi_tsx"]
+    ],
+    visibility = ["//valdi:__pkg__"],
+    testonly = True,
+)

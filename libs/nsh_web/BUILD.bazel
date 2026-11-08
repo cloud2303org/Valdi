@@ -1,0 +1,20 @@
+exports_files(["Cargo.toml", "Cargo.lock"])
+exports_files(["src/lib.rs"], visibility = ["//third-party/nsh_web:__pkg__"])
+
+filegroup(
+    name = "sources",
+    srcs = glob(["src/**/*.rs"]),
+    visibility = ["//third-party/nsh_web:__pkg__"],
+)
+
+filegroup(
+    name = "headers",
+    srcs = glob(["include/*.h"]),
+    visibility = ["//third-party/nsh_web:__pkg__"],
+)
+
+filegroup(
+    name = "tests",
+    srcs = glob(["tests/**/*.rs"]),
+    visibility = ["//third-party/nsh_web:__pkg__"],
+)

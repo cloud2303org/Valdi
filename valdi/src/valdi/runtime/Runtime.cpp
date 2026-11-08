@@ -38,6 +38,9 @@
 #include "valdi/runtime/JavaScript/Modules/ProtobufModuleFactory.hpp"
 #include "valdi/runtime/JavaScript/Modules/TCPSocketModuleFactory.hpp"
 #include "valdi/runtime/JavaScript/Modules/UnicodeModuleFactory.hpp"
+#ifdef VALDI_NATIVE_WEB
+#include "valdi/runtime/NativeWeb/NativeWeb.hpp"
+#endif
 
 #include "valdi/runtime/Metrics/Metrics.hpp"
 
@@ -220,6 +223,9 @@ void Runtime::postInit() {
         registerJavaScriptModuleFactory(makeShared<ProtobufModuleFactory>(*_resourceManager, _workerQueue, *_logger));
         registerJavaScriptModuleFactory(makeShared<UnicodeModuleFactory>());
         registerJavaScriptModuleFactory(makeShared<Base64ModuleFactory>());
+#ifdef VALDI_NATIVE_WEB
+        registerJavaScriptModuleFactory(makeShared<NativeWebModuleFactory>());
+#endif
 
         if constexpr (kTCPSocketEnabled) {
             registerNativeModuleFactory(makeShared<TCPSocketModuleFactory>().toShared());

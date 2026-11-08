@@ -9,6 +9,9 @@
 #include "valdi/android/ValdiFunctionNative.hpp"
 #include "valdi/android/ValueMarshallerRegistryCppJNI.hpp"
 #include "valdi/jni/JavaThread.hpp"
+#ifdef VALDI_NATIVE_WEB
+#include "libs/nsh_web_transport/include/valdi_nsh_transport_android.h"
+#endif
 
 #if SNAP_DRAWING_ENABLED
 #include "valdi/android/AnimatedImageJNI.hpp"
@@ -38,4 +41,14 @@ djinni::JniClassInitializer valdiJNIOnLoad([] { // NOLINT(fuchsia-statically-con
         }
 #endif
     });
+#ifdef VALDI_NATIVE_WEB
+    auto* env = djinni::jniGetThreadEnv();
+    if (valdi_nsh_transport_init_android(env) != 0) {
+        auto errorClass = env->FindClass("java/lang/IllegalStateException");
+        if (errorClass != nullptr) {
+            env->ThrowNew(errorClass, "Could not initialize the NSH network transport");
+            env->DeleteLocalRef(errorClass);
+        }
+    }
+#endif
 });

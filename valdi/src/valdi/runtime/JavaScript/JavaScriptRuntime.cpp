@@ -53,6 +53,9 @@
 #include "valdi/runtime/JavaScript/JavaScriptANRDetector.hpp"
 #include "valdi/runtime/JavaScript/JavaScriptRuntimeDeserializers.hpp"
 #include "valdi/runtime/JavaScript/Modules/JavaScriptModuleFactory.hpp"
+#ifdef VALDI_NATIVE_WEB
+#include "valdi/runtime/NativeWeb/NativeWeb.hpp"
+#endif
 
 #include "valdi/runtime/Interfaces/IDiskCache.hpp"
 
@@ -412,6 +415,13 @@ JavaScriptRuntime::~JavaScriptRuntime() {
     if (_joinJsThreadOnTeardown) {
         _dispatchQueue->fullTeardown();
     }
+#ifdef VALDI_NATIVE_WEB
+    // Partial teardown keeps the VM alive but has already shut Web state down
+    // on its queue. Only retire its closed registry entry here.
+    if (_javaScriptContext != nullptr) {
+        NativeWeb::release(*_javaScriptContext);
+    }
+#endif
 }
 
 void JavaScriptRuntime::doInitialize() {
@@ -500,13 +510,25 @@ void JavaScriptRuntime::teardown(bool destroyContext) {
     if (destroyContext) {
         _dispatchQueue->safeSync([&]() { teardownOnJsThread(true); });
     } else {
+#ifdef VALDI_NATIVE_WEB
+        // Application termination can call this off the JS thread while a
+        // native Web callback is running. Retain the runtime until that call
+        // finishes and serialize cleanup without blocking the caller.
+        _dispatchQueue->async([self = strongSmallRef(this)]() { self->teardownOnJsThread(false); });
+#else
         teardownOnJsThread(false);
+#endif
     }
 }
 
 void JavaScriptRuntime::teardownOnJsThread(bool destroyContext) {
     // requestFullTeardown() reaches here without going through teardown().
     markWorkersHostTornDown();
+#ifdef VALDI_NATIVE_WEB
+    if (_javaScriptContext != nullptr) {
+        NativeWeb::shutdown(*_javaScriptContext);
+    }
+#endif
 
     if (_anrDetector != nullptr) {
         _anrDetector->removeTaskScheduler(this);
@@ -546,6 +568,12 @@ void JavaScriptRuntime::teardownOnJsThread(bool destroyContext) {
     }
     _runtimeDeserializers = nullptr;
     _propertyNameIndex.setContext(nullptr);
+
+#ifdef VALDI_NATIVE_WEB
+    if (_javaScriptContext != nullptr) {
+        NativeWeb::release(*_javaScriptContext);
+    }
+#endif
 
     Weak<IJavaScriptContext> weakJavaScriptContext;
     {
@@ -4335,6 +4363,8 @@ static StringBox dispatchReasonName(JsThreadDispatchReason reason) {
             return STRING_LITERAL("runtime.startProfiling");
         case JsThreadDispatchReason::StopProfiling:
             return STRING_LITERAL("runtime.stopProfiling");
+        case JsThreadDispatchReason::NativeWeb:
+            return STRING_LITERAL("NativeWeb");
     }
     return STRING_LITERAL("runtime.dispatch");
 }

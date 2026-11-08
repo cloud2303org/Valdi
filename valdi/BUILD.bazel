@@ -13,6 +13,11 @@ load("valdi.bzl", "ANDROIDX_RUNTIME_LIBRARIES", "valdi_test", COMPILER_FLAGS_COM
 
 exports_files(["src/valdi/.clang-tidy"])
 
+config_setting(
+    name = "native_web_enabled",
+    define_values = {"valdi_native_web": "true"},
+)
+
 kt_kotlinc_options(
     name = "kotlinc_opts",
     warn = "off",
@@ -174,12 +179,19 @@ cc_library(
     srcs = glob([
         "src/valdi/runtime/**/*.c",
         "src/valdi/runtime/**/*.cpp",
-    ]),
+    ], exclude = ["src/valdi/runtime/NativeWeb/**"]) + select({
+        ":native_web_enabled": glob(["src/valdi/runtime/NativeWeb/**/*.cpp"]),
+        "//conditions:default": [],
+    }),
     hdrs = glob([
         "src/valdi/runtime/**/*.h",
         "src/valdi/runtime/**/*.hpp",
     ]),
     copts = COMMON_COMPILE_FLAGS + CC_COMPILER_FLAGS + ["-Wno-deprecated-this-capture"],
+    local_defines = select({
+        ":native_web_enabled": ["VALDI_NATIVE_WEB=1"],
+        "//conditions:default": [],
+    }),
     strip_include_prefix = "src",
     visibility = ["//visibility:public"],
     deps = [
@@ -196,7 +208,10 @@ cc_library(
         "@phmap",
         "@xxhash",
         "@zstd",
-    ],
+    ] + select({
+        ":native_web_enabled": ["//third-party/nsh_web:native_web"],
+        "//conditions:default": [],
+    }),
 )
 
 # ViewManager implementation using the snap_drawing library.
@@ -438,6 +453,10 @@ cc_library(
     ]),
     copts = CC_COMPILER_FLAGS + ["-DANDROID"],
     defines = SNAP_DRAWING_ENABLED_DEFINES,
+    local_defines = select({
+        ":native_web_enabled": ["VALDI_NATIVE_WEB=1"],
+        "//conditions:default": [],
+    }),
     linkopts = [
         "-landroid",
         "-lEGL",
@@ -455,7 +474,10 @@ cc_library(
         "//libs/utils:utils_core_cc",
         "//libs/utils:utils_encoding_cc",
         "//valdi_core:valdi_core_android",
-    ],
+    ] + select({
+        ":native_web_enabled": ["//third-party/nsh_web:native_web"],
+        "//conditions:default": [],
+    }),
     alwayslink = True,
 )
 
@@ -495,7 +517,10 @@ kt_android_library(
     srcs = glob([
         "src/java/**/*.java",
         "src/java/**/*.kt",
-    ]) + ["//valdi:djinni_java_srcs"],
+    ]) + ["//valdi:djinni_java_srcs"] + select({
+        ":native_web_enabled": ["//libs/nsh_web_transport:java"],
+        "//conditions:default": [],
+    }),
     kotlinc_opts = ":kotlinc_opts",
     visibility = ["//visibility:public"],
     exports = [
@@ -1256,6 +1281,69 @@ valdi_test(
 
 # Engine-boundary regressions without compiling the UI integration fixtures and their modules.
 valdi_test(
+    name = "test_nsh_engine",
+    srcs = glob(["test/native_web_engine/**/*.cpp"]) + [
+        "test/integration/JSBridgeTestFixture.cpp",
+        "test/integration/JSIntegrationTestsUtils.cpp",
+    ],
+    hdrs = [
+        "test/integration/JSBridgeTestFixture.hpp",
+        "test/integration/JSIntegrationTestsUtils.hpp",
+    ],
+    deps = [
+        ":test_utils",
+        ":valdi_runtime_with_vm",
+    ],
+)
+
+valdi_test(
+    name = "test_nsh",
+    target_compatible_with = select({
+        ":native_web_enabled": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    srcs = glob([
+        "test/native_web/**/*.cpp",
+        "test/native_web_engine/**/*.cpp",
+    ], exclude = ["test/native_web/NativeWebRuntime_tests.cpp"]) + [
+        "test/integration/JSBridgeTestFixture.cpp",
+        "test/integration/JSIntegrationTestsUtils.cpp",
+    ],
+    hdrs = glob(["test/native_web/**/*.hpp"]) + [
+        "src/valdi/runtime/NativeWeb/NativeWeb.cpp",
+        "test/integration/JSBridgeTestFixture.hpp",
+        "test/integration/JSIntegrationTestsUtils.hpp",
+    ],
+    deps = [
+        ":test_utils",
+        ":valdi_runtime_with_vm",
+    ],
+)
+
+valdi_test(
+    name = "test_nsh_runtime",
+    target_compatible_with = select({
+        ":native_web_enabled": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    srcs = [
+        "test/native_web/NativeWebRuntime_tests.cpp",
+        "test/integration/JSBridgeTestFixture.cpp",
+        "test/integration/RuntimeTestsUtils.cpp",
+    ],
+    hdrs = glob(["test/native_web/**/*.hpp"]) + [
+        "test/integration/JSBridgeTestFixture.hpp",
+        "test/integration/RuntimeTestsUtils.hpp",
+        "//third-party/nsh_web:runtime_test_assets",
+    ],
+    data = ["//third-party/nsh_web:runtime_test_assets"],
+    deps = [
+        ":test_utils",
+        ":valdi_runtime_with_vm",
+    ],
+)
+
+valdi_test(
     name = "test_hermes_boundary",
     srcs = [
         "test/integration/HermesDebuggerRegistry_tests.cpp",
@@ -1580,7 +1668,10 @@ filegroup(
     name = "proguard-rules",
     srcs = [
         "src/java/proguard-rules.pro",
-    ],
+    ] + select({
+        ":native_web_enabled": ["//libs/nsh_web_transport:proguard"],
+        "//conditions:default": [],
+    }),
     visibility = ["//visibility:public"],
 )
 

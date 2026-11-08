@@ -25,9 +25,14 @@
 
 #include "hermes/VM/NativeState.h"
 #include "hermes/VM/PropertyAccessor.h"
+#include "hermes/VM/JSDataView.h"
 
 #include <optional>
 #include <cmath>
+#include <cstdlib>
+#include <cstring>
+#include <limits>
+#include <memory>
 
 #ifdef HERMES_ENABLE_DEBUGGER
 #include "valdi/hermes/HermesDebuggerServer.hpp"
@@ -423,6 +428,253 @@ JSValueRef HermesJavaScriptContext::newFunction(const Ref<JSFunction>& callable,
     }
 
     return toJSValueRefUncached(functionResult.getValue());
+}
+
+static hermes::vm::CallResult<hermes::vm::HermesValue> callWebConstructor(void* opaque,
+                                                                        hermes::vm::Runtime& runtime) {
+    auto args = runtime.getCurrentFrame().getNativeArgs();
+    if (!args.isConstructorCall()) {
+        return runtime.raiseTypeError("Native Web constructor requires 'new'");
+    }
+    auto* data = static_cast<JSFunctionData*>(opaque);
+    auto& context = data->jsContext;
+    auto newTarget = context.toJSValueRef(args.getNewTarget());
+    SmallVector<JSValueRef, 8> arguments(args.getArgCount());
+    for (size_t i = 0; i < args.getArgCount(); ++i) {
+        arguments[i] = context.toJSValueRef(args.getArg(static_cast<unsigned>(i)));
+    }
+    JSExceptionTracker exceptionTracker(context);
+    JSFunctionNativeCallContext callContext(context,
+                                            arguments.empty() ? nullptr : arguments.data(),
+                                            arguments.size(),
+                                            exceptionTracker,
+                                            data->function->getReferenceInfo());
+    callContext.setThisValue(newTarget.get());
+    if (VALDI_UNLIKELY(context.interruptRequested()) && context.onInterrupt()) {
+        exceptionTracker.onError("JavaScript execution terminated");
+    }
+    auto result = exceptionTracker ? (*data->function)(callContext) : context.newUndefined();
+    if (!exceptionTracker) {
+        auto exception = exceptionTracker.getExceptionAndClear();
+        return runtime.setThrownValue(HermesJavaScriptContext::toHermesValue(exception.get()));
+    }
+    return HermesJavaScriptContext::toHermesValue(result.get());
+}
+
+JSValueRef HermesJavaScriptContext::newWebConstructor(const Ref<JSFunction>& callback,
+                                                      const StringBox& name,
+                                                      int32_t length,
+                                                      JSExceptionTracker& exceptionTracker) {
+    hermes::vm::GCScope gcScope(*_runtime);
+    if (callback == nullptr || length < 0) {
+        checkException(_runtime->raiseTypeError("Invalid native Web constructor"), exceptionTracker);
+        return newUndefined();
+    }
+    auto data = makeShared<JSFunctionData>(*this, callback);
+    auto constructor = _runtime->makeHandle(hermes::vm::NativeConstructor::create(
+        *_runtime,
+        hermes::vm::Handle<hermes::vm::JSObject>::vmcast(&_runtime->functionPrototype),
+        data.get(),
+        &callWebConstructor,
+        static_cast<unsigned>(length)));
+    // The constructor's GC-visible native state owns the raw callback context.
+    if (!checkException(setNativeState(*_runtime, constructor, data), exceptionTracker)) {
+        return newUndefined();
+    }
+    auto prototype = _runtime->makeHandle(hermes::vm::JSObject::create(*_runtime));
+    auto functionName = newSymbolIDFromString(name.toStringView());
+    auto status = hermes::vm::Callable::defineNameLengthAndPrototype(
+        constructor,
+        *_runtime,
+        functionName.get(),
+        static_cast<unsigned>(length),
+        prototype,
+        // The binding replaces this with its Rust class prototype and locks it.
+        hermes::vm::Callable::WritablePrototype::Yes);
+    if (!checkException(status, exceptionTracker)) {
+        return newUndefined();
+    }
+    return toJSValueRef(constructor.getHermesValue());
+}
+
+NativeWebValueKind HermesJavaScriptContext::getWebValueKind(const JSValue& value) {
+    auto hermesValue = toHermesValue(value);
+    if (hermesValue.isSymbol()) {
+        return NativeWebValueKind::Symbol;
+    }
+    if (hermesValue.isBigInt()) {
+        return NativeWebValueKind::BigInt;
+    }
+    return NativeWebValueKind::Other;
+}
+
+bool HermesJavaScriptContext::getWebBufferInfo(const JSValue& value,
+                                               NativeWebBufferInfo& info,
+                                               JSExceptionTracker& /*exceptionTracker*/) {
+    hermes::vm::GCScope gcScope(*_runtime);
+    auto source = toHandle(value);
+    info = NativeWebBufferInfo();
+    auto buffer = hermes::vm::Handle<hermes::vm::JSArrayBuffer>::dyn_vmcast(source);
+    if (buffer) {
+        info.byteLength = buffer->size();
+    } else if (auto view = hermes::vm::Handle<hermes::vm::JSDataView>::dyn_vmcast(source)) {
+        buffer = view->getBuffer(*_runtime);
+        info.kind = -1;
+        info.byteOffset = view->byteOffset();
+        info.byteLength = view->byteLength();
+    } else if (auto array = hermes::vm::Handle<hermes::vm::JSTypedArrayBase>::dyn_vmcast(source)) {
+        switch (array->getKind()) {
+            case hermes::vm::CellKind::Int8ArrayKind: info.kind = 0; break;
+            case hermes::vm::CellKind::Uint8ArrayKind: info.kind = 1; break;
+            case hermes::vm::CellKind::Uint8ClampedArrayKind: info.kind = 2; break;
+            case hermes::vm::CellKind::Int16ArrayKind: info.kind = 3; break;
+            case hermes::vm::CellKind::Uint16ArrayKind: info.kind = 4; break;
+            case hermes::vm::CellKind::Int32ArrayKind: info.kind = 5; break;
+            case hermes::vm::CellKind::Uint32ArrayKind: info.kind = 6; break;
+            case hermes::vm::CellKind::Float32ArrayKind: info.kind = 7; break;
+            case hermes::vm::CellKind::Float64ArrayKind: info.kind = 8; break;
+            case hermes::vm::CellKind::BigInt64ArrayKind: info.kind = 9; break;
+            case hermes::vm::CellKind::BigUint64ArrayKind: info.kind = 10; break;
+            default: return false;
+        }
+        buffer = _runtime->makeHandle(array->getBuffer(*_runtime));
+        info.byteOffset = array->getByteOffset();
+        info.byteLength = array->getByteLength();
+        info.elementSize = array->getByteWidth();
+    } else {
+        return false;
+    }
+    info.buffer = toJSValueRef(buffer.getHermesValue());
+    info.detached = !buffer->attached();
+    if (info.detached) {
+        info.byteOffset = 0;
+        info.byteLength = 0;
+    } else {
+        auto* base = buffer->getDataBlock();
+        // Empty attached buffers may have a null data block.
+        info.data = base == nullptr ? nullptr : base + info.byteOffset;
+    }
+    return true;
+}
+
+JSValueRef HermesJavaScriptContext::newWebArrayBuffer(const uint8_t* bytes,
+                                                      size_t size,
+                                                      JSExceptionTracker& exceptionTracker) {
+    hermes::vm::GCScope gcScope(*_runtime);
+    if (size > std::numeric_limits<hermes::vm::JSArrayBuffer::size_type>::max()) {
+        checkException(_runtime->raiseRangeError("ArrayBuffer size exceeds the VM limit"), exceptionTracker);
+        return newUndefined();
+    }
+    auto buffer = _runtime->makeHandle(hermes::vm::JSArrayBuffer::create(
+        *_runtime, hermes::vm::Handle<hermes::vm::JSObject>::vmcast(&_runtime->arrayBufferPrototype)));
+    if (!checkException(hermes::vm::JSArrayBuffer::createDataBlock(
+                            *_runtime, buffer, static_cast<hermes::vm::JSArrayBuffer::size_type>(size)),
+                        exceptionTracker)) {
+        return newUndefined();
+    }
+    if (size != 0 && bytes != nullptr) {
+        std::memcpy(buffer->getDataBlock(), bytes, size);
+    }
+    return toJSValueRef(buffer.getHermesValue());
+}
+
+JSValueRef HermesJavaScriptContext::newWebBufferView(const JSValue& buffer,
+                                                     size_t byteOffset,
+                                                     size_t elementCount,
+                                                     int32_t kind,
+                                                     JSExceptionTracker& exceptionTracker) {
+    hermes::vm::GCScope gcScope(*_runtime);
+    auto backing = hermes::vm::Handle<hermes::vm::JSArrayBuffer>::dyn_vmcast(toHandle(buffer));
+    if (!backing || !backing->attached()) {
+        checkException(_runtime->raiseTypeError("Expected an attached ArrayBuffer"), exceptionTracker);
+        return newUndefined();
+    }
+    auto constructor = hermes::vm::Runtime::makeNullHandle<hermes::vm::NativeConstructor>();
+    switch (kind) {
+        case -1: constructor = _runtime->dataViewConstructor; break;
+        case 0: constructor = _runtime->Int8ArrayConstructor; break;
+        case 1: constructor = _runtime->Uint8ArrayConstructor; break;
+        case 2: constructor = _runtime->Uint8ClampedArrayConstructor; break;
+        case 3: constructor = _runtime->Int16ArrayConstructor; break;
+        case 4: constructor = _runtime->Uint16ArrayConstructor; break;
+        case 5: constructor = _runtime->Int32ArrayConstructor; break;
+        case 6: constructor = _runtime->Uint32ArrayConstructor; break;
+        case 7: constructor = _runtime->Float32ArrayConstructor; break;
+        case 8: constructor = _runtime->Float64ArrayConstructor; break;
+        case 9: constructor = _runtime->BigInt64ArrayConstructor; break;
+        case 10: constructor = _runtime->BigUint64ArrayConstructor; break;
+        default:
+            checkException(_runtime->raiseTypeError("Unsupported native Web buffer view kind"), exceptionTracker);
+            return newUndefined();
+    }
+    // No valid view can exceed the VM's uint32 buffer limit. Check before
+    // converting size_t to Number, avoiding rounding or VM ToLength clamping.
+    auto maxSize = std::numeric_limits<hermes::vm::JSArrayBuffer::size_type>::max();
+    if (byteOffset > maxSize || elementCount > maxSize) {
+        checkException(_runtime->raiseRangeError("Buffer view range exceeds the VM limit"), exceptionTracker);
+        return newUndefined();
+    }
+    auto ctor = toJSValueRef(constructor.getHermesValue());
+    JSValueRef arguments[] = {JSValueRef::makeRetained(*this, buffer),
+                              newNumber(static_cast<double>(byteOffset)),
+                              newNumber(static_cast<double>(elementCount))};
+    JSFunctionCallContext callContext(*this, arguments, 3, exceptionTracker);
+    // VM constructors validate alignment and offset + elementCount * width.
+    return callObjectAsConstructor(ctor.get(), callContext);
+}
+
+void HermesJavaScriptContext::detachWebArrayBuffer(const JSValue& buffer, JSExceptionTracker& exceptionTracker) {
+    hermes::vm::GCScope gcScope(*_runtime);
+    auto backing = hermes::vm::Handle<hermes::vm::JSArrayBuffer>::dyn_vmcast(toHandle(buffer));
+    if (!backing) {
+        checkException(_runtime->raiseTypeError("Expected an ArrayBuffer to detach"), exceptionTracker);
+        return;
+    }
+    hermes::vm::JSArrayBuffer::detach(*_runtime, backing);
+}
+
+JSValueRef HermesJavaScriptContext::transferWebArrayBuffer(const JSValue& buffer,
+                                                          JSExceptionTracker& exceptionTracker) {
+    hermes::vm::GCScope gcScope(*_runtime);
+    auto source = hermes::vm::Handle<hermes::vm::JSArrayBuffer>::dyn_vmcast(toHandle(buffer));
+    if (!source || !source->attached()) {
+        checkException(_runtime->raiseTypeError("Expected an attached ArrayBuffer to transfer"), exceptionTracker);
+        return newUndefined();
+    }
+    auto prototype = hermes::vm::Handle<hermes::vm::JSObject>::vmcast(&_runtime->arrayBufferPrototype);
+    if (source->external()) {
+        // This pin's getExternalDataContext wraps its descriptor lookup in
+        // NoAllocScope (Hermes #2201). Materialize THIS source's property map
+        // first, outside that scope. No allocation or hidden-class transition
+        // may intervene before the immediately following ownership lookup.
+        hermes::vm::NamedPropertyDescriptor descriptor;
+        hermes::vm::JSObject::getOwnNamedDescriptor(
+            source,
+            *_runtime,
+            hermes::vm::Predefined::getSymbolID(
+                hermes::vm::Predefined::InternalPropertyArrayBufferExternalFinalizer),
+            descriptor);
+        auto owner = hermes::vm::JSArrayBuffer::getExternalDataContext(*_runtime, source);
+        auto* data = source->getDataBlock();
+        auto size = source->size();
+        auto target = _runtime->makeHandle(hermes::vm::JSArrayBuffer::create(*_runtime, prototype));
+        // Keep source attached and owner alive throughout target allocation
+        // and NativeState installation. The existing deleter is shared as-is;
+        // this path adds no finalizer that enters JS or the Rust Web context.
+        hermes::vm::JSArrayBuffer::setExternalDataBlock(*_runtime, target, data, size, owner);
+        hermes::vm::JSArrayBuffer::ejectBufferUnsafe(*_runtime, source);
+        return toJSValueRef(target.getHermesValue());
+    }
+
+    // Pinned Hermes internal blocks are malloc/calloc allocations. Ejection
+    // debits GC accounting without freeing; adoption credits the fresh object.
+    // RAII owns the untracked block while object allocation may collect/throw.
+    auto size = source->size();
+    std::unique_ptr<uint8_t, decltype(&std::free)> data(source->getDataBlock(), &std::free);
+    hermes::vm::JSArrayBuffer::ejectBufferUnsafe(*_runtime, source);
+    auto target = hermes::vm::JSArrayBuffer::createWithInternalDataBlock(*_runtime, prototype, data.get(), size);
+    data.release();
+    return toJSValueRef(target.getHermesValue());
 }
 
 bool HermesJavaScriptContext::isNativeOwnedPromise(const JSValue& promise) {
@@ -1178,6 +1430,48 @@ static hermes::vm::CallResult<hermes::vm::PseudoHandle<hermes::vm::StringPrimiti
     return hermes::vm::toString_RJS(runtime, runtime.makeHandle(value));
 }
 
+std::string HermesJavaScriptContext::valueToWebWTF8(const JSValue& value, JSExceptionTracker& exceptionTracker) {
+    hermes::vm::GCScope gcScope(*_runtime);
+    auto result = toString(*_runtime, toHermesValue(value));
+    if (!checkException(result.getStatus(), exceptionTracker)) {
+        return {};
+    }
+    auto view = hermes::vm::StringPrimitive::createStringView(*_runtime, _runtime->makeHandle(std::move(*result)));
+    if (view.isASCII()) {
+        return std::string(view.castToCharPtr(), view.length());
+    }
+    std::string output;
+    output.reserve(view.length());
+    auto* units = view.castToChar16Ptr();
+    for (size_t i = 0; i < view.length(); ++i) {
+        uint32_t codePoint = units[i];
+        if (codePoint >= 0xD800 && codePoint <= 0xDBFF && i + 1 < view.length()) {
+            uint32_t low = units[i + 1];
+            if (low >= 0xDC00 && low <= 0xDFFF) {
+                codePoint = 0x10000 + ((codePoint - 0xD800) << 10) + (low - 0xDC00);
+                ++i;
+            }
+        }
+        // WTF-8 encodes unpaired surrogate code units directly as three bytes.
+        if (codePoint < 0x80) {
+            output.push_back(static_cast<char>(codePoint));
+        } else if (codePoint < 0x800) {
+            output.push_back(static_cast<char>(0xC0 | (codePoint >> 6)));
+            output.push_back(static_cast<char>(0x80 | (codePoint & 0x3F)));
+        } else if (codePoint < 0x10000) {
+            output.push_back(static_cast<char>(0xE0 | (codePoint >> 12)));
+            output.push_back(static_cast<char>(0x80 | ((codePoint >> 6) & 0x3F)));
+            output.push_back(static_cast<char>(0x80 | (codePoint & 0x3F)));
+        } else {
+            output.push_back(static_cast<char>(0xF0 | (codePoint >> 18)));
+            output.push_back(static_cast<char>(0x80 | ((codePoint >> 12) & 0x3F)));
+            output.push_back(static_cast<char>(0x80 | ((codePoint >> 6) & 0x3F)));
+            output.push_back(static_cast<char>(0x80 | (codePoint & 0x3F)));
+        }
+    }
+    return output;
+}
+
 StringBox HermesJavaScriptContext::valueToString(const JSValue& value, JSExceptionTracker& exceptionTracker) {
     hermes::vm::GCScope gcScope(*_runtime);
     auto result = toString(*_runtime, toHermesValue(value));
@@ -1528,7 +1822,12 @@ void HermesJavaScriptContext::willExitVM(JSExceptionTracker& exceptionTracker) {
     }
 
     auto result = _runtime->drainJobs();
-    checkException(result, exceptionTracker);
+    if (checkException(result, exceptionTracker)) {
+        // Keep WeakRef targets alive through nested entries and the entire
+        // microtask checkpoint. A throwing job leaves work queued for a later
+        // drain, so preserve those targets until the checkpoint completes.
+        _runtime->clearKeptObjects();
+    }
 }
 
 void HermesJavaScriptContext::startDebugger(bool isWorker) {

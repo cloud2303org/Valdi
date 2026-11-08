@@ -76,6 +76,7 @@ enum class JsThreadDispatchReason {
     DumpHeap,
     StartProfiling,
     StopProfiling,
+    NativeWeb,
 };
 
 enum JavaScriptTaskScheduleType {

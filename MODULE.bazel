@@ -466,6 +466,30 @@ resvg_crate.from_specs(
 )
 use_repo(resvg_crate, "resvg_crates")
 
+nsh_web_crate = use_extension("@rules_rust//crate_universe:extensions.bzl", "crate")
+nsh_web_crate.render_config(
+    default_package_name = "",
+    repositories = ["nsh_web_crates"],
+)
+nsh_web_crate.from_cargo(
+    name = "nsh_web_crates",
+    manifests = ["//third-party/nsh_web:Cargo.toml"],
+    cargo_lockfile = "//third-party/nsh_web:Cargo.lock",
+    supported_platform_triples = [
+        "aarch64-apple-darwin",
+        "x86_64-apple-darwin",
+        "aarch64-apple-ios",
+        "aarch64-apple-ios-sim",
+        "x86_64-apple-ios",
+        "aarch64-linux-android",
+        "armv7-linux-androideabi",
+        "x86_64-linux-android",
+        "x86_64-unknown-linux-gnu",
+        "x86_64-pc-windows-msvc",
+    ],
+)
+use_repo(nsh_web_crate, "nsh_web_crates")
+
 rust_host_tools = use_extension("@rules_rust//rust:extensions.bzl", "rust_host_tools")
 rust_host_tools.host_tools(
     name = "rust_host_tools_nightly",

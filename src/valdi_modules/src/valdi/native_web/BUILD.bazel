@@ -1,0 +1,9 @@
+load("//bzl/valdi:valdi_module.bzl", "valdi_module")
+
+valdi_module(
+    name = "native_web",
+    srcs = glob(["src/**/*.ts"]) + ["tsconfig.json"],
+    android_output_target = "release",
+    ios_output_target = "release",
+    visibility = ["//visibility:public"],
+)

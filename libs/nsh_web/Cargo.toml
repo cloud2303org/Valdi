@@ -1,0 +1,18 @@
+[package]
+name = "valdi-nsh-web"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.87"
+license = "Apache-2.0"
+autotests = false
+
+[lib]
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+rustc-hash = "=2.1.1"
+percent-encoding = "=2.3.2"
+url = "=2.5.8"
+# Keep URL/IDNA data compatible with the fork Rust 1.87 toolchain.
+idna_adapter = "=1.2.0"
+valdi-nsh-transport = { path = "../nsh_web_transport" }

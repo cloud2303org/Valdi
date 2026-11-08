@@ -1,0 +1,21 @@
+{
+  "commit": "701bdcee9512e0f6aed39042d1fe24564dcd0b43",
+  "files": {
+    "../standard/websocket.rs": "2ff33bd12c7a7ef29811bf6a0bead9540b1bd283b4150e18127a8309f4fdfbbc",
+    "../standard/websocket_native.rs": "b455a36c9d0c765fc7c3bd46b0be8db0695cc6a4dc372b3babaf819e4b85e8e6",
+    "event.rs": "7fd97656bb1844a06d2d68860f52fbe4027bde453a790b10e1771c3d06ead54e",
+    "url.rs": "cdf3118fedd7b85aa6656b512964cda7bf0f0a68daf5f55e06fbb7a995719491",
+    "encoding.rs": "b958cc2d58500d6ad1a1cb387e08f972ac42efb87a7d1f041aa89af9b5863b74",
+    "blob.rs": "23b18b1af90f61ede79e694cecca85c38199b3f655a9b44dc63596dd501cdb40",
+    "fetch.rs": "f0a2949822a98f4c3deb8700672f82661995e5873e76933e5fb19c33657e8e48",
+    "websocket.rs": "01e9bcb28cb8ecd67ae25e098dd470c594ae85032247f9f8126f80f8509eceed",
+    "iterator.rs": "b8336670973853dcd6691decd2e7d92682e98e5e693f7dde837ac2988a8271e2",
+    "js.rs": "d1b51f30d1d08f671372dae6d1331ad69869998dca3dcfc46b7f1e6ec20355a8",
+    "mod.rs": "ba3bb76a5791a7e4f83c508814d64d4077efedba18440835ab51455cfddb20f6",
+    "streams/mod.rs": "6f142c419aefd7626a08207e97da7291d9fc993426879b8c5b2c74913904d26a",
+    "streams/readable.rs": "c55d8b6b5a986cd00d68c4d9704bc307ed1f65d619a3a1a29960bbae7ce51d81",
+    "streams/writable.rs": "cc84497be44e09a20caee163cbfe5681060519ec3c5ab57fda3bac164a478afe",
+    "streams/transform.rs": "4fdb77783822af8179fa155a6e50e676e3e9c3c40ec5b0fa8262140a2d2d4e59",
+    "streams/text.rs": "a84c73c597baeedbb8dcf13919026fae6178214726233f09ae272eddccf44e44"
+  }
+}

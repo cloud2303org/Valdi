@@ -1,0 +1,26 @@
+exports_files(["Cargo.toml", "Cargo.lock"])
+exports_files(["src/lib.rs"], visibility = ["//third-party/nsh_web:__pkg__"])
+
+filegroup(
+    name = "sources",
+    srcs = glob(["src/**/*.rs"]),
+    visibility = ["//third-party/nsh_web:__pkg__"],
+)
+
+filegroup(
+    name = "headers",
+    srcs = glob(["include/*.h"]),
+    visibility = ["//third-party/nsh_web:__pkg__"],
+)
+
+filegroup(
+    name = "java",
+    srcs = glob(["java/**/*.java"]),
+    visibility = ["//valdi:__pkg__"],
+)
+
+filegroup(
+    name = "proguard",
+    srcs = ["consumer-rules.pro"],
+    visibility = ["//valdi:__pkg__"],
+)
