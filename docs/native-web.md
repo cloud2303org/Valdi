@@ -96,7 +96,7 @@ native link uses the Rust `web_static` target and its transport dependency.
 
 ## Imports, entry point, and installation timing
 
-Use the exact module path backed by the native factory and declaration file:
+Use the public TypeScript wrapper path:
 
 ```typescript
 import {
@@ -104,23 +104,28 @@ import {
 } from 'native_web/src/NativeWeb';
 ```
 
-The C++ factory registers **exactly `native_web/src/NativeWeb`** and supplies
-that module's runtime exports. `src/NativeWeb.d.ts` provides its TypeScript
-declarations and emits no JavaScript implementation; the factory is its
-runtime counterpart. Every runnable API example here uses this exact path,
-with no additional resolver mapping required.
+`src/NativeWeb.ts` preserves the public import path and reexports the native
+APIs plus the JS `installNativeWeb(): void` function. It loads the internal
+C++ factory registered at **`native_web/src/NativeWebNative`**, using
+`require('./NativeWebNative')` without an import-star wrapper.
+`src/NativeWebNative.d.ts` describes that raw factory and has no installer
+declaration. Application code should use the public wrapper path above.
 
 The optional barrel `native_web/src/index` only reexports `./NativeWeb`.
 It is not a separate native factory. No package-root entry is supplied for
 the bare name `native_web`. Consuming-app packaging and runtime loading of
 the exact path still need validation in the rebuilt host.
 
-The first actual load creates the per-context Rust state, transport and named
-exports. It leaves existing globals unchanged. Named imports work immediately,
-including their internal AbortSignal/AbortController dependencies. Later loads
-reuse those exports. A type-only import does not load the module.
+The first actual load of the wrapper loads the raw factory, creating the
+per-context Rust state, transport and named exports. The wrapper captures
+the raw module's own property descriptors and names at evaluation time:
+native API properties are non-enumerable, so enumerating `Object.keys(raw)`
+would omit them. Importing leaves existing globals unchanged. Named imports
+work immediately, including their internal AbortSignal/AbortController
+dependencies. Later loads reuse those exports. A type-only import does not
+load the module.
 
-For global APIs, call the native installer once from the application entry,
+For global APIs, call the JS installer once from the application entry,
 before code that uses those globals:
 
 ```typescript
@@ -131,12 +136,21 @@ installNativeWeb();
 // Response, ReadableStream, AbortController, and the other Web APIs.
 ```
 
-The installer defines the original native exports on the current JS global,
-replacing existing writable/configurable Web definitions. A nonconfigurable
-conflict throws. Repeated successful calls are no-ops; they do not rebuild
-objects or restore globals changed afterward. The installer itself stays a
-module export. Installation is per JS context and cannot revive a shut-down
-context. No JS implementation or polyfill is evaluated.
+The installer uses `Object.defineProperty` to bind the captured native values
+on the current JS global as writable, non-enumerable, configurable properties.
+Existing configurable Web definitions are replaced even if they are readonly.
+A conflicting nonconfigurable property throws. Completion is recorded only
+after all definitions succeed; a failure may leave earlier definitions in
+place and a later call retries. Repeated successful calls are no-ops; they
+do not rebuild objects or restore globals changed afterward. Mutating raw
+module exports, public exports or globals after wrapper evaluation does not
+change the values captured for installation.
+
+The installer itself stays a module export and accepts no options. It makes
+no network requests and implements no Web algorithms. Installation is per
+JS context and cannot revive a shut-down native context: rebinding a native
+value does not make a closed native object usable. Fetch, streams, encoding,
+abort and WebSocket algorithms remain Rust/native.
 
 Module loading captures the **then-current** engine intrinsics, including Object
 helpers, WeakMap helpers, Promise/resolve/then, JSON.parse, error constructors,
@@ -164,15 +178,16 @@ application reads still observe the application's public properties.
 The C++ host works through `IJavaScriptContext` plus the optional
 `IJavaScriptNativeWebSupport` primitives implemented by
 `HermesJavaScriptContext`. An engine missing that interface, or a context
-without a JS task scheduler, fails installation; this document does not claim
+without a JS task scheduler, fails raw factory initialization; this document does not claim
 other Valdi engines support it.
 
 ## Implementation and API scope
 
 The layers are:
 
-1. `src/valdi_modules/src/valdi/native_web`: generated TypeScript declarations
-   and an entry reexport only.
+1. `src/valdi_modules/src/valdi/native_web`: generated raw TypeScript
+   declarations, a public wrapper with JS global registration glue, and an
+   entry reexport.
 2. `valdi/src/valdi/runtime/NativeWeb/NativeWeb.cpp` and `.hpp`: native module
    registration, engine operations, native classes, value lifetime/GC tracing,
    Promise interaction, scheduler delivery, and teardown.
@@ -186,8 +201,19 @@ AbortController/AbortSignal, URL/URLSearchParams, TextEncoder/TextDecoder,
 Blob/File/FormData, Headers/Request/Response/fetch, WebSocket,
 ReadableStream including BYOB readers, WritableStream, TransformStream,
 queuing strategies, TextEncoderStream, and TextDecoderStream. See
-[NativeWeb.d.ts](../src/valdi_modules/src/valdi/native_web/src/NativeWeb.d.ts)
-for the declared surface.
+[NativeWebNative.d.ts](../src/valdi_modules/src/valdi/native_web/src/NativeWebNative.d.ts)
+for the declared native surface and
+[NativeWeb.ts](../src/valdi_modules/src/valdi/native_web/src/NativeWeb.ts)
+for the public reexports and installer.
+
+Run `python3 generate_types.py` from the module directory to regenerate both
+files from the pinned Rust declaration metadata and native additions.
+`python3 generate_types.py --check` checks both outputs and rejects the
+obsolete `src/NativeWeb.d.ts`. The JS glue regression can run with
+`node test/installer.cjs /absolute/path/to/typescript`; the type contract uses
+`node test/typecheck.cjs /absolute/path/to/typescript`. The glue test uses a
+non-enumerable raw-export double and checks compiled wrapper behavior; it
+does not establish Rust algorithms or native Hermes runtime behavior.
 
 This is a broad native port, not a claim of full WHATWG or browser
 compatibility. Browser origin, CORS, cookie, credential, cache, proxy, and TLS

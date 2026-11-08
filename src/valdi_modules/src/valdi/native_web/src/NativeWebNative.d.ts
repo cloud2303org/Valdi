@@ -537,6 +537,3 @@ export class WebSocket extends EventTarget {
 }
 
 export function fetch(input: string | URL | Request, init?: RequestInit): Promise<Response>;
-
-/** Install this module's Web APIs on the current JS global once. */
-export function installNativeWeb(): void;

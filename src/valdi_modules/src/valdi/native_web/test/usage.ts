@@ -14,8 +14,25 @@ import {
   fetch,
   installNativeWeb,
 } from '../src/NativeWeb';
+import * as raw from '../src/NativeWebNative';
+import { installNativeWeb as installFromBarrel } from '../src/index';
+import type { BodyInit, RequestInit, ReadableStreamReadResult } from '../src/NativeWeb';
 
 installNativeWeb();
+installFromBarrel();
+const install: () => void = installNativeWeb;
+const nativeFetch: typeof raw.fetch = fetch;
+const body: BodyInit = 'hello';
+const requestInit: RequestInit = { body };
+const readResult: ReadableStreamReadResult<Uint8Array> = { done: true };
+void install;
+void nativeFetch;
+void requestInit;
+void readResult;
+// @ts-expect-error The internal factory exposes native Web APIs, no installer.
+raw.installNativeWeb();
+// @ts-expect-error Installation accepts no options.
+installNativeWeb({});
 
 async function readResponse(): Promise<string> {
   const abort = new AbortController();

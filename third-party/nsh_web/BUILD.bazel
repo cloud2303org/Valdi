@@ -76,7 +76,7 @@ runtime_test_assets(
     name = "runtime_test_assets",
     srcs = [
         "//src/valdi_modules/src/valdi/%s:android.debug.valdimodule" % name
-        for name in ["coreutils", "drawing", "jasmine", "source_map", "valdi_core", "valdi_tsx"]
+        for name in ["coreutils", "drawing", "jasmine", "native_web", "source_map", "valdi_core", "valdi_tsx"]
     ],
     visibility = ["//valdi:__pkg__"],
     testonly = True,

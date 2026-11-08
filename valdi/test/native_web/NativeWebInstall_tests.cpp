@@ -9,12 +9,30 @@ namespace {
 void importWeb(JSContextWrapper& wrapper) {
     wrapper.withContext([](auto& cx, auto& ex) {
         NativeWebModuleFactory factory;
-        auto web = factory.loadModule(cx, ReferenceInfoBuilder(), ex);
+        auto web = loadNativeWeb(factory, cx, ex);
         ASSERT_TRUE(ex);
         cx.setObjectProperty(cx.getGlobalObject(ex).get(), "web", web.get(), ex);
+        auto raw = factory.loadModule(cx, ReferenceInfoBuilder(), ex);
+        cx.setObjectProperty(cx.getGlobalObject(ex).get(), "rawWeb", raw.get(), ex);
     });
 }
 } // namespace
+
+TEST_P(NativeWebInstallTests, NativeFactoryExportsOnlyNativeApis) {
+    JSContextWrapper wrapper(getJsBridge(), nullptr);
+    NativeWebScope scope(wrapper);
+    wrapper.withContext([](auto& cx, auto& ex) {
+        NativeWebModuleFactory factory;
+        EXPECT_EQ(factory.getModulePath(), STRING_LITERAL("native_web/src/NativeWebNative"));
+        auto raw = factory.loadModule(cx, ReferenceInfoBuilder(), ex);
+        ASSERT_TRUE(ex);
+        auto installer = cx.getObjectProperty(raw.get(), "installNativeWeb", ex);
+        EXPECT_TRUE(cx.isValueUndefined(installer.get()));
+        auto response = cx.getObjectProperty(raw.get(), "Response", ex);
+        EXPECT_TRUE(cx.isValueFunction(response.get()));
+    });
+    EXPECT_TRUE(wrapper.evaluateScript("typeof Response === 'undefined'").toBool());
+}
 
 TEST_P(NativeWebInstallTests, ImportPreservesGlobalsAndNamedExportsWorkBeforeInstallation) {
     JSContextWrapper wrapper(getJsBridge(), nullptr);
@@ -59,7 +77,7 @@ TEST_P(NativeWebInstallTests, ExplicitInstallationUsesOriginalIdentitiesAndIsRep
         const nativeResponse = web.Response;
         const nativeFetch = web.fetch;
         const nativeSocket = web.WebSocket;
-        web.Response = function replacementExport() {};
+        rawWeb.Response = function replacementExport() {};
         web.installNativeWeb();
         if (Response !== nativeResponse || fetch !== nativeFetch || WebSocket !== nativeSocket ||
             DOMException !== web.DOMException || ReadableStream !== web.ReadableStream) return false;
@@ -76,8 +94,9 @@ TEST_P(NativeWebInstallTests, InstallerCannotReviveClosedContextAndContextsAreIn
     ASSERT_TRUE(first.evaluateScript("typeof web.installNativeWeb === 'function'").toBool());
     first.withContext([](auto& cx, auto&) { NativeWeb::shutdown(cx); });
     EXPECT_TRUE(first.evaluateScript(R"JS((() => {
-        try { web.installNativeWeb(); return false; }
-        catch (error) { return typeof Response === 'undefined'; }
+        web.installNativeWeb();
+        try { new Response('closed'); return false; }
+        catch (error) { return true; }
     })())JS").toBool());
     JSContextWrapper second(getJsBridge(), nullptr);
     NativeWebScope secondScope(second);

@@ -26,8 +26,8 @@ class NativeWeb {
     static void release(IJavaScriptContext& context);
 };
 
-/** Loading native_web/src/NativeWeb installs the Rust API and returns its
- * exports. Construction/registration alone does not change a context's globals.
+/** Loading native_web/src/NativeWebNative returns the Rust API exports.
+ * The public JS module supplies optional global installation.
  */
 class NativeWebModuleFactory final : public JavaScriptModuleFactory {
   public:

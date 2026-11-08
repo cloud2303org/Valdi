@@ -3,7 +3,6 @@
 #include "libs/nsh_web/include/valdi_nsh_web.h"
 #include "libs/nsh_web_transport/include/valdi_nsh_transport.h"
 #include "valdi/runtime/Interfaces/IJavaScriptNativeWebSupport.hpp"
-#include "valdi/runtime/JavaScript/JSFunctionWithCallable.hpp"
 #include "valdi/runtime/JavaScript/JSPromise.hpp"
 #include "valdi/runtime/JavaScript/JavaScriptFunctionCallContext.hpp"
 #include "valdi/runtime/JavaScript/JavaScriptTaskScheduler.hpp"
@@ -158,13 +157,6 @@ class WebState final : public std::enable_shared_from_this<WebState> {
     std::mutex finalizationMutex;
     std::vector<std::shared_ptr<NativeRecord>> finalizations;
     JSValueRef exports;
-    struct GlobalDefinition {
-        std::string name;
-        JSValueRef value;
-        int64_t flags;
-    };
-    std::vector<GlobalDefinition> globalDefinitions;
-    bool globalsInstalled = false;
     JSValueRef pending;
     std::vector<JSValueRef> reports;
     size_t depth = 0;
@@ -224,21 +216,6 @@ class WebState final : public std::enable_shared_from_this<WebState> {
     void exportGlobal(std::string_view name, const JSValueRef& value, int64_t flags, JSExceptionTracker& ex) {
         define(nativeGlobal, name, value, flags, ex);
         define(exports, name, value, flags, ex);
-        if (ex) {
-            globalDefinitions.push_back({std::string(name), value, flags});
-        }
-    }
-    void installGlobals(JSExceptionTracker& ex) {
-        if (globalsInstalled) {
-            return;
-        }
-        for (const auto& definition : globalDefinitions) {
-            define(global, definition.name, definition.value, definition.flags, ex);
-            if (!ex) {
-                return;
-            }
-        }
-        globalsInstalled = true;
     }
     void prototype(const JSValueRef& objectValue, const JSValueRef& proto, JSExceptionTracker& ex) {
         call(setPrototype, object, {objectValue, proto}, ex);
@@ -1117,27 +1094,6 @@ class WebState final : public std::enable_shared_from_this<WebState> {
             pending = {};
         }
         leave(ex);
-        if (ex) {
-            std::weak_ptr<WebState> weakSelf = shared_from_this();
-            auto installer = cx.newFunction(
-                makeShared<JSFunctionWithCallable>(ReferenceInfoBuilder(), [weakSelf](auto& context) {
-                    auto self = weakSelf.lock();
-                    auto& ex = context.getExceptionTracker();
-                    if (self == nullptr) {
-                        ex.onError("Native Web context is closed");
-                        return context.getContext().newUndefined();
-                    }
-                    if (self->enter(ex)) {
-                        self->installGlobals(ex);
-                        self->leave(ex);
-                    }
-                    return context.getContext().newUndefined();
-                }),
-                ex);
-            define(installer, "name", string("installNativeWeb", ex), 4, ex);
-            define(installer, "length", cx.newNumber(0), 4, ex);
-            define(exports, "installNativeWeb", installer, 5, ex);
-        }
         return static_cast<bool>(ex);
     }
 
@@ -1518,7 +1474,6 @@ class WebState final : public std::enable_shared_from_this<WebState> {
         }
         handles.clear();
         strings.clear();
-        globalDefinitions.clear();
         exports = {};
         pending = {};
         global = {};
@@ -1630,7 +1585,7 @@ Registry& registry() {
 
 } // namespace
 
-StringBox NativeWebModuleFactory::getModulePath() const { return STRING_LITERAL("native_web/src/NativeWeb"); }
+StringBox NativeWebModuleFactory::getModulePath() const { return STRING_LITERAL("native_web/src/NativeWebNative"); }
 
 JSValueRef NativeWebModuleFactory::loadModule(IJavaScriptContext& context, const ReferenceInfoBuilder&,
                                               JSExceptionTracker& ex) {

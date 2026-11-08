@@ -1313,7 +1313,9 @@ valdi_test(
         "src/valdi/runtime/NativeWeb/NativeWeb.cpp",
         "test/integration/JSBridgeTestFixture.hpp",
         "test/integration/JSIntegrationTestsUtils.hpp",
+        "//third-party/nsh_web:runtime_test_assets",
     ],
+    data = ["//third-party/nsh_web:runtime_test_assets"],
     deps = [
         ":test_utils",
         ":valdi_runtime_with_vm",
