@@ -191,6 +191,14 @@ bool ValdiRuntimeTweaks::enableIosNativeDateFormatting() const {
     return getConfigKey("VALDI_ENABLE_IOS_NATIVE_DATE_FORMATTING");
 }
 
+bool ValdiRuntimeTweaks::protobufLazyDecodingByDefault() const {
+    return getConfigKey("VALDI_PROTOBUF_LAZY_DEFAULT");
+}
+
+bool ValdiRuntimeTweaks::enableProtobufFieldReads() const {
+    return getConfigKey("VALDI_PROTOBUF_FIELD_READS");
+}
+
 int32_t ValdiRuntimeTweaks::preloadYieldChunkSize() const {
     auto configKey = StringCache::getGlobal().makeStringFromLiteral(std::string_view("VALDI_PRELOAD_YIELD_CHUNK_SIZE"));
     return _tweakValueProvider->getInt(configKey, 0);

@@ -1,6 +1,7 @@
 #include "JSBridgeTestFixture.hpp"
 #include "JSIntegrationTestsUtils.hpp"
 #include "valdi/hermes/HermesDebuggerRegistry.hpp"
+#include "valdi/hermes/HermesDebuggerServer.hpp"
 #include "valdi_core/cpp/Utils/Defer.hpp"
 
 #include <hermes/hermes.h>
@@ -15,6 +16,38 @@ namespace ValdiTest {
 namespace {
 
 class HermesDebuggerRegistryTest : public JSBridgeTestFixture {};
+
+TEST_P(HermesDebuggerRegistryTest, debuggerRegistrationHonorsOptInPolicyAndRuntimeConfiguration) {
+    MAIN_THREAD_INIT();
+    const auto previousPolicy = IJavaScriptContext::remoteDebuggerRequiresDebuggerService();
+    Defer restorePolicy([&] { IJavaScriptContext::setRemoteDebuggerRequiresDebuggerService(previousPolicy); });
+    JSContextWrapper wrapper(getJsBridge(), nullptr);
+    auto* server = Hermes::HermesDebuggerServer::getInstance(ConsoleLogger::getLogger());
+    ASSERT_NE(nullptr, server);
+    auto registry = server->getRegistry();
+    const auto originalCount = registry->getRuntimeIds().size();
+
+    for (bool requiresService : {false, true}) {
+        for (bool enabled : {false, true}) {
+            SCOPED_TRACE(::testing::Message() << "requiresService=" << requiresService << ", enabled=" << enabled);
+            IJavaScriptContext::setRemoteDebuggerRequiresDebuggerService(requiresService);
+            {
+                auto context = getJsBridge()->createJsContext(wrapper.taskScheduler.get(), ConsoleLogger::getLogger());
+                {
+                    JSEntry entry(*context, wrapper.valdiContext);
+                    IJavaScriptContextConfig config;
+                    config.enableRemoteDebugger = enabled;
+                    context->initialize(config, entry.exceptionTracker);
+                    entry.checkException();
+                    context->startDebugger(false);
+                    const auto expectedCount = originalCount + ((!requiresService || enabled) ? 1 : 0);
+                    EXPECT_EQ(expectedCount, registry->getRuntimeIds().size());
+                }
+            }
+            EXPECT_EQ(originalCount, registry->getRuntimeIds().size());
+        }
+    }
+}
 
 class BlockingDebuggerScheduler final : public TaskSchedulerImpl {
 public:

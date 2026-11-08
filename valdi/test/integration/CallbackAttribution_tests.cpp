@@ -361,7 +361,6 @@ INSTANTIATE_TEST_SUITE_P(CallbackAttributionTests,
                          CallbackAttributionFixture,
                          ::testing::Values(JavaScriptEngineTestCase::Hermes,
                                            JavaScriptEngineTestCase::QuickJS,
-                                           JavaScriptEngineTestCase::QuickJSWithTSN,
                                            JavaScriptEngineTestCase::JSCore),
                          PrintJavaScriptEngineType());
 

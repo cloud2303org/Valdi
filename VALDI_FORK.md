@@ -5,9 +5,15 @@ This fork retains upstream Git history. `valdiroutes` is the maintained runtime 
 ## Current upstream base
 
 - Repository: https://github.com/Snapchat/Valdi
-- Branch: upstream `main` as of 2026-11-04
-- Commit: `9b7a20d5bc690492d9fc15e0977a3fa9d1834f5e`
+- Branch: upstream `main` as of 2026-11-08
+- Commit: `b527b091ea98b4952b1a525388d0c0b66ca04940`
 - Last release tag: `beta-0.2.1` (`f26bee4dc170b6c929f71d4dd07d44e033f47176`)
+
+The 2026-11-08 synchronization merges all 32 commits after `9b7a20d5`,
+including the experimental SDL3 Linux host and calculator, Protobuf field
+reads and decoding controls, Android gesture/date-format updates, iOS worker
+enumeration, and Promise callback attribution. Native Web remains an opt-in
+fork module with TypeScript installation glue and Rust/C++ implementations.
 
 The 2026-11-04 synchronization includes all 21 commits after the previous
 `4aa98f01` base, including the complete Web renderer changes. The earlier
@@ -55,12 +61,18 @@ In a clean clone of this fork:
 
 ```sh
 git remote add upstream https://github.com/Snapchat/Valdi.git  # once
-git fetch upstream --tags
-git switch -c upgrade/valdi-TAG origin/valdiroutes
-git merge --no-ff TAG
+git switch valdiroutes
+git config pull.rebase false
+git pull --no-rebase --no-ff upstream main
 ```
 
-Resolve conflicts in source, retaining only customizations still needed. Update the upstream base recorded above. Do not force-sync the maintained branch over its custom commits. Push the upgrade branch, then pin that exact commit in ValdiNativeRoutes with `node scripts/upstream.mjs pin COMMIT` and run its application CI (npm, Android and iOS). Validate Release bytecode and native behavior before promoting the upgrade to `valdiroutes`.
+This creates a merge commit and preserves both histories. For validation before
+the merge commit, add `--no-commit`, run the checks, then commit the merge.
+A shallow clone may first need enough history to find the common ancestor.
+Keep branch tracking on `origin/valdiroutes`; name `upstream main` explicitly
+when pulling official changes.
+
+Resolve conflicts in source, retaining only customizations still needed. Update the upstream base recorded above. Do not force-sync the maintained branch over its custom commits. Push `valdiroutes`, then pin that exact commit in ValdiNativeRoutes with `node scripts/upstream.mjs pin COMMIT` and run its application CI (npm, Android and iOS). Validate Release bytecode and native behavior for the resulting runtime.
 
 The application owns its pages, host code and Node compiler port. Its companion diff report and binding goldens still need review when upstream code generation changes. Framework Actions are disabled in this fork; application CI is the validation entry point.
 

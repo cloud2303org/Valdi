@@ -1832,6 +1832,9 @@ void HermesJavaScriptContext::willExitVM(JSExceptionTracker& exceptionTracker) {
 
 void HermesJavaScriptContext::startDebugger(bool isWorker) {
 #ifdef HERMES_ENABLE_DEBUGGER
+    if (remoteDebuggerRequiresDebuggerService() && !remoteDebuggerEnabled()) {
+        return;
+    }
     auto* debuggerService = HermesDebuggerServer::getInstance(_logger);
     if (debuggerService != nullptr && _debuggerRuntimeId == kRuntimeIdUndefined) {
         auto registry = debuggerService->getRegistry();

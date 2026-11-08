@@ -7,6 +7,12 @@ on:
       - '**/BUILD.bazel'
       - '**/BUILD'
       - 'MODULE.bazel'
+      - '.bazelrc'
+      - 'bzl/valdi/common.bazelrc'
+      - '.bazelversion'
+      - '.bazelignore'
+      - 'linux_window_host/**'
+      - 'apps/calculator/**'
       - 'registry/**'
       - 'tools/ci/**'
       - 'tools/api_surface/**'
@@ -37,6 +43,12 @@ on:
       - '**/BUILD.bazel'
       - '**/BUILD'
       - 'MODULE.bazel'
+      - '.bazelrc'
+      - 'bzl/valdi/common.bazelrc'
+      - '.bazelversion'
+      - '.bazelignore'
+      - 'linux_window_host/**'
+      - 'apps/calculator/**'
       - 'registry/**'
       - 'tools/ci/**'
       - 'tools/api_surface/**'
@@ -167,7 +179,7 @@ jobs:
 
       - name: Upload test results
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: test-results-${{ matrix.runner }}
           path: |
@@ -245,7 +257,7 @@ jobs:
 
       - name: Upload test logs and crash reports
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: macos-test-logs
           path: /tmp/macos-test-logs
@@ -258,6 +270,8 @@ jobs:
 
   linux-ci:
     name: "Linux: ${{ matrix.name }}"
+    # The experimental graphical job starts non-blocking, per RFC 0001.
+    continue-on-error: ${{ matrix.task == 'linux-window-host' }}
     # Pin the major image (mirrors the macos-26 pin above) so a GitHub
     # ubuntu-latest roll can't silently change the toolchain under CI.
     runs-on: ubuntu-24.04
@@ -281,6 +295,8 @@ jobs:
             task: hotreload-smoke
           - name: Compiler Golden Diff
             task: compiler-golden
+          - name: SDL Window Host (experimental)
+            task: linux-window-host
 
     steps:
       - name: Checkout code
@@ -301,6 +317,9 @@ jobs:
           service_account_ro: ${{ vars.GCP_SERVICE_ACCOUNT_RO }}
           cache_bucket: ${{ vars.BAZEL_CACHE_BUCKET }}
           cache_key: ${{ matrix.task }}
+          # The Android export build fills the runner's disk with a second copy of its outputs in the
+          # disk cache ("No space left on device"); the remote cache already covers it.
+          disk_cache: ${{ matrix.task == 'build-export' && 'false' || 'true' }}
 
       - name: Setup Linux environment
         # Also installs watchman (needed by the hotreload smoke); see setup_linux_env.sh.
@@ -372,7 +391,7 @@ jobs:
       - name: "Upload: Valdi size report (main baseline)"
         if: matrix.task == 'build-export' && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.size-report.outcome == 'success'
         continue-on-error: true
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: valdi-size-report
           path: ${{ runner.temp }}/valdi-size/size-report.json
@@ -382,6 +401,28 @@ jobs:
       - name: "Run: Module Tests"
         if: matrix.task == 'test-modules'
         run: ./tools/ci/test_modules.sh
+
+      - name: "Run: SDL Window Host (offscreen)"
+        if: matrix.task == 'linux-window-host'
+        timeout-minutes: 45
+        run: ./tools/ci/linux_window_host_tests.sh
+
+      - name: Collect SDL host test logs
+        if: matrix.task == 'linux-window-host' && failure()
+        run: |
+          mkdir -p /tmp/linux-window-host-logs
+          if [ -d linux_window_host/bazel-testlogs ]; then
+            cp -RL linux_window_host/bazel-testlogs/. /tmp/linux-window-host-logs/
+          fi
+
+      - name: Upload SDL host test logs
+        if: matrix.task == 'linux-window-host' && failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: linux-window-host-logs
+          path: /tmp/linux-window-host-logs
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: "Run: Registry Validation"
         if: matrix.task == 'validate-registry'
@@ -406,7 +447,7 @@ jobs:
 
       - name: "Upload regenerated goldens (on drift)"
         if: matrix.task == 'compiler-golden' && failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: regenerated-compiler-goldens
           path: ${{ runner.temp }}/regenerated-compiler-goldens
@@ -454,7 +495,7 @@ jobs:
 
       - name: Upload diff images
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: snapshot-diffs
           path: /tmp/valdi-snapshots/diffs/

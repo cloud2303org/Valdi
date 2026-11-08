@@ -137,8 +137,8 @@ static JSValueRef getProtobufNonRepeatedField(ProtobufArena& arena,
         case google::protobuf::FieldDescriptor::TYPE_GROUP:
             return jsContext.newUndefined();
         case google::protobuf::FieldDescriptor::TYPE_MESSAGE: {
-            auto messageIndex = arena.fieldToMessageIndex(
-                message, field, fieldDescriptor->message_type(), callContext.getExceptionTracker());
+            auto messageIndex =
+                arena.fieldToMessageIndex(message, field, fieldDescriptor, callContext.getExceptionTracker());
             CHECK_CALL_CONTEXT(callContext);
 
             return toJSIndex(callContext, messageIndex);
@@ -826,6 +826,35 @@ JSValueRef ProtobufModule::arenaGetMessageFields(JSFunctionNativeCallContext& ca
 }
 
 // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
+JSValueRef ProtobufModule::arenaGetMessageField(JSFunctionNativeCallContext& callContext) {
+    auto arena = getArena(callContext, 0);
+    CHECK_CALL_CONTEXT(callContext);
+
+    auto messageIndex = getIndex(callContext, 1);
+    CHECK_CALL_CONTEXT(callContext);
+
+    auto fieldIndex = getIndex(callContext, 2);
+    CHECK_CALL_CONTEXT(callContext);
+
+    // Serialize descriptor access (e.g. message_type() on message-typed fields) against
+    // concurrent lazy DescriptorPool mutation from other JS runtimes.
+    auto factoryLocks = arena->lockRetainedMessageFactories();
+
+    auto* message = arena->getMessage(messageIndex, callContext.getExceptionTracker());
+    CHECK_CALL_CONTEXT(callContext);
+
+    const auto* descriptor = message->getDescriptor();
+
+    if (fieldIndex >= static_cast<size_t>(descriptor->field_count())) {
+        return callContext.throwError(onInvalidFieldsDescriptor());
+    }
+
+    const auto* fieldDescriptor = descriptor->field(static_cast<int>(fieldIndex));
+
+    return getProtobufMessageField(*arena, *message, fieldDescriptor, callContext);
+}
+
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 JSValueRef ProtobufModule::arenaCopyMessage(JSFunctionNativeCallContext& callContext) {
     auto arenaResult = getArena(callContext, 0);
     CHECK_CALL_CONTEXT(callContext);
@@ -842,13 +871,36 @@ JSValueRef ProtobufModule::arenaCopyMessage(JSFunctionNativeCallContext& callCon
     return toJSIndex(callContext, copyIndex);
 }
 
+// Mirrors NativeDecodingMode in ValdiProtobuf.d.ts. The values keep the old boolean contract
+// readable in both directions: a TS bundle that still passes true/false lands on Eager/Lazy, and
+// an older native reading these as a bool treats Default as eager.
+enum class NativeDecodingMode : int32_t {
+    Lazy = 0,
+    Eager = 1,
+    Default = 2,
+};
+
 // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 JSValueRef ProtobufModule::createArena(JSFunctionNativeCallContext& callContext) {
-    auto eagerDecoding = callContext.getParameterAsBool(0);
+    auto decodingMode = static_cast<NativeDecodingMode>(callContext.getParameterAsInt(0));
     CHECK_CALL_CONTEXT(callContext);
 
     auto includeAllFieldsDuringEncoding = callContext.getParameterAsBool(1);
     CHECK_CALL_CONTEXT(callContext);
+
+    bool eagerDecoding = true;
+    switch (decodingMode) {
+        case NativeDecodingMode::Lazy:
+            eagerDecoding = false;
+            break;
+        case NativeDecodingMode::Eager:
+            break;
+        case NativeDecodingMode::Default: {
+            const auto& runtimeTweaks = _resourcesManager.getRuntimeTweaks();
+            eagerDecoding = runtimeTweaks == nullptr || !runtimeTweaks->protobufLazyDecodingByDefault();
+            break;
+        }
+    }
 
     auto arena = Valdi::makeShared<ProtobufArena>(eagerDecoding, includeAllFieldsDuringEncoding);
 
