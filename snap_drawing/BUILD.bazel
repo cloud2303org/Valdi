@@ -112,6 +112,7 @@ cc_library(
     deps = [
         ":snap_drawing",
         "@gtest",
+        "@rules_cc//cc/runfiles",
     ],
 )
 
@@ -142,6 +143,7 @@ cc_test(
         ":test_utils",
         "//valdi:valdi_snap_drawing",
         "@gtest//:gtest_main",
+        "@rules_cc//cc/runfiles",
     ],
 )
 

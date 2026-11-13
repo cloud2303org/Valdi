@@ -91,6 +91,25 @@ Resolve conflicts in source, retaining only customizations still needed. Update 
 
 The application owns its pages, host code and Node compiler port. Its companion diff report and binding goldens still need review when upstream code generation changes. Framework Actions are disabled in this fork; application CI is the validation entry point.
 
+## Validation entry-point repairs (2026-11-13)
+
+The Web Unicode implementation leaves the backing-buffer type of its private
+encoding helpers inferred. This keeps `encodeString(): ArrayBuffer` compatible
+with TypeScript 5.9 without changing the emitted JavaScript.
+
+SnapDrawing tests resolve declared resources through `rules_cc` runfiles and
+repository mapping, including manifest-only layouts, with an exact checkout-root
+fallback for direct execution. Required-resource failures exit with a diagnostic
+even in optimized builds.
+
+The focused callback-attribution target uses real Node-compiled debug module
+archives instead of the removed legacy static-resource generator. A target-only
+GoogleTest environment registers those archives once, retaining their borrowed
+storage across repeated environment setup. The shared asset rule also preserves
+the NativeWeb runtime tests' existing namespace and archive paths. These changes
+do not restore the legacy compiler or change the broader integration suite's
+resource mechanism.
+
 ## Node-only module compiler (2026-10-29)
 
 The maintained branch removes the old Swift Valdi compiler implementation,

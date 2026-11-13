@@ -81,7 +81,7 @@ function sanitizeCodePoint(cp: number): number {
 
 /* ===== UTF-8 ===== */
 
-function encodeUtf8(str: string): Uint8Array {
+function encodeUtf8(str: string) {
   if (typeof TextEncoder !== 'undefined') {
     return new TextEncoder().encode(str);
   }
@@ -171,7 +171,7 @@ function decodeUtf8(bytes: Uint8Array): string {
 
 /* ===== UTF-16 (LE on encode; BOM-aware on decode) ===== */
 
-function encodeUtf16LE(str: string): Uint8Array {
+function encodeUtf16LE(str: string) {
   // Use UTF-16 code units directly (JS internal)
   const out = new Uint8Array(str.length * 2);
   const dv = new DataView(out.buffer);
@@ -214,7 +214,7 @@ function decodeUtf16(bytes: Uint8Array): string {
 
 /* ===== UTF-32 (LE on encode; BOM-aware on decode) ===== */
 
-function encodeUtf32LE(str: string): Uint8Array {
+function encodeUtf32LE(str: string) {
   const cps = toCodePoints(str);
   const out = new Uint8Array(cps.length * 4);
   const dv = new DataView(out.buffer);

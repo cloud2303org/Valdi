@@ -8,6 +8,7 @@ load("@rules_kotlin//kotlin:core.bzl", "kt_kotlinc_options")
 load("@rules_kotlin//kotlin:jvm.bzl", "kt_jvm_library", "kt_jvm_test")
 load("//bzl:valdi_library.bzl", "COMMON_COMPILE_FLAGS", "OBJC_FLAGS", "OBJC_ONLY_FLAGS")
 load("//bzl/conditions:custom_selects.bzl", "custom_selects")
+load("//bzl/valdi:test_assets.bzl", "runtime_test_assets")
 load("//bzl/valdi:valdi_static_resource.bzl", "valdi_static_resource")
 load("valdi.bzl", "ANDROIDX_RUNTIME_LIBRARIES", "valdi_test", COMPILER_FLAGS_COMPAT = "COMPILER_FLAGS")
 
@@ -1177,22 +1178,33 @@ valdi_test(
     ],
 )
 
+runtime_test_assets(
+    name = "callback_attribution_test_assets",
+    testonly = True,
+    srcs = [
+        "//src/valdi_modules/src/valdi/%s:android.debug.valdimodule" % name
+        for name in ["coreutils", "source_map", "valdi_core", "valdi_tsx"]
+    ],
+)
+
 valdi_test(
     name = "test_callback_attribution",
     srcs = [
+        "test/assets/CallbackAttributionTestAssets.cpp",
         "test/integration/CallbackAttribution_tests.cpp",
         "test/integration/JSBridgeTestFixture.cpp",
         "test/integration/RuntimeTestsUtils.cpp",
     ],
     hdrs = [
+        ":callback_attribution_test_assets",
         "test/integration/JSBridgeTestFixture.hpp",
         "test/integration/RuntimeTestsUtils.hpp",
     ],
+    data = [":callback_attribution_test_assets"],
     deps = [
         ":test_utils",
         ":valdi_runtime_with_vm",
-        "//src/valdi_modules/src/valdi/valdi_core:valdi_core_native",
-        "//tsn",
+        "@rules_cc//cc/runfiles",
     ],
 )
 
