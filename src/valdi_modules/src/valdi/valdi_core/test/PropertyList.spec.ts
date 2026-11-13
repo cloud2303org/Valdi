@@ -1,5 +1,5 @@
 import 'jasmine/src/jasmine';
-import { hasProperty } from './PropertyList';
+import { hasProperty } from '../src/utils/PropertyList';
 
 describe('PropertyList', () => {
   it('hasProperty only checks keys for array property lists', () => {

@@ -21,6 +21,8 @@ The obsolete foundation and valdi_test Web-only implementations are removed with
 upstream. Test dependencies are kept out of production module dependencies. The
 fork's removed legacy compiler/hotreloader stays removed; the upstream hotreload
 launcher change does not restore it.
+The PropertyList Jasmine test lives under `valdi_core/test/`, so moving Jasmine to
+`test_deps` does not leave test globals in the Node compiler's production inputs.
 
 The 2026-11-08 synchronization merged all 32 commits after `9b7a20d5`,
 including the experimental SDL3 Linux host and calculator, Protobuf field
