@@ -2220,7 +2220,7 @@ def __infer_base_project_path(targets):
     common_path = None
     for t in targets:
         base_path = t[ValdiModuleInfo].base_path
-        if not common_path:
+        if common_path == None:
             common_path = base_path
         else:
             common_path = __common_path(common_path, base_path)

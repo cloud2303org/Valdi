@@ -97,12 +97,13 @@ jobs:
             xcode: '26.5.0'
             test_name_pattern: ''
           # macOS 27: its dyld rejects Rust proc-macros stripped by rustc < 1.98
-          # (rust-lang/rust#157750), which macOS 26 runners can't catch. `build ios`
-          # compiles the Rust tool crates, so that's all this leg runs: the full suite
-          # is three cold workspaces, more than this runner's ~44 GB disk / 7 GB RAM.
+          # (rust-lang/rust#157750), which macOS 26 runners can't catch. `build ios` and
+          # `build macos` compile the Rust tool crates and the macOS SDK path; the full suite
+          # is three cold workspaces, more than this runner's ~44 GB disk / 7 GB RAM (the two
+          # builds leave about 25 GB free).
           - runner: xcode-27
             xcode: '27.0.0'
-            test_name_pattern: 'build ios'
+            test_name_pattern: 'build ios|build macos'
     runs-on: ${{ matrix.runner }}
 
     steps:
@@ -320,6 +321,9 @@ jobs:
           # The Android export build fills the runner's disk with a second copy of its outputs in the
           # disk cache ("No space left on device"); the remote cache already covers it.
           disk_cache: ${{ matrix.task == 'build-export' && 'false' || 'true' }}
+
+      - name: Restore CI download cache
+        uses: ./.github/actions/download-cache
 
       - name: Setup Linux environment
         # Also installs watchman (needed by the hotreload smoke); see setup_linux_env.sh.
@@ -547,6 +551,9 @@ jobs:
           service_account_ro: ${{ vars.GCP_SERVICE_ACCOUNT_RO }}
           cache_bucket: ${{ vars.BAZEL_CACHE_BUCKET }}
           cache_key: web-integration
+
+      - name: Restore CI download cache
+        uses: ./.github/actions/download-cache
 
       - name: Setup Linux environment
         run: source ./tools/ci/setup_linux_env.sh

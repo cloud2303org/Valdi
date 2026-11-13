@@ -5,11 +5,24 @@ This fork retains upstream Git history. `valdiroutes` is the maintained runtime 
 ## Current upstream base
 
 - Repository: https://github.com/Snapchat/Valdi
-- Branch: upstream `main` as of 2026-11-08
-- Commit: `b527b091ea98b4952b1a525388d0c0b66ca04940`
+- Branch: upstream `main` as of 2026-11-13
+- Commit: `aed1249d5614cd9afb2c8d43d8177794e28789f0`
 - Last release tag: `beta-0.2.1` (`f26bee4dc170b6c929f71d4dd07d44e033f47176`)
 
-The 2026-11-08 synchronization merges all 32 commits after `9b7a20d5`,
+The 2026-11-13 synchronization merges all 32 commits after `b527b091`,
+including batched pooled-view release, Android border-radius animation safety,
+Swift proxy-cache locking, bidirectional text layout, module/source-map loading,
+and debugger input error reporting. The application must synchronize its vendored
+`ConsoleLogTransformer` with the runtime: logging guards now resolve
+`ValdiRuntimeProvider.getValdiRuntime()` on each call. ModuleLoader keeps bootstrap
+logging independent of that provider to avoid a require cycle.
+
+The obsolete foundation and valdi_test Web-only implementations are removed with
+upstream. Test dependencies are kept out of production module dependencies. The
+fork's removed legacy compiler/hotreloader stays removed; the upstream hotreload
+launcher change does not restore it.
+
+The 2026-11-08 synchronization merged all 32 commits after `9b7a20d5`,
 including the experimental SDL3 Linux host and calculator, Protobuf field
 reads and decoding controls, Android gesture/date-format updates, iOS worker
 enumeration, and Promise callback attribution. Native Web remains an opt-in

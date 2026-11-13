@@ -1,10 +1,12 @@
 import { StringSet } from 'coreutils/src/StringSet';
 import { ISourceMap } from 'source_map/src/ISourceMap';
 import { IModuleLoader, OnHotReloadCallback, OnModuleRegisteredCallback, RequireFunc } from './IModuleLoader';
-import { ValdiRuntime } from './ValdiRuntime';
 export { RequireFunc } from './IModuleLoader';
 
-declare const runtime: ValdiRuntime;
+declare const runtime: {
+  scheduleWorkItem(callback: () => void, delayMs?: number, interruptible?: boolean): number;
+  isLoggingEnabled: boolean;
+};
 
 type JsEvalRetryableError = string;
 export type JSEvalResult = JsEvalRetryableError | undefined;
@@ -16,6 +18,10 @@ export type SourceMapFactory = (
   sourceMapLineOffset: number | undefined,
 ) => ISourceMap | undefined;
 
+// Web workers have no window, but load modules the same way the page does.
+const IS_WEB =
+  (typeof window !== 'undefined' && typeof window.document !== 'undefined') ||
+  typeof (globalThis as { importScripts?: unknown }).importScripts === 'function';
 interface ResolvedPath {
   absolutePath: string;
   directoryPaths: string[];
@@ -32,7 +38,7 @@ function normalizePath(pathEntries: string[]): string[] {
         // Keep the '..' we went outside our root
         out.push(pathEntry);
       }
-    } else if (pathEntry === '.' && runtime.getCurrentPlatform() !== 4) {
+    } else if (pathEntry === '.' && !IS_WEB) {
       // Omit '.' from the path on Android (1), iOS (2), MacOS (3). On Web (4) keep '.' in the path.
       continue;
     } else {
@@ -242,7 +248,11 @@ export class ModuleLoader implements IModuleLoader {
       const resolvedPath = resolveAbsoluteImportFromPath(path);
       this.doPreload(resolvedPath.absolutePath, 0, maxDepth, visited);
     } catch (err) {
-      console.log(`Could not preload module ${path}: ${(err as Error).message}`);
+      // Bootstrap can run before globalThis.console exists, and the console
+      // transformer skips globalThis.console, so guard the flag here.
+      if (runtime.isLoggingEnabled) {
+        globalThis.console?.log(`Could not preload module ${path}: ${(err as Error).message}`);
+      }
     }
   }
 
@@ -476,17 +486,22 @@ export class ModuleLoader implements IModuleLoader {
   getOrCreateSourceMap = (path: string, sourceMapFactory: SourceMapFactory): ISourceMap | undefined => {
     const resolvedPath = resolveAbsoluteImportFromPath(path);
     let module = this.modules[resolvedPath.absolutePath];
+    let importError: { error: any } | undefined;
     if (!module || !module.sourceMap) {
       // Attempt to load the module automatically if it's not in the map
       try {
         this.doImport(resolvedPath, undefined, true, true);
       } catch (err: any) {
-        console.log(`Could not load module ${path}: ${err.message}`);
+        // Resolve the source map anyway so frames from a module that throws during evaluation stay symbolicated
+        importError = { error: err };
       }
 
       module = this.modules[resolvedPath.absolutePath];
 
       if (!module) {
+        if (importError) {
+          throw importError.error;
+        }
         return undefined;
       }
     }
@@ -509,6 +524,9 @@ export class ModuleLoader implements IModuleLoader {
       }
     }
 
+    if (importError) {
+      throw importError.error;
+    }
     if (!sourceMap) {
       return undefined;
     }
