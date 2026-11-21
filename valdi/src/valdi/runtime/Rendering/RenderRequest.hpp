@@ -33,7 +33,9 @@ constexpr size_t kEntryAlignment = getAlignmentValue<RenderRequestEntries::Creat
                                                      RenderRequestEntries::EndAnimations,
                                                      RenderRequestEntries::CancelAnimation,
                                                      RenderRequestEntries::OnLayoutComplete,
-                                                     RenderRequestEntries::OnNextDraw>();
+                                                     RenderRequestEntries::OnNextDraw,
+                                                     RenderRequestEntries::DetachElement,
+                                                     RenderRequestEntries::InsertElementBefore>();
 
 template<typename T>
 constexpr size_t getEntryAllocSize() {
@@ -76,6 +78,8 @@ public:
     RenderRequestEntries::CancelAnimation* appendCancelAnimation();
     RenderRequestEntries::OnLayoutComplete* appendOnLayoutComplete();
     RenderRequestEntries::OnNextDraw* appendOnNextDraw();
+    RenderRequestEntries::DetachElement* appendDetachElement();
+    RenderRequestEntries::InsertElementBefore* appendInsertElementBefore();
 
     template<typename Visitor>
     void visitEntries(Visitor& visitor) const {

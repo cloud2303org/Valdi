@@ -27,6 +27,8 @@ enum RenderRequestEntryType : uint8_t {
     CancelAnimation,
     OnLayoutComplete,
     OnNextDraw,
+    DetachElement,
+    InsertElementBefore,
 };
 
 namespace RenderRequestEntries {
@@ -279,6 +281,44 @@ private:
     Ref<ValueFunction> _callback;
 };
 
+class DetachElement : public ElementEntryBase {
+public:
+    constexpr static RenderRequestEntryType kType = RenderRequestEntryType::DetachElement;
+
+    DetachElement();
+    ~DetachElement() = default;
+
+    void serialize(const AttributeIds& attributeIds, ValueMap& value);
+};
+
+class InsertElementBefore : public ElementEntryBase {
+public:
+    constexpr static RenderRequestEntryType kType = RenderRequestEntryType::InsertElementBefore;
+
+    InsertElementBefore();
+    ~InsertElementBefore() = default;
+
+    constexpr RawViewNodeId getParentElementId() const {
+        return _parentElementId;
+    }
+    constexpr void setParentElementId(RawViewNodeId parentElementId) {
+        _parentElementId = parentElementId;
+    }
+
+    constexpr RawViewNodeId getBeforeElementId() const {
+        return _beforeElementId;
+    }
+    constexpr void setBeforeElementId(RawViewNodeId beforeElementId) {
+        _beforeElementId = beforeElementId;
+    }
+
+    void serialize(const AttributeIds& attributeIds, ValueMap& value);
+
+private:
+    RawViewNodeId _parentElementId = 0;
+    RawViewNodeId _beforeElementId = 0;
+};
+
 template<typename Visitor>
 inline auto visitEntry(EntryBase& entry, Visitor&& visitor) {
     switch (entry.getType()) {
@@ -311,6 +351,12 @@ inline auto visitEntry(EntryBase& entry, Visitor&& visitor) {
         } break;
         case RenderRequestEntryType::OnNextDraw: {
             return visitor(reinterpret_cast<OnNextDraw&>(entry));
+        } break;
+        case RenderRequestEntryType::DetachElement: {
+            return visitor(reinterpret_cast<DetachElement&>(entry));
+        } break;
+        case RenderRequestEntryType::InsertElementBefore: {
+            return visitor(reinterpret_cast<InsertElementBefore&>(entry));
         } break;
         default:
             std::abort();

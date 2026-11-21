@@ -406,6 +406,9 @@ public:
     size_t getLiveChildCount() const;
     ViewNode* getChildAt(size_t index) const;
     void insertChildAt(ViewTransactionScope& viewTransactionScope, const Ref<ViewNode>& child, size_t index);
+    void insertChildBefore(ViewTransactionScope& viewTransactionScope,
+                           const Ref<ViewNode>& child,
+                           const Ref<ViewNode>& anchor);
     void appendChild(ViewTransactionScope& viewTransactionScope, const Ref<ViewNode>& child);
     void removeFromParent(ViewTransactionScope& viewTransactionScope);
 

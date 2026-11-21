@@ -1638,7 +1638,39 @@ void ViewNode::removeFromParent(ViewTransactionScope& viewTransactionScope) {
 }
 
 void ViewNode::appendChild(ViewTransactionScope& viewTransactionScope, const Ref<ViewNode>& child) {
+    SC_ASSERT(child.get() != this);
+    child->removeFromParent(viewTransactionScope);
     insertChildAt(viewTransactionScope, child, getLiveChildCount());
+}
+
+void ViewNode::insertChildBefore(ViewTransactionScope& viewTransactionScope,
+                                 const Ref<ViewNode>& child,
+                                 const Ref<ViewNode>& anchor) {
+    SC_ASSERT(child.get() != this);
+    if (anchor == nullptr) {
+        appendChild(viewTransactionScope, child);
+        return;
+    }
+    if (child == anchor) {
+        if (child->getParent().get() != this) {
+            appendChild(viewTransactionScope, child);
+        }
+        return;
+    }
+
+    // Remove child from its current parent first so intra-parent moves resolve the post-removal anchor index.
+    child->removeFromParent(viewTransactionScope);
+
+    const auto childCount = getLiveChildCount();
+    size_t insertIndex = childCount;
+    for (size_t i = 0; i < childCount; ++i) {
+        if (getChildAt(i) == anchor.get()) {
+            insertIndex = i;
+            break;
+        }
+    }
+
+    insertChildAt(viewTransactionScope, child, insertIndex);
 }
 
 void ViewNode::insertChildAt(ViewTransactionScope& viewTransactionScope, const Ref<ViewNode>& child, size_t index) {

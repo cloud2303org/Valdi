@@ -72,6 +72,8 @@ private:
     void visit(RenderRequestEntries::CancelAnimation& entry);
     void visit(RenderRequestEntries::OnLayoutComplete& entry);
     void visit(RenderRequestEntries::OnNextDraw& entry);
+    void visit(RenderRequestEntries::DetachElement& entry);
+    void visit(RenderRequestEntries::InsertElementBefore& entry);
 };
 
 } // namespace Valdi

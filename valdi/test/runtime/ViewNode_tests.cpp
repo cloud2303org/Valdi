@@ -1,6 +1,8 @@
 #include "ViewNodeTestsUtils.hpp"
 #include "valdi/runtime/Attributes/ViewNodeTextInlineAttachment.hpp"
 #include "valdi/runtime/Metrics/Metrics.hpp"
+#include "valdi/runtime/Rendering/RenderRequest.hpp"
+#include "valdi/runtime/Rendering/ViewNodeRenderer.hpp"
 #include "valdi/standalone_runtime/StandaloneView.hpp"
 #include "gtest/gtest.h"
 
@@ -4427,6 +4429,182 @@ TEST(ViewNode, canSetStaticScrollContentSize) {
     scrollContainer->setScrollContentOffset(utils.getViewTransactionScope(), Point(25, 25));
     root->updateVisibilityAndPerformUpdates(utils.getViewTransactionScope());
     ASSERT_EQ(Point(0, 225), scrollContainer->getDirectionAgnosticScrollContentOffset());
+}
+
+namespace {
+
+struct SolidRenderFixture {
+    Ref<StandaloneMainQueue> mainQueue;
+    Ref<MainThreadManager> mainThreadManager;
+    StandaloneViewManager viewManager;
+    AttributeIds attributeIds;
+    Ref<ViewManagerContext> viewManagerContext;
+    Ref<ViewNodeTree> tree;
+
+    explicit SolidRenderFixture(PlatformType platform = PlatformTypeIOS)
+        : mainQueue(makeShared<StandaloneMainQueue>()),
+          mainThreadManager(makeShared<MainThreadManager>(mainQueue->createMainThreadDispatcher())),
+          viewManager(platform) {
+        mainThreadManager->markCurrentThreadIsMainThread();
+        viewManagerContext = makeShared<ViewManagerContext>(viewManager,
+                                                            attributeIds,
+                                                            makeShared<ColorPaletteManager>(),
+                                                            Yoga::createConfig(0),
+                                                            false,
+                                                            mainThreadManager,
+                                                            ConsoleLogger::getLogger());
+        auto context = makeShared<Context>(0, strongSmallRef(&ConsoleLogger::getLogger()));
+        tree = makeShared<ViewNodeTree>(context, viewManagerContext, &viewManager, nullptr, mainThreadManager.get(), true);
+    }
+
+    ~SolidRenderFixture() {
+        if (tree != nullptr) {
+            tree->withLock([&]() {
+                if (auto root = tree->getRootViewNode(); root != nullptr) {
+                    tree->removeViewNode(root->getRawId());
+                }
+            });
+            tree = nullptr;
+        }
+    }
+
+    void render(RenderRequest& request) {
+        tree->withLock([&]() {
+            ViewNodeRenderer renderer(*tree, ConsoleLogger::getLogger(), false);
+            renderer.render(request);
+        });
+    }
+};
+
+void appendCreate(RenderRequest& req, RawViewNodeId id, const StringBox& tag) {
+    auto* entry = req.appendCreateElement();
+    entry->setElementId(id);
+    entry->setViewClassName(tag);
+}
+
+void appendInsertBefore(RenderRequest& req, RawViewNodeId id, RawViewNodeId parentId, RawViewNodeId beforeId) {
+    auto* entry = req.appendInsertElementBefore();
+    entry->setElementId(id);
+    entry->setParentElementId(parentId);
+    entry->setBeforeElementId(beforeId);
+}
+
+} // namespace
+
+TEST(ViewNode, solidDetachAndReattachAcrossRequests) {
+    SolidRenderFixture fixture(PlatformTypeIOS);
+
+    auto req1 = makeShared<RenderRequest>();
+    appendCreate(*req1, 1, STRING_LITERAL("view"));
+    appendCreate(*req1, 2, STRING_LITERAL("view"));
+    appendCreate(*req1, 3, STRING_LITERAL("label"));
+    req1->appendSetRootElement()->setElementId(1);
+    appendInsertBefore(*req1, 2, 1, 0);
+    appendInsertBefore(*req1, 3, 2, 0);
+    fixture.render(*req1);
+
+    auto parent = fixture.tree->getViewNode(2);
+    auto child = fixture.tree->getViewNode(3);
+    ASSERT_TRUE(parent != nullptr);
+    ASSERT_TRUE(child != nullptr);
+    ASSERT_EQ(1u, parent->getLiveChildCount());
+    ASSERT_EQ(child.get(), parent->getChildAt(0));
+
+    // Detach child 3 without destroying it.
+    auto req2 = makeShared<RenderRequest>();
+    req2->appendDetachElement()->setElementId(3);
+    fixture.render(*req2);
+
+    ASSERT_EQ(0u, parent->getLiveChildCount());
+    ASSERT_FALSE(child->hasParent());
+    ASSERT_EQ(child, fixture.tree->getViewNode(3));
+
+    // Re-attach the exact same surviving ViewNode instance in a later RenderRequest.
+    auto req3 = makeShared<RenderRequest>();
+    appendInsertBefore(*req3, 3, 2, 0);
+    fixture.render(*req3);
+
+    ASSERT_EQ(1u, parent->getLiveChildCount());
+    ASSERT_EQ(child.get(), parent->getChildAt(0));
+}
+
+TEST(ViewNode, solidInsertBeforeAndIntraParentMove) {
+    SolidRenderFixture fixture(PlatformTypeIOS);
+
+    auto req1 = makeShared<RenderRequest>();
+    appendCreate(*req1, 1, STRING_LITERAL("view"));
+    appendCreate(*req1, 2, STRING_LITERAL("view"));
+    appendCreate(*req1, 3, STRING_LITERAL("view"));
+    appendCreate(*req1, 4, STRING_LITERAL("view"));
+    req1->appendSetRootElement()->setElementId(1);
+    appendInsertBefore(*req1, 2, 1, 0); // [2]
+    appendInsertBefore(*req1, 4, 1, 0); // [2, 4]
+    appendInsertBefore(*req1, 3, 1, 4); // [2, 3, 4]
+    fixture.render(*req1);
+
+    auto root = fixture.tree->getViewNode(1);
+    ASSERT_EQ(3u, root->getLiveChildCount());
+    ASSERT_EQ(2u, root->getChildAt(0)->getRawId());
+    ASSERT_EQ(3u, root->getChildAt(1)->getRawId());
+    ASSERT_EQ(4u, root->getChildAt(2)->getRawId());
+
+    // Move last child (4) before first (2) -> [4, 2, 3], then move 4 before 3 -> [2, 4, 3].
+    auto req2 = makeShared<RenderRequest>();
+    appendInsertBefore(*req2, 4, 1, 2);
+    fixture.render(*req2);
+    ASSERT_EQ(4u, root->getChildAt(0)->getRawId());
+    ASSERT_EQ(2u, root->getChildAt(1)->getRawId());
+    ASSERT_EQ(3u, root->getChildAt(2)->getRawId());
+
+    auto req3 = makeShared<RenderRequest>();
+    appendInsertBefore(*req3, 4, 1, 3);
+    fixture.render(*req3);
+    ASSERT_EQ(2u, root->getChildAt(0)->getRawId());
+    ASSERT_EQ(4u, root->getChildAt(1)->getRawId());
+    ASSERT_EQ(3u, root->getChildAt(2)->getRawId());
+
+    // Append with beforeId=0 resets to end: move 2 to end -> [4, 3, 2].
+    auto req4 = makeShared<RenderRequest>();
+    appendInsertBefore(*req4, 2, 1, 0);
+    fixture.render(*req4);
+    ASSERT_EQ(4u, root->getChildAt(0)->getRawId());
+    ASSERT_EQ(3u, root->getChildAt(1)->getRawId());
+    ASSERT_EQ(2u, root->getChildAt(2)->getRawId());
+}
+
+TEST(ViewNode, solidGenericViewTagAliases) {
+    {
+        SolidRenderFixture iosFixture(PlatformTypeIOS);
+        auto req = makeShared<RenderRequest>();
+        appendCreate(*req, 1, STRING_LITERAL("view"));
+        appendCreate(*req, 2, STRING_LITERAL("layout"));
+        appendCreate(*req, 3, STRING_LITERAL("label"));
+        req->appendSetRootElement()->setElementId(1);
+        appendInsertBefore(*req, 2, 1, 0);
+        appendInsertBefore(*req, 3, 2, 0);
+        iosFixture.render(*req);
+
+        auto viewNode = iosFixture.tree->getViewNode(1);
+        auto layoutNode = iosFixture.tree->getViewNode(2);
+        auto labelNode = iosFixture.tree->getViewNode(3);
+
+        ASSERT_TRUE(layoutNode->isLayout());
+        auto factories = iosFixture.viewManagerContext->getGlobalViewFactories();
+        ASSERT_EQ(factories->getViewFactory(STRING_LITERAL("SCValdiView")), viewNode->getViewFactory());
+        ASSERT_EQ(factories->getViewFactory(STRING_LITERAL("Layout")), layoutNode->getViewFactory());
+        ASSERT_EQ(factories->getViewFactory(STRING_LITERAL("SCValdiLabel")), labelNode->getViewFactory());
+    }
+
+    {
+        SolidRenderFixture androidFixture(PlatformTypeAndroid);
+        auto factories = androidFixture.viewManagerContext->getGlobalViewFactories();
+        ASSERT_EQ(factories->getViewFactory(STRING_LITERAL("com.snap.valdi.views.ValdiView")),
+                  factories->getViewFactory(STRING_LITERAL("view")));
+        ASSERT_EQ(factories->getViewFactory(STRING_LITERAL("com.snap.valdi.views.ValdiTextView")),
+                  factories->getViewFactory(STRING_LITERAL("label")));
+        ASSERT_EQ(factories->getViewFactory(STRING_LITERAL("Layout")),
+                  factories->getViewFactory(STRING_LITERAL("layout")));
+    }
 }
 
 } // namespace ValdiTest

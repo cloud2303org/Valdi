@@ -198,6 +198,37 @@ void ViewNodeRenderer::visit(RenderRequestEntries::OnNextDraw& entry) {
     _viewNodeTree.onNextDraw(entry.getCallback());
 }
 
+void ViewNodeRenderer::visit(RenderRequestEntries::DetachElement& entry) {
+    if (!setCurrent(entry.getElementId(), entry)) {
+        return;
+    }
+    _currentNode->removeFromParent(_viewTransactionScope);
+    if (_viewNodeTree.getRootViewNode() == _currentNode) {
+        _viewNodeTree.setRootViewNode(nullptr, false);
+    }
+}
+
+void ViewNodeRenderer::visit(RenderRequestEntries::InsertElementBefore& entry) {
+    if (!setParent(entry.getParentElementId(), entry)) {
+        return;
+    }
+    if (!setCurrent(entry.getElementId(), entry)) {
+        return;
+    }
+    if (_currentNode == _parentNode) {
+        return;
+    }
+
+    auto beforeId = entry.getBeforeElementId();
+    if (beforeId == 0) {
+        _parentNode->appendChild(_viewTransactionScope, _currentNode);
+        return;
+    }
+
+    auto anchor = _viewNodeTree.getViewNode(beforeId);
+    _parentNode->insertChildBefore(_viewTransactionScope, _currentNode, anchor);
+}
+
 void ViewNodeRenderer::onCurrentNodeAttributeChange() {
     _currentNodeAttributeChanged = true;
 }

@@ -117,6 +117,14 @@ RenderRequestEntries::OnNextDraw* RenderRequest::appendOnNextDraw() {
     return appendEntry<RenderRequestEntries::OnNextDraw>();
 }
 
+RenderRequestEntries::DetachElement* RenderRequest::appendDetachElement() {
+    return appendEntry<RenderRequestEntries::DetachElement>();
+}
+
+RenderRequestEntries::InsertElementBefore* RenderRequest::appendInsertElementBefore() {
+    return appendEntry<RenderRequestEntries::InsertElementBefore>();
+}
+
 RenderRequestEntries::EntryBase* RenderRequest::doAppendEntry(size_t size) {
     auto* buffer = _entries.appendWritable(size);
     _entriesSize++;

@@ -161,7 +161,7 @@ Ref<RenderRequest> JavaScriptRuntimeDeserializers::parseRequestDescriptor(
 
         RawViewNodeId nodeId = 0;
 
-        if (type < 14) {
+        if (type < 14 || type == 19 || type == 20) {
             // Those are always tied to a node id.
             nodeId = static_cast<RawViewNodeId>(typeHeader >> 8);
         }
@@ -407,6 +407,20 @@ Ref<RenderRequest> JavaScriptRuntimeDeserializers::parseRequestDescriptor(
             }
             disableCallIfContextIsDestroyed(callback);
             entry->setCallback(callback.getFunctionRef());
+        } else if (type == 19) {
+            renderRequest->appendDetachElement()->setElementId(nodeId);
+        } else if (type == 20) {
+            if (current + 2 > length) {
+                return onParseError(exceptionTracker);
+            }
+
+            auto parentId = descriptor[current++] & 0xffffff;
+            auto beforeId = descriptor[current++] & 0xffffff;
+
+            auto* entry = renderRequest->appendInsertElementBefore();
+            entry->setElementId(nodeId);
+            entry->setParentElementId(static_cast<RawViewNodeId>(parentId));
+            entry->setBeforeElementId(static_cast<RawViewNodeId>(beforeId));
         } else {
             return onParseError(exceptionTracker);
         }

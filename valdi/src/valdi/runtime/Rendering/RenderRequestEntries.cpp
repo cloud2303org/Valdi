@@ -139,6 +139,26 @@ void OnNextDraw::serialize(const AttributeIds& attributeIds, ValueMap& value) {
     EntryBase::serialize(kOnNextDraw, attributeIds, value);
 }
 
+DetachElement::DetachElement() : ElementEntryBase(DetachElement::kType) {}
+
+void DetachElement::serialize(const AttributeIds& attributeIds, ValueMap& value) {
+    static auto kDetachElement = STRING_LITERAL("DetachElement");
+    ElementEntryBase::serialize(kDetachElement, attributeIds, value);
+}
+
+InsertElementBefore::InsertElementBefore() : ElementEntryBase(InsertElementBefore::kType) {}
+
+void InsertElementBefore::serialize(const AttributeIds& attributeIds, ValueMap& value) {
+    static auto kInsertElementBefore = STRING_LITERAL("InsertElementBefore");
+    static auto kParentElementId = STRING_LITERAL("parentElementId");
+    static auto kBeforeElementId = STRING_LITERAL("beforeElementId");
+
+    value[kParentElementId] = Value(static_cast<int32_t>(_parentElementId));
+    value[kBeforeElementId] = Value(static_cast<int32_t>(_beforeElementId));
+
+    ElementEntryBase::serialize(kInsertElementBefore, attributeIds, value);
+}
+
 Value serializeEntry(EntryBase& entry, const AttributeIds& attributeIds) {
     auto map = makeShared<ValueMap>();
     visitEntry(entry, [&](auto& entry) { entry.serialize(attributeIds, *map); });

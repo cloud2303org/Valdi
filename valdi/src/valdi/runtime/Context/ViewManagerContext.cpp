@@ -6,11 +6,14 @@
 //
 
 #include "valdi/runtime/Context/ViewManagerContext.hpp"
+#include "valdi/runtime/Attributes/AttributesManager.hpp"
 #include "valdi/runtime/Attributes/DefaultAttributeProcessors.hpp"
+#include "valdi/runtime/Interfaces/IViewManager.hpp"
 #include "valdi/runtime/Utils/MainThreadManager.hpp"
 #include "valdi/runtime/Views/GlobalViewFactories.hpp"
 #include "valdi/runtime/Views/View.hpp"
 #include "valdi/runtime/Views/ViewPreloader.hpp"
+#include "valdi_core/cpp/Utils/StringCache.hpp"
 #include "valdi_core/cpp/Utils/Trace.hpp"
 
 #include <algorithm>
@@ -18,6 +21,63 @@
 #include <vector>
 
 namespace Valdi {
+
+namespace {
+
+void registerDefaultGenericViewTagAliases(GlobalViewFactories& factories, PlatformType platformType) {
+    factories.registerViewClassReplacement(STRING_LITERAL("layout"),
+                                           AttributesManager::getLayoutPlaceholderClassName());
+
+    if (platformType == PlatformTypeAndroid) {
+        factories.registerViewClassReplacement(STRING_LITERAL("view"), STRING_LITERAL("com.snap.valdi.views.ValdiView"));
+        factories.registerViewClassReplacement(STRING_LITERAL("label"),
+                                               STRING_LITERAL("com.snap.valdi.views.ValdiTextView"));
+        factories.registerViewClassReplacement(STRING_LITERAL("scroll"),
+                                               STRING_LITERAL("com.snap.valdi.views.ValdiScrollView"));
+        factories.registerViewClassReplacement(STRING_LITERAL("image"),
+                                               STRING_LITERAL("com.snap.valdi.views.ValdiImageView"));
+        factories.registerViewClassReplacement(STRING_LITERAL("video"),
+                                               STRING_LITERAL("com.snap.valdi.views.ValdiVideoView"));
+        factories.registerViewClassReplacement(STRING_LITERAL("webview"),
+                                               STRING_LITERAL("com.snap.valdi.modules.webview.ValdiWebView"));
+        factories.registerViewClassReplacement(STRING_LITERAL("button"), STRING_LITERAL("android.widget.Button"));
+        factories.registerViewClassReplacement(STRING_LITERAL("spinner"),
+                                               STRING_LITERAL("com.snap.valdi.views.ValdiSpinnerView"));
+        factories.registerViewClassReplacement(STRING_LITERAL("blur"), STRING_LITERAL("com.snap.valdi.views.ValdiView"));
+        factories.registerViewClassReplacement(STRING_LITERAL("glass"),
+                                               STRING_LITERAL("com.snap.valdi.views.ValdiView"));
+        factories.registerViewClassReplacement(STRING_LITERAL("textfield"),
+                                               STRING_LITERAL("com.snap.valdi.views.ValdiEditText"));
+        factories.registerViewClassReplacement(STRING_LITERAL("textview"),
+                                               STRING_LITERAL("com.snap.valdi.views.ValdiEditTextMultiline"));
+        factories.registerViewClassReplacement(STRING_LITERAL("textanimationgroup"),
+                                               STRING_LITERAL("com.snap.valdi.views.ValdiTextAnimationGroup"));
+        factories.registerViewClassReplacement(STRING_LITERAL("shape"),
+                                               STRING_LITERAL("com.snap.valdi.views.ShapeView"));
+        factories.registerViewClassReplacement(STRING_LITERAL("animatedimage"),
+                                               STRING_LITERAL("com.snap.valdi.views.AnimatedImageView"));
+    } else {
+        factories.registerViewClassReplacement(STRING_LITERAL("view"), STRING_LITERAL("SCValdiView"));
+        factories.registerViewClassReplacement(STRING_LITERAL("label"), STRING_LITERAL("SCValdiLabel"));
+        factories.registerViewClassReplacement(STRING_LITERAL("scroll"), STRING_LITERAL("SCValdiScrollView"));
+        factories.registerViewClassReplacement(STRING_LITERAL("image"), STRING_LITERAL("SCValdiImageView"));
+        factories.registerViewClassReplacement(STRING_LITERAL("video"), STRING_LITERAL("SCValdiVideoView"));
+        factories.registerViewClassReplacement(STRING_LITERAL("webview"), STRING_LITERAL("SCValdiWebView"));
+        factories.registerViewClassReplacement(STRING_LITERAL("button"), STRING_LITERAL("UIButton"));
+        factories.registerViewClassReplacement(STRING_LITERAL("spinner"), STRING_LITERAL("SCValdiSpinnerView"));
+        factories.registerViewClassReplacement(STRING_LITERAL("blur"), STRING_LITERAL("SCValdiBlurView"));
+        factories.registerViewClassReplacement(STRING_LITERAL("glass"), STRING_LITERAL("SCValdiGlassView"));
+        factories.registerViewClassReplacement(STRING_LITERAL("textfield"), STRING_LITERAL("SCValdiTextField"));
+        factories.registerViewClassReplacement(STRING_LITERAL("textview"), STRING_LITERAL("SCValdiTextView"));
+        factories.registerViewClassReplacement(STRING_LITERAL("textanimationgroup"),
+                                               STRING_LITERAL("SCValdiTextAnimationGroup"));
+        factories.registerViewClassReplacement(STRING_LITERAL("shape"), STRING_LITERAL("SCValdiShapeView"));
+        factories.registerViewClassReplacement(STRING_LITERAL("animatedimage"),
+                                               STRING_LITERAL("SCValdiAnimatedContentView"));
+    }
+}
+
+} // namespace
 
 ViewManagerContext::ViewManagerContext(IViewManager& viewManager,
                                        AttributeIds& attributeIds,
@@ -32,6 +92,7 @@ ViewManagerContext::ViewManagerContext(IViewManager& viewManager,
     Valdi::registerDefaultProcessors(_attributesManager);
 
     _globalViewFactories = Valdi::makeShared<GlobalViewFactories>(_attributesManager);
+    registerDefaultGenericViewTagAliases(*_globalViewFactories, _viewManager.getPlatformType());
 
     if (enablePreloading) {
         _viewPreloader = Valdi::makeShared<ViewPreloader>(_globalViewFactories, *mainThreadManager, logger);

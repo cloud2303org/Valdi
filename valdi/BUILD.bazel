@@ -1113,6 +1113,17 @@ valdi_test(
 )
 
 valdi_test(
+    name = "test_view_node",
+    srcs = [
+        "test/runtime/ViewNode_tests.cpp",
+    ],
+    deps = [
+        ":test_utils",
+        ":valdi_runtime",
+    ],
+)
+
+valdi_test(
     name = "test_runtime",
     srcs = glob(["test/runtime/**/*.cpp"]),
     deps = [
