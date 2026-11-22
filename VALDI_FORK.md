@@ -5,9 +5,17 @@ This fork retains upstream Git history. `valdiroutes` is the maintained runtime 
 ## Current upstream base
 
 - Repository: https://github.com/Snapchat/Valdi
-- Branch: upstream `main` as of 2026-11-13
-- Commit: `aed1249d5614cd9afb2c8d43d8177794e28789f0`
+- Branch: upstream `main` as of 2026-11-22
+- Commit: `fcbd6549468be6cc5c8ff95425cf14ab4194770b`
 - Last release tag: `beta-0.2.1` (`f26bee4dc170b6c929f71d4dd07d44e033f47176`)
+
+The 2026-11-22 synchronization merges all 42 commits after `aed1249d`,
+including branded primitive intersection support in bindings and compiler goldens,
+SnapDrawing hover dispatching, text-input host wiring, and iOS viewport fixes,
+plus JNI signature utilities and test isolation updates. The fork's removed
+legacy Swift compiler (`compiler/compiler/Compiler`) and legacy hotreloader stay
+removed, and the consuming application ports branded primitive intersection
+resolution into its Node codegen (`tools/valdi-rolldown/codegen`).
 
 The 2026-11-13 synchronization merges all 32 commits after `b527b091`,
 including batched pooled-view release, Android border-radius animation safety,

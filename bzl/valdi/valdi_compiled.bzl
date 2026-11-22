@@ -2184,7 +2184,8 @@ def _append_hotreload_explicit_input_list_entry(target, json_entries):
         "module_path": base_path,
         "module_content": target[ValdiModuleInfo].module_definition,
         "monitor": is_external_ref == False,
-        "auto_discover": is_external_ref,
+        # Single-pass compiles (--compile) never start the monitor, so in-repo modules need discovery too.
+        "auto_discover": True,
         "files": [],
     })
 
@@ -2228,7 +2229,6 @@ def __infer_base_project_path(targets):
 
 def _invoke_valdi_hotreloader(ctx):
     fail("The legacy Valdi hotreloader has been removed; use scripts/hotreload.sh")
-
 
 def _valdi_hotreload_impl(ctx):
     """Generates a shell script that can start the Compiler in hotreload mode
