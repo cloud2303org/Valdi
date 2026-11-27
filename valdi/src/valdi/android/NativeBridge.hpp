@@ -17,6 +17,7 @@ public:
 
     static jint getBuildOptions(fbjni::alias_ref<fbjni::JClass> clazz);
     static void setDebuggerPortEnvironment(fbjni::alias_ref<fbjni::JClass> clazz, jint debuggerPort);
+    static void setTweakOverridesEnvironment(fbjni::alias_ref<fbjni::JClass> clazz, jstring overrides);
 
     static jobject getAllRuntimeAttachedObjects(fbjni::alias_ref<fbjni::JClass> clazz, jlong runtimeManagerHandle);
 
@@ -310,6 +311,7 @@ public:
     static void disableModuleArchiveCacheForBuild(fbjni::alias_ref<fbjni::JClass> clazz,
                                                   jstring directory,
                                                   jstring buildVersion);
+    static void notifyModuleArchiveCacheMemoryPressure(fbjni::alias_ref<fbjni::JClass> clazz);
     static void setRuntimeManagerJsThreadQoS(fbjni::alias_ref<fbjni::JClass> clazz,
                                              jlong runtimeManagerHandle,
                                              jint jsThreadQoS);

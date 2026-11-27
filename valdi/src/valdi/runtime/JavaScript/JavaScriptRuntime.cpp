@@ -187,13 +187,13 @@ public:
     ScopedANRAttribution(JavaScriptRuntime& runtime, const JavaScriptANRAttribution* attribution) {
         if (runtime.anrDiagnosticsActiveOnJsThread()) {
             _runtime = &runtime;
-            _previous = runtime.swapANRAttribution(attribution != nullptr ? *attribution : JavaScriptANRAttribution());
+            _previous = runtime.enterANRAttribution(attribution != nullptr ? *attribution : JavaScriptANRAttribution());
         }
     }
 
     ~ScopedANRAttribution() {
         if (_runtime != nullptr) {
-            _runtime->swapANRAttribution(std::move(_previous));
+            _runtime->restoreANRAttribution(std::move(_previous));
         }
     }
 
@@ -4250,10 +4250,8 @@ void JavaScriptRuntime::onInterrupt(IJavaScriptContext& jsContext) {
         auto stackTraceString = stacktrace->getStackTrace();
         // The bundle named by the stack only feeds ANR reporting, so it rides the same gate as the breadcrumbs.
         auto stackBundleName = anrDiagnosticsEnabled() ? stacktrace->getStackBundleName() : StringBox();
-        captureSession->setCapturedStacktrace(JavaScriptCapturedStacktrace(JavaScriptCapturedStacktrace::Status::RUNNING,
-                                                                           stackTraceString,
-                                                                           Context::currentRef(),
-                                                                           stackBundleName));
+        captureSession->setCapturedStacktrace(JavaScriptCapturedStacktrace(
+            JavaScriptCapturedStacktrace::Status::RUNNING, stackTraceString, Context::currentRef(), stackBundleName));
     }
 }
 
@@ -4382,7 +4380,6 @@ void JavaScriptRuntime::dispatchOnJsThread(Ref<Context> ownerContext,
                                            JavaScriptTaskScheduleType scheduleType,
                                            uint32_t delayMs,
                                            JavaScriptThreadTask&& function) {
-    SC_ASSERT(ownerContext != nullptr);
     dispatchOnJsThreadImpl(std::move(ownerContext),
                            scheduleType,
                            delayMs,
@@ -4503,6 +4500,10 @@ void JavaScriptRuntime::setANRDiagnosticsEnabled(bool enabled) {
     _anrDiagnosticsEnabled.store(enabled, std::memory_order_relaxed);
 }
 
+void JavaScriptRuntime::setANRFrameDurationsEnabled(bool enabled) {
+    _anrFrameDurationsEnabled.store(enabled, std::memory_order_relaxed);
+}
+
 bool JavaScriptRuntime::anrDiagnosticsEnabled() const {
     return _anrDiagnosticsEnabled.load(std::memory_order_relaxed);
 }
@@ -4524,23 +4525,45 @@ StringBox JavaScriptRuntime::anrNativeCallNameForTraceSpan(const StringBox& trac
 }
 
 JavaScriptANRAttribution::RestoreToken JavaScriptRuntime::pushNativeCallActivity(const StringBox& name) {
+    auto startTime = anrFrameStartTime();
     std::lock_guard<Mutex> lock(_nativeCallActivityMutex);
-    return _anrAttribution.push(name);
+    _anrAttributionGeneration.fetch_add(1, std::memory_order_relaxed);
+    return _anrAttribution.push(name, startTime);
 }
 
 void JavaScriptRuntime::popNativeCallActivity(JavaScriptANRAttribution::RestoreToken token) {
     std::lock_guard<Mutex> lock(_nativeCallActivityMutex);
+    _anrAttributionGeneration.fetch_add(1, std::memory_order_relaxed);
     _anrAttribution.pop(std::move(token));
 }
 
-JavaScriptANRAttribution JavaScriptRuntime::swapANRAttribution(JavaScriptANRAttribution attribution) {
+JavaScriptANRAttribution JavaScriptRuntime::enterANRAttribution(JavaScriptANRAttribution attribution) {
+    auto startTime = anrFrameStartTime();
     std::lock_guard<Mutex> lock(_nativeCallActivityMutex);
+    // A task taken off the queue starts its inherited frames now: they were open in the dispatching task,
+    // not on the thread. A task run inline inside another keeps their start times, since the enclosing
+    // task's frames are still open around it.
+    if (_anrAttribution.empty()) {
+        attribution.setStartTime(startTime);
+    }
+    _anrAttributionGeneration.fetch_add(1, std::memory_order_relaxed);
     std::swap(_anrAttribution, attribution);
     return attribution;
 }
 
+void JavaScriptRuntime::restoreANRAttribution(JavaScriptANRAttribution previous) {
+    std::lock_guard<Mutex> lock(_nativeCallActivityMutex);
+    _anrAttributionGeneration.fetch_add(1, std::memory_order_relaxed);
+    _anrAttribution = std::move(previous);
+}
+
+JavaScriptANRAttribution::TimePoint JavaScriptRuntime::anrFrameStartTime() const {
+    return _anrFrameDurationsEnabled.load(std::memory_order_relaxed) ? std::chrono::steady_clock::now() :
+                                                                       JavaScriptANRAttribution::TimePoint();
+}
+
 Shared<const JavaScriptANRAttribution> JavaScriptRuntime::captureANRAttribution(const Context& ownerContext,
-                                                                               const StringBox& dispatchAttribution) {
+                                                                                const StringBox& dispatchAttribution) {
     if (!anrDiagnosticsEnabled()) {
         return nullptr;
     }
@@ -4556,12 +4579,13 @@ Shared<const JavaScriptANRAttribution> JavaScriptRuntime::captureANRAttribution(
             dispatcherScopeName = dispatcherContext->getScopeName();
         }
     }
+    auto startTime = anrFrameStartTime();
     // A scoped runtime's scope name is the owner label its creator passed in. Record it where work enters
     // the runtime, not on every task the runtime dispatches to itself.
     if (ownerContext.getScopeName() != dispatcherScopeName) {
-        attribution.push(ownerContext.getScopeName());
+        attribution.push(ownerContext.getScopeName(), startTime);
     }
-    attribution.push(dispatchAttribution);
+    attribution.push(dispatchAttribution, startTime);
     if (attribution.empty()) {
         return nullptr;
     }
@@ -4577,7 +4601,26 @@ const StringBox& JavaScriptRuntime::getCallbackAttribution() {
     return _callbackAttribution;
 }
 
+StringBox JavaScriptRuntime::getInnermostANRAttributionLabel() const {
+    std::lock_guard<Mutex> lock(_nativeCallActivityMutex);
+    return _anrAttribution.getInnermostLabel();
+}
+
 std::string JavaScriptRuntime::getANRAttributionInfo() const {
+    return formatANRAttributionInfo();
+}
+
+uint64_t JavaScriptRuntime::getANRAttributionGeneration() const {
+    return _anrAttributionGeneration.load(std::memory_order_relaxed);
+}
+
+uint64_t JavaScriptRuntime::copyANRAttribution(JavaScriptANRAttribution& attribution) const {
+    std::lock_guard<Mutex> lock(_nativeCallActivityMutex);
+    attribution = _anrAttribution;
+    return _anrAttributionGeneration.load(std::memory_order_relaxed);
+}
+
+std::string JavaScriptRuntime::formatANRAttributionInfo() const {
     if (!anrDiagnosticsEnabled()) {
         return {};
     }
@@ -4587,7 +4630,11 @@ std::string JavaScriptRuntime::getANRAttributionInfo() const {
         std::lock_guard<Mutex> lock(_nativeCallActivityMutex);
         attribution = _anrAttribution;
     }
-    auto info = attribution.format();
+    std::optional<JavaScriptANRAttribution::TimePoint> now;
+    if (_anrFrameDurationsEnabled.load(std::memory_order_relaxed)) {
+        now = std::chrono::steady_clock::now();
+    }
+    auto info = attribution.format(now);
 
     // The JS queue is serial, so the last dispatched context belongs to the task that is currently
     // running (the stuck one when this is read during an ANR).

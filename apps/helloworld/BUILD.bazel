@@ -21,6 +21,8 @@ valdi_application(
     ios_families = ["iphone"],
     root_component_path = "App@hello_world/src/HelloWorldApp",
     title = "Valdi Hello World",
+    # No code reads this key. It exercises the tweaks plumbing: Info.plist (iOS, macOS) and the manifest (Android).
+    tweaks = {"VALDI_HELLO_WORLD_TWEAKS_PROBE": True},
     version = "1.0.0",
     deps = ["//apps/helloworld/src/valdi/hello_world"],
 )
@@ -40,8 +42,10 @@ kt_android_library(
         # app's Kotlin module deps) and the AAR holding libvaldi.so.
         ":hello_world_android_aar_import",
         ":hello_world_android_src",
+        "//apps/helloworld/text_binding_fixture",
         "//valdi:valdi_android_test_runtime",
         "//valdi:valdi_android_test_support",
+        "//valdi:valdi_java",
         "@test_mvn//:androidx_test_core",
         "@test_mvn//:androidx_test_espresso_espresso_core",
         "@test_mvn//:androidx_test_ext_junit",

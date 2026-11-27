@@ -10,7 +10,7 @@ Valdi will follow [Semantic Versioning](https://semver.org) starting at 1.0.0: `
 - **MINOR** releases add features without breaking public API. They may deprecate things.
 - **PATCH** releases fix bugs. No new features and no API changes.
 
-Until 1.0, releases are tagged `beta-X.Y.Z`, and any beta release may include breaking changes.
+Releases from 1.0 on are tagged X.Y.Z (for example 1.0.0), with no prefix. Earlier releases were tagged beta-X.Y.Z.
 
 The framework and the `valdi` command-line tool are versioned separately. Each CLI release notes which framework versions it supports.
 
@@ -26,7 +26,7 @@ These are covered by the compatibility promise:
 
 These are **not** public API and can change in any release:
 
-- Anything marked experimental, beta, or internal-only, and anything undocumented.
+- Anything marked experimental, beta, or internal-only, and anything undocumented. Something is marked experimental by an `@experimental` (or `@internal`) tag in its TypeScript docs, an "Experimental" note at the top of its documentation page, or "(experimental)" in CLI help.
 - Anything under an `internal` path or prefixed with `_`.
 - Compiler output format and generated code layout, beyond what apps call directly.
 - Exact error message text, log output, and performance characteristics.
@@ -52,9 +52,9 @@ Support tiers describe what we commit to, not just what CI happens to run.
 
 | Tier | Meaning | Platforms |
 |---|---|---|
-| **Tier 1** | Supported. Tested in CI on every change. Bugs block a release. | iOS, Android |
-| **Tier 2** | Beta. Tested in CI, but APIs and behavior may change. Bugs are fixed on a best-effort basis. | Web (HTML/CSS), macOS (as an app target) |
-| **Development only** | Works for building and testing. Not supported for shipping apps. | Linux |
+| **Tier 1** | Supported. Tested in CI on every change. Bugs block a release. | iOS, Android, macOS (as an app target) |
+| **Tier 2** | Beta. Tested in CI, but APIs and behavior may change. Bugs are fixed on a best-effort basis. | Web (HTML/CSS) |
+| **Development only** | Works for building and testing. Not supported for shipping apps. | Linux, Terminal UI (see [RFC 0003](./rfcs/0003-terminal-renderer.md)) |
 | **Unsupported** | Not supported and not planned. | Windows, macOS on Intel (x64) |
 
 ## Toolchain support
@@ -64,6 +64,7 @@ Support tiers describe what we commit to, not just what CI happens to run.
 | Development host | macOS on Apple Silicon; Linux for Android builds and tests |
 | Xcode | 26.5 and 27 |
 | iOS deployment target | 15.0 and later |
+| macOS deployment target | 15.0 and later |
 | Android | API 21 (Android 5.0) and later |
 | Node.js | 20 LTS or later |
-| Bazel | 8.x, with bzlmod. The exact version is pinned in [`.bazelversion`](./.bazelversion). |
+| Bazel | 8.x, with bzlmod. The exact version in [`.bazelversion`](./.bazelversion) is what we test and what new projects pin. |

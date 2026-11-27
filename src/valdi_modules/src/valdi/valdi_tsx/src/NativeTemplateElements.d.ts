@@ -776,6 +776,8 @@ interface ViewAttributes {
   boxShadow?: string;
 
   /**
+   * @experimental This feature is experimental and may change in future releases.
+   *
    * [Web-Only]
    * Sets the mouse cursor to be displayed when hovering over the element.
    * This property is only effective on web platforms.
@@ -821,7 +823,10 @@ interface ViewAttributes {
   /**
    * Event handler called when a hovering pointer, such as a mouse or a hand ray, starts or stops being over this
    * view. Only the innermost view with an onHoverChange under the pointer is hovered, and a view covering another
-   * blocks hover the way it blocks touches. A view removed while hovered may not be told it stopped being hovered.
+   * blocks hover the way it blocks touches. Replacing the handler preserves the view's hover state, and its current
+   * handler receives the exit. Removing the view or clearing the handler sends a detached exit with zero coordinates.
+   * A detached exit can arrive after the owning component is destroyed. Check `this.isDestroyed()` before
+   * calling `setState` from the handler.
    * Only renderers with a hovering pointer call it; elsewhere it is ignored.
    */
   onHoverChange?: (event: HoverEvent) => void;
@@ -2181,9 +2186,9 @@ export interface ScrollViewInteractive extends ScrollView {
    * @experimental This feature is experimental and may change in future releases.
    *
    * Pixels of visual overhang above sticky headers under this scroll. Extends the
-   * effective header height for the sticky clamp so consumers that render a bar
-   * above the header (e.g. SectionList with stickyCover) do not overlap the next
-   * section's header. Only applies when nativeStickyEnabled=true.
+   * effective header height for the sticky clamp so a bar rendered above the header
+   * does not overlap the next section's header. Only applies when
+   * nativeStickyEnabled=true.
    * @default: 0
    */
   nativeStickyCover?: number;
@@ -2192,10 +2197,10 @@ export interface ScrollViewInteractive extends ScrollView {
    * @experimental This feature is experimental and may change in future releases.
    *
    * Pixels below the scroll viewport top where sticky headers should pin. Matches
-   * CSS `position: sticky; top: N`. Use when a floating page header (e.g. Subscreen's
-   * SubscreenHeader) has a visual footprint (gradient, shadow, animated height)
-   * extending below its Yoga bounds; without this the sticky headers pin at Yoga-top
-   * of the scroll viewport and can end up clipped behind the floating header.
+   * CSS `position: sticky; top: N`. Use when a floating page header has a visual
+   * footprint (gradient, shadow, animated height) extending below its Yoga bounds;
+   * without this the sticky headers pin at Yoga-top of the scroll viewport and can
+   * end up clipped behind the floating header.
    * Only applies when nativeStickyEnabled=true.
    * @default: 0
    */

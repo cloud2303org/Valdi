@@ -79,6 +79,10 @@ public:
 
     JSValueRef transferWebArrayBuffer(const JSValue& buffer, JSExceptionTracker& exceptionTracker) final;
 
+    JSValueRef newBigInt(const BigInt& value, JSExceptionTracker& exceptionTracker) final;
+
+    Ref<BigInt> valueToBigInt(const JSValue& value, JSExceptionTracker& exceptionTracker) final;
+
     JSValueRef newStringUTF8(const std::string_view& str, JSExceptionTracker& exceptionTracker) final;
 
     JSValueRef newStringUTF16(const std::u16string_view& str, JSExceptionTracker& exceptionTracker) final;

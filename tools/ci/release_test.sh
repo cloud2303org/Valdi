@@ -61,6 +61,15 @@ node "$CLI_DIR/dist/index.js" bootstrap \
   -t=ui_application \
   --with-cleanup
 
+# The bootstrapped app must pin the same Bazel version Valdi CI tests.
+EXPECTED_BAZEL_VERSION="$(tr -d '[:space:]' < "$OPEN_SOURCE_DIR/.bazelversion")"
+ACTUAL_BAZEL_VERSION="$(bazel version --gnu_format 2>/dev/null | awk '$1 == "bazel" {print $2}')"
+if [[ "$ACTUAL_BAZEL_VERSION" != "$EXPECTED_BAZEL_VERSION" ]]; then
+  echo "ERROR: bootstrapped app runs Bazel $ACTUAL_BAZEL_VERSION, expected $EXPECTED_BAZEL_VERSION"
+  exit 1
+fi
+echo "Bazel $ACTUAL_BAZEL_VERSION matches repo .bazelversion ✓"
+
 # Verify the project references public GitHub (not local).
 # Bootstrapped projects may use MODULE.bazel (bzlmod) or WORKSPACE.
 if [[ -f MODULE.bazel ]]; then
@@ -80,6 +89,12 @@ if ! grep -q 'github.com/Snapchat/Valdi' "$CHECK_FILE"; then
   exit 1
 fi
 echo "$CHECK_FILE references public GitHub (remote, not local) ✓"
+
+# `valdi hotreload` runs this tool from the bootstrapped app; it fails at startup if runfiles are broken.
+# The app is pinned to the last published tag, which predates fixes in this checkout, so build @valdi
+# from the checkout under test (the PR on CI, the tag itself at release time).
+echo "Running clientsql toolchain..."
+bazel run --override_module=valdi="$OPEN_SOURCE_DIR" @valdi//compiler/clientsql:clientsql_toolchain -- -version
 
 # Build and test
 if [[ -z "${SKIP_BUILD:-}" ]]; then

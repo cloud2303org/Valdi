@@ -5,9 +5,23 @@ This fork retains upstream Git history. `valdiroutes` is the maintained runtime 
 ## Current upstream base
 
 - Repository: https://github.com/Snapchat/Valdi
-- Branch: upstream `main` as of 2026-11-22
-- Commit: `fcbd6549468be6cc5c8ff95425cf14ab4194770b`
+- Branch: upstream `main` as of 2026-11-25
+- Commit: `de6e5539af6e59277a056c32f468457b43bbfc4f`
 - Last release tag: `beta-0.2.1` (`f26bee4dc170b6c929f71d4dd07d44e033f47176`)
+
+The 2026-11-27 synchronization merges all 40 commits after `fcbd6549`,
+including end-to-end native `BigInt` support across Value/Schema/JNI/ObjC/Swift
+and Hermes, runtime module-archive bytecode compilation and caching, JS ANR
+stack sampling and native Promise continuation attribution, startup tweak
+overrides (`bzl/valdi/tweaks.bzl` and `TweakOverrideProvider`), iOS 27 SDK
+`SCValdiBootstrappingSceneDelegate` lifecycle support, JNI `JavaEnv` thread env
+fixes, `DefaultValueMarshallers` schema-mismatch safety, Android surface resize
+redraw, SnapDrawing hover detached-exit and editable-text remeasure fixes, and
+`foundation` `compactMap`. The fork's removed legacy Swift compiler
+(`compiler/compiler/Compiler`) stays removed; `HermesJavaScriptContext` retains
+its `toBoolean` coercion and `IJavaScriptNativeWebSupport` methods alongside
+upstream's `newBigInt`/`valueToBigInt`, and the consuming application ports the
+`BigInt` companion AST and Node codegen changes.
 
 The 2026-11-22 synchronization merges all 42 commits after `aed1249d`,
 including branded primitive intersection support in bindings and compiler goldens,

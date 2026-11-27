@@ -68,6 +68,9 @@ public:
     // Serve module archives from a per-build pack of decompressed archives, mapped once per process, instead
     // of decompressing each archive to the heap on every load. Off deletes the pack.
     bool enableMmapModuleArchiveCacheReuse() const;
+    // Compiles the JS files of module archives to bytecode before they are added to the pack, so later
+    // processes load bytecode instead of parsing source. Needs the pack and an engine with precompilation.
+    bool enableModuleArchiveBytecodeCompile() const;
     // Skips the per-module `<module>.map.json` lookup when the build ships no source maps, where every
     // lookup misses (on iOS a miss scans every loaded bundle). Off (default) keeps the lookup.
     bool skipSourceMapLookup() const;
@@ -79,6 +82,17 @@ public:
     // or per layout.
     bool disableViewPoolingOnLayoutCallbacks() const;
     bool enableANRDiagnostics() const;
+    // VALDI_ENABLE_ANR_FRAME_DURATIONS (default false). When true, ANR reports say how long each attribution
+    // frame has been open, at the cost of one clock read per frame push on the JS thread.
+    bool enableANRFrameDurations() const;
+    // VALDI_ENABLE_ANR_SAMPLING (default false). When true, the ANR detector samples the JS thread's
+    // attribution while a probe waits and appends where the time went, as a tree on the lines after the message's
+    // first line. [stuck-in:] and [attribution:] are unchanged, so grouping on [stuck-in:] is too.
+    bool enableANRSampling() const;
+    // VALDI_ANR_SAMPLING_INTERVAL_MS (default 50). Time between ANR attribution samples.
+    int32_t anrSamplingIntervalMs() const;
+    // VALDI_ANR_SAMPLING_MAX_SAMPLES (default 128). Most ANR attribution samples kept per window.
+    int32_t anrSamplingMaxSamples() const;
     bool enableFixFlexBasisFitContent() const;
     // When true, iOS registers a native DateFormatting module so Valdi date/time formatting follows
     // NSDateFormatter (and the 24-Hour Time setting) instead of the JS locale formatter. Off by default
@@ -101,6 +115,8 @@ private:
     Shared<ITweakValueProvider> _tweakValueProvider;
 
     bool getConfigKey(const char* key) const;
+    // The configured value when positive, otherwise `fallback`.
+    int32_t getPositiveIntConfigKey(const char* key, int32_t fallback) const;
 };
 
 } // namespace Valdi

@@ -89,6 +89,7 @@ const jestConfig = {
   testPathIgnorePatterns: [],  // Don't ignore anything
   roots: [testDir],  // Only search in test directory
   testMatch: ['**/*.spec.js'],  // Only match .spec.js files
+  watchman: false,  // The Bazel sandbox can't write watchman's state dir
 };
 const configPath = path.join(testDir, 'jest.config.json');
 fs.writeFileSync(configPath, JSON.stringify(jestConfig));
@@ -97,6 +98,7 @@ console.log('Running tests:', testFiles);
 const result = spawnSync('node', [
   jestBin,
   '--config', configPath,
+  '--no-watchman',  // Watchman can't create its state dir inside a read-only test sandbox
   '--verbose',
   '--runTestsByPath',  // Only run the exact paths provided
   ...testFiles  // Pass test files directly

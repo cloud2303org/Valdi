@@ -172,6 +172,31 @@ public:
 };
 
 template<typename ValueType>
+class BigIntValueMarshaller : public ValueMarshaller<ValueType> {
+public:
+    BigIntValueMarshaller(const Ref<PlatformValueDelegate<ValueType>>& delegate)
+        : ValueMarshaller<ValueType>(delegate) {}
+
+    ValueType unmarshall(const Valdi::Value& value,
+                         const ReferenceInfoBuilder& referenceInfoBuilder,
+                         ExceptionTracker& exceptionTracker) final {
+        auto v = value.checkedTo<Ref<BigInt>>(exceptionTracker);
+        if (!exceptionTracker) {
+            return this->_delegate->newNull();
+        }
+
+        return this->_delegate->newBigInt(v, exceptionTracker);
+    }
+
+    Valdi::Value marshall(const ValueType* /*receiver*/,
+                          const ValueType& value,
+                          const ReferenceInfoBuilder& referenceInfoBuilder,
+                          ExceptionTracker& exceptionTracker) final {
+        return Valdi::Value(this->_delegate->valueToBigInt(value, exceptionTracker));
+    }
+};
+
+template<typename ValueType>
 class DoubleValueMarshaller : public ValueMarshaller<ValueType> {
 public:
     DoubleValueMarshaller(const Ref<PlatformValueDelegate<ValueType>>& delegate)
@@ -1047,6 +1072,12 @@ public:
 
         auto propertiesSize = _schema->getPropertiesSize();
 
+        // A typed object built from another schema (e.g. another registration of the same class) can have
+        // fewer or reordered properties. Index reads are only safe where its layout matches ours; anything
+        // else is read by name, otherwise we would read past the end of its property storage.
+        const auto* typedObjectSchema = typedObject != nullptr ? typedObject->getSchema().get() : nullptr;
+        auto typedObjectPropertiesSize = typedObjectSchema != nullptr ? typedObjectSchema->getPropertiesSize() : 0;
+
         ValueType properties[propertiesSize];
 
         for (size_t i = 0; i < propertiesSize; i++) {
@@ -1056,7 +1087,12 @@ public:
             auto propertyValue = Value::undefined();
 
             if (typedObject != nullptr) {
-                propertyValue = typedObject->getProperty(i);
+                if (typedObjectSchema == _schema.get() ||
+                    (i < typedObjectPropertiesSize && typedObjectSchema->getProperty(i).name == property.name)) {
+                    propertyValue = typedObject->getProperty(i);
+                } else {
+                    propertyValue = typedObject->getPropertyForName(property.name);
+                }
             } else {
                 const auto& it = map->find(property.name);
                 if (it != map->end()) {

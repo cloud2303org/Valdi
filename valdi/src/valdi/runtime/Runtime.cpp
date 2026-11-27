@@ -30,6 +30,7 @@
 #include "valdi/runtime/Context/ViewNodeViewStats.hpp"
 #include "valdi_core/cpp/Context/ComponentPath.hpp"
 
+#include "valdi/runtime/JavaScript/ModuleArchiveBytecodeCompiler.hpp"
 #include "valdi/runtime/JavaScript/Modules/AttributedTextNativeModuleFactory.hpp"
 #include "valdi/runtime/JavaScript/Modules/Base64ModuleFactory.hpp"
 #include "valdi/runtime/JavaScript/Modules/FileSystemFactory.hpp"
@@ -172,6 +173,7 @@ Runtime::Runtime(AttributeIds& attributeIds,
                                                                   jsRuntimeThreadQoS,
                                                                   anrDetector,
                                                                   logger);
+        _resourceManager->setArchiveCompiler(makeShared<ModuleArchiveBytecodeCompiler>(*jsBridge, logger));
     }
 
     // Uncomment to print the internal Valdi object sizes
@@ -205,6 +207,9 @@ void Runtime::postInit() {
     if (_javaScriptRuntime != nullptr) {
         _javaScriptRuntime->setListener(this, weakRef(this));
         _javaScriptRuntime->setANRDiagnosticsEnabled(enableANRDiagnostics());
+        const auto& runtimeTweaks = getRuntimeTweaks();
+        _javaScriptRuntime->setANRFrameDurationsEnabled(runtimeTweaks != nullptr &&
+                                                        runtimeTweaks->enableANRFrameDurations());
     }
     _viewNodeManager.setRuntime(weakRef(this));
     _contextManager->setListener(this);
@@ -773,6 +778,9 @@ void Runtime::setRuntimeTweaks(const Ref<ValdiRuntimeTweaks>& runtimeTweaks) {
             runtimeTweaks != nullptr ? runtimeTweaks->refuseDispatchAfterJsQueueTeardown() : true);
         _javaScriptRuntime->setStopWorkersOnHostTeardown(
             runtimeTweaks != nullptr ? runtimeTweaks->enableTeardownStopOrphanedWorkers() : false);
+        // postInit reads this once, so a provider attached later must push it too.
+        _javaScriptRuntime->setANRFrameDurationsEnabled(runtimeTweaks != nullptr &&
+                                                        runtimeTweaks->enableANRFrameDurations());
     }
 }
 

@@ -5,6 +5,7 @@ import com.snap.valdi.callable.ValdiFunction;
 public class NativeBridge {
     public static native int getBuildOptions();
     public static native void setDebuggerPortEnvironment(int debuggerPort);
+    public static native void setTweakOverridesEnvironment(String overrides);
     public static native long createRuntimeManager(Object mainThreadDispatcher,
                                                       Object snapDrawingFrameScheduler,
                                                       Object viewManager,
@@ -38,6 +39,7 @@ public class NativeBridge {
                                                                   String buildVersion,
                                                                   String bundledModulesIdentity);
     public static native void disableModuleArchiveCacheForBuild(String directory, String buildVersion);
+    public static native void notifyModuleArchiveCacheMemoryPressure();
 
     public static native long createRuntime(long runtimeManagerHandle, Object customResourceResolver);
     public static native void onRuntimeReady(long runtimeManagerHandle, long runtimeHandle);
